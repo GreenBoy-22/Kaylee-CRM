@@ -56,6 +56,7 @@ type Student = {
   constructive_note: string | null;
   last_contact_date: string | null;
   next_appointment_date: string | null;
+  next_call_at?: string | null;
   graduation_goal_date?: string | null;
   momentum?: string | null;
   last_academic_activity_date?: string | null;
@@ -327,6 +328,7 @@ function App() {
       constructive_note: row.constructive_note || '',
       last_contact_date: row.last_contact_date || null,
       next_appointment_date: row.next_appointment_date || null,
+      next_call_at: row.next_call_at || null,
       graduation_goal_date: row.graduation_goal_date || null,
       momentum: row.momentum || '',
       last_academic_activity_date: row.last_academic_activity_date || null,
@@ -1069,7 +1071,23 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, role, setPag
   const supportStudents = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).isSupport);
   const followUpsDue = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).needsFollowUp);
   const today = new Date().toISOString().slice(0, 10);
-  const callsToday = activeStudents.filter((student) => student.next_appointment_date === today);
+  const isSameDay = (iso: string | null | undefined, ymd: string) => !!iso && iso.slice(0, 10) === ymd;
+  const callsToday = activeStudents
+    .filter((student) => isSameDay(student.next_call_at, today) || student.next_appointment_date === today)
+    .sort((a, b) => {
+      const at = a.next_call_at ? new Date(a.next_call_at).getTime() : Number.MAX_SAFE_INTEGER;
+      const bt = b.next_call_at ? new Date(b.next_call_at).getTime() : Number.MAX_SAFE_INTEGER;
+      return at - bt;
+    });
+  const nowMs = Date.now();
+  const sevenDaysMs = nowMs + 7 * 24 * 60 * 60 * 1000;
+  const callsThisWeek = activeStudents
+    .filter((student) => {
+      if (!student.next_call_at) return false;
+      const t = new Date(student.next_call_at).getTime();
+      return t > nowMs && t <= sevenDaysMs && !isSameDay(student.next_call_at, today);
+    })
+    .sort((a, b) => new Date(a.next_call_at!).getTime() - new Date(b.next_call_at!).getTime());
   const priorityQueue = [...activeStudents].sort((a, b) => priorityScore(b, touchpoints) - priorityScore(a, touchpoints)).slice(0, 6);
 
   if (mode === 'work' && role === 'admin') {
@@ -1083,6 +1101,28 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, role, setPag
         ['Calls today', String(callsToday.length), 'manual now · Outlook later'],
         ['Follow-ups due', String(followUpsDue.length), 'copy/draft needed']
       ]} />
+      <section className="panel">
+        <div className="panel-head"><h2>Today’s Scheduled Calls</h2><Phone size={17} /></div>
+        {callsToday.length === 0 && <div className="brief-item">No calls scheduled for today. Add a "Next call" datetime when logging a touchpoint to populate this list.</div>}
+        {callsToday.map((student) => {
+          const timeText = student.next_call_at
+            ? new Date(student.next_call_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+            : 'All day';
+          return <button className="mentor-queue-row" key={student.id} onClick={() => setPage('students')}>
+            <span className="queue-rank">{timeText}</span>
+            <div>
+              <strong>{student.display_name}</strong>
+              <p>{student.student_id ? `ID ${student.student_id} · ` : ''}{student.course || 'No course'} · {student.status}</p>
+            </div>
+            <span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span>
+          </button>;
+        })}
+        {callsThisWeek.length > 0 && <details style={{ marginTop: 12 }}><summary><strong>Upcoming this week ({callsThisWeek.length})</strong></summary>
+          {callsThisWeek.map((student) => <div className="brief-item" key={student.id}>
+            <strong>{new Date(student.next_call_at!).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</strong> · {student.display_name} · {student.course || 'No course'}
+          </div>)}
+        </details>}
+      </section>
       <div className="mentor-grid">
         <section className="panel mentor-action-panel">
           <div className="panel-head"><h2>Today’s Priority Queue</h2><span className="readonly-pill"><AlertTriangle size={14} /> Risk ordered</span></div>
@@ -1216,7 +1256,7 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
   });
   const [touchForm, setTouchForm] = useState({
     touchpoint_type: 'Call to student', touchpoint_date: new Date().toISOString().slice(0, 10),
-    course: '', momentum: '', note: ''
+    course: '', momentum: '', note: '', next_call_at: ''
   });
 
   useEffect(() => {
@@ -1298,7 +1338,11 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
       momentum: touchForm.momentum,
       note: touchForm.note
     });
-    setTouchForm({ touchpoint_type: 'Call to student', touchpoint_date: new Date().toISOString().slice(0, 10), course: selected.course || '', momentum: '', note: '' });
+    if (touchForm.next_call_at) {
+      const iso = new Date(touchForm.next_call_at).toISOString();
+      updateStudent(selected.id, { next_call_at: iso } as Partial<Student>);
+    }
+    setTouchForm({ touchpoint_type: 'Call to student', touchpoint_date: new Date().toISOString().slice(0, 10), course: selected.course || '', momentum: '', note: '', next_call_at: '' });
   }
 
 
@@ -1335,6 +1379,7 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
             <div><span>Student ID</span><strong>{selected.student_id || '—'}</strong></div>
             <div><span>Course</span><strong>{selected.course || '—'}</strong></div>
             <div><span>Course end</span><strong>{selected.course_end_date || '—'}</strong></div>
+            <div><span>Next call</span><strong>{selected.next_call_at ? new Date(selected.next_call_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}</strong></div>
             <div className="quick-facts-goal"><span>Goal</span><strong>{selected.goal || 'No goal saved yet.'}</strong></div>
           </div>
           <div className="next-call-compact">
@@ -1359,7 +1404,7 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
             <section className="panel"><h2>Touchpoint Log</h2>{selectedTouchpoints.length === 0 && <div className="brief-item">No touchpoints yet. Add the first call, email, text, or voicemail in the panel on the right.</div>}{selectedTouchpoints.map((touchpoint) => <div className="touchpoint-card" key={touchpoint.id}><div className="panel-head"><div><strong>{touchpoint.touchpoint_type}</strong><p>{touchpoint.touchpoint_date} · {touchpoint.course || selected.course || 'No course'} · {touchpoint.momentum || 'Momentum not set'}</p></div>{touchpoint.touchpoint_type.includes('Email') ? <Mail size={17} /> : touchpoint.touchpoint_type.includes('Text') ? <MessageSquare size={17} /> : <Phone size={17} />}</div><p>{touchpoint.note}</p><details><summary>Next-call prep and follow-up drafts</summary><div className="brief-item"><strong>Next call:</strong> {touchpoint.next_call_prep}</div><div className="brief-item"><strong>Kaylee coaching:</strong> {touchpoint.constructive_note}</div><textarea readOnly value={touchpoint.follow_up_email || ''} /><button className="btn primary" onClick={() => copyText(touchpoint.follow_up_email || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Email Draft</button><textarea readOnly value={touchpoint.follow_up_text || ''} /><button className="btn ghost" onClick={() => copyText(touchpoint.follow_up_text || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Text Draft</button></details></div>)}</section>
           </div>
           <aside className="student-work-side">
-            <section className="panel"><h2>Add Touchpoint</h2><div className="form-grid"><select value={touchForm.touchpoint_type} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_type: e.target.value })}>{touchpointTypes.map((type) => <option key={type}>{type}</option>)}</select><input type="date" value={touchForm.touchpoint_date} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_date: e.target.value })} /><input placeholder="Course" value={touchForm.course || selected.course || ''} onChange={(e) => setTouchForm({ ...touchForm, course: e.target.value })} /><input placeholder="Momentum" value={touchForm.momentum} onChange={(e) => setTouchForm({ ...touchForm, momentum: e.target.value })} /></div><textarea placeholder="What happened? What did the student say? What is the next step?" value={touchForm.note} onChange={(e) => setTouchForm({ ...touchForm, note: e.target.value })} />{ferpaWarnings(touchForm.note).length > 0 && <FerpaWarning warnings={ferpaWarnings(touchForm.note)} />}<div className="form-actions"><button className="btn primary" onClick={submitTouchpoint}><Save size={15} /> Save Touchpoint + Generate Prep</button></div></section>
+            <section className="panel"><h2>Add Touchpoint</h2><div className="form-grid"><select value={touchForm.touchpoint_type} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_type: e.target.value })}>{touchpointTypes.map((type) => <option key={type}>{type}</option>)}</select><input type="date" value={touchForm.touchpoint_date} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_date: e.target.value })} /><input placeholder="Course" value={touchForm.course || selected.course || ''} onChange={(e) => setTouchForm({ ...touchForm, course: e.target.value })} /><input placeholder="Momentum" value={touchForm.momentum} onChange={(e) => setTouchForm({ ...touchForm, momentum: e.target.value })} /></div><label className="date-field"><span>Next call with this student (optional)</span><input type="datetime-local" value={touchForm.next_call_at} onChange={(e) => setTouchForm({ ...touchForm, next_call_at: e.target.value })} /></label><textarea placeholder="What happened? What did the student say? What is the next step?" value={touchForm.note} onChange={(e) => setTouchForm({ ...touchForm, note: e.target.value })} />{ferpaWarnings(touchForm.note).length > 0 && <FerpaWarning warnings={ferpaWarnings(touchForm.note)} />}<div className="form-actions"><button className="btn primary" onClick={submitTouchpoint}><Save size={15} /> Save Touchpoint + Generate Prep</button></div></section>
           </aside>
         </div>
       </section> : <section className="panel"><h2>Select a student</h2><p>Add or select a student to view their profile, touchpoints, and next-call prep.</p></section>}
