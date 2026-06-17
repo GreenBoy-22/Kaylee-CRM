@@ -1,3 +1,4 @@
+function Inventory({
 import { useState } from 'react';
 import {
   Home,
