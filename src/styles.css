@@ -416,3 +416,102 @@ td small { display: block; margin-top: 2px; color: var(--muted); }
 .focus-item {
   border-left: 4px solid var(--purple);
 }
+
+/* v0.10 Streamlined student detail layout */
+
+.student-top-zone {
+  background: linear-gradient(180deg, #fff 0%, #fafafd 100%);
+}
+
+.quick-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 4px;
+}
+
+.quick-facts > div {
+  background: var(--purple-bg);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.quick-facts span {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--purple-dark);
+  opacity: .8;
+}
+
+.quick-facts strong {
+  font-size: 15px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.quick-facts-goal {
+  grid-column: span 4;
+  background: #f7f7fa !important;
+}
+
+.next-call-compact {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.next-call-compact-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--purple-dark);
+}
+
+.next-call-compact summary {
+  cursor: pointer;
+  color: var(--purple-dark);
+  font-weight: 600;
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.student-work-area {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin-top: 16px;
+}
+
+.student-work-main {
+  min-width: 0;
+}
+
+.student-work-side {
+  position: sticky;
+  top: 16px;
+  align-self: start;
+}
+
+.student-work-side .panel {
+  margin-bottom: 0;
+}
+
+@media (max-width: 1100px) {
+  .student-work-area {
+    grid-template-columns: 1fr;
+  }
+  .student-work-side {
+    position: static;
+  }
+  .quick-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .quick-facts-goal {
+    grid-column: span 2;
+  }
+}
