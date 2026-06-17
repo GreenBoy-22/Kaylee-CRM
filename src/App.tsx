@@ -623,8 +623,16 @@ Kaylee`;
 
     if (!cleaned.length) return setMessage('No importable students found. Make sure the CSV includes DisplayName.');
 
-    const existingKeys = new Set(students.map((student) => `${student.display_name.toLowerCase()}|${String(student.course || '').toLowerCase()}`));
-    const newStudents = cleaned.filter((student) => !existingKeys.has(`${student.display_name.toLowerCase()}|${String(student.course || '').toLowerCase()}`));
+    // Dedup: prefer student_id when present (most reliable); fall back to display_name + course.
+    const existingIds = new Set(students.map((s) => String(s.student_id || '').trim()).filter(Boolean));
+    const existingNameCourse = new Set(students.map((student) => `${student.display_name.toLowerCase()}|${String(student.course || '').toLowerCase()}`));
+    const newStudents = cleaned.filter((student) => {
+      const sid = String(student.student_id || '').trim();
+      if (sid && existingIds.has(sid)) return false;
+      const key = `${student.display_name.toLowerCase()}|${String(student.course || '').toLowerCase()}`;
+      if (!sid && existingNameCourse.has(key)) return false;
+      return true;
+    });
     if (!newStudents.length) return setMessage('CSV processed, but all students already appear to exist.');
 
     if (!supabase) {
@@ -633,7 +641,12 @@ Kaylee`;
     }
 
     const { data, error } = await supabase.from('students').insert(newStudents).select();
-    if (error) return setMessage(`CSV import failed: ${error.message}`);
+    if (error) {
+      if (error.code === '23505' || error.message.includes('students_student_id_unique')) {
+        return setMessage('CSV import failed: one or more student IDs already exist in the database.');
+      }
+      return setMessage(`CSV import failed: ${error.message}`);
+    }
     setStudents((current) => normalizeStudents([...(data as Student[]), ...current]));
     setMessage(`Imported ${data?.length || newStudents.length} FERPA-safe students.`);
   }
