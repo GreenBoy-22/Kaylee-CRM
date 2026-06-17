@@ -42,7 +42,7 @@ type InventoryItem = {
 };
 
 type Student = {
-  id: string;
+  student_id: string;
   display_name: string;
   course: string | null;
   goal: string;
