@@ -533,12 +533,12 @@ Kaylee`;
     const rows = parseCsv(text);
     if (rows.length < 2) return setMessage('No student rows found in CSV.');
     const headers = rows[0].map((header) => header.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
-    const records = rows.slice(1).map((cells) => Object.fromEntries(headers.map((header, index) => [header, cells[index] || ''])));
+    const records: Record<string, string>[] = rows.slice(1).map((cells) => Object.fromEntries(headers.map((header, index) => [header, cells[index] || ''])));
 
     // Accept either "Name" or "DisplayName" as the student name column.
     // Also accept several plausible aliases for the WGU student ID column.
     const cleaned = records
-      .map((row: Record<string, string>) => ({
+      .map((row): Record<string, string> => ({
         ...row,
         displayname: row.displayname || row.name || '',
         studentid: row.studentid || row.wguid || row.studentidnumber || ''
