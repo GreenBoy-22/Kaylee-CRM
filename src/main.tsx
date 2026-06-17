@@ -1,134 +1,65 @@
-import React, { useMemo, useState } from 'react';
-import { createRoot } from 'react-dom/client';
-import {
-  Bell, CalendarDays, Car, Check, ClipboardCheck, Copy, Home, Inbox, LayoutDashboard,
-  ListTodo, Mail, Menu, MessageSquareText, Plus, ShieldCheck, Sparkles, Users, WalletCards,
-  Wrench, X
-} from 'lucide-react';
-import './styles.css';
+export type Mode = 'home' | 'work';
+export type Role = 'admin' | 'limited';
+export type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 
-type Mode = 'home' | 'work';
-type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'adam' | 'vehicles' | 'suggestions' | 'students' | 'meetings' | 'emails';
-type Tone = 'urgent' | 'warning' | 'success' | 'purple' | 'neutral';
-
-type NavItem = readonly [Page, string, React.ElementType, boolean?];
-
-const nav = {
-  shared: [
-    ['dashboard','Dashboard',LayoutDashboard], ['today',"Today’s Tasks",ClipboardCheck],
-    ['briefing','Daily Briefing',Sparkles], ['calendar','Calendar',CalendarDays], ['budget','Budget',WalletCards]
-  ] as const satisfies readonly NavItem[],
-  home: [
-    ['inventory','Inventory',Inbox], ['chores','Chores & Tasks',ListTodo], ['adam',"Adam’s Tasks",ShieldCheck,true],
-    ['vehicles','Vehicles',Car], ['suggestions','Home Suggestions',Home]
-  ] as const satisfies readonly NavItem[],
-  work: [
-    ['students','Students',Users,true], ['meetings','Meetings',CalendarDays], ['emails','Emails',Mail]
-  ] as const satisfies readonly NavItem[]
+export const users = {
+  kaylee: { name: 'Kaylee', email: 'green.kayleet@gmail.com', role: 'admin' as Role, color: '#534AB7' },
+  adam: { name: 'Adam', email: 'adamlamargreen@gmail.com', role: 'limited' as Role, phone: '470-302-0444', color: '#0F6E56' }
 };
 
-const inventory = [
-  { name:'Greek yogurt', brand:'Chobani', room:'Fridge', cat:'Food', qty:2, exp:'Jun 19', value:11.98, tone:'warning' },
-  { name:'Chicken broth', brand:'Swanson', room:'Indoor Pantry', cat:'Food', qty:3, exp:'Jul 3', value:8.97, tone:'success' },
-  { name:'Laundry detergent', brand:'Tide', room:'Laundry', cat:'Cleaning', qty:1, exp:'—', value:18.99, tone:'neutral' },
-  { name:'Air fryer', brand:'Ninja', room:'Kitchen', cat:'Appliance', qty:1, exp:'Insurance', value:129.00, tone:'success' },
-  { name:'Dog shampoo', brand:'Burt’s Bees', room:'Bathroom', cat:'Pet', qty:1, exp:'—', value:9.99, tone:'neutral' }
-];
-const todayTasks = [
-  { title:'Approve Adam’s Friday task plan', owner:'Kaylee', meta:'Urgent approval', tone:'urgent' as Tone, source:'Adam' },
-  { title:'Check Greek yogurt before it expires', owner:'Kaylee', meta:'8 min · Fridge', tone:'warning' as Tone, source:'Inventory' },
-  { title:'Reset dishwasher', owner:'Kaylee', meta:'Quick win · Kitchen', tone:'success' as Tone, source:'Chores' },
-  { title:'Draft student follow-ups from GROW notes', owner:'Kaylee', meta:'20 min · FERPA safe', tone:'purple' as Tone, source:'Students' }
-];
-const chores = [
-  { name:'Reset dishwasher', section:'Daily Life', day:'Today', room:'Kitchen', recur:'daily', owner:'Kaylee', done:false },
-  { name:'Water porch plants', section:'Gardening', day:'Today', room:'Outdoor', recur:'every 2 days', owner:'Adam', done:false },
-  { name:'Vacuum living room', section:'House & Daily Life', day:'Wednesday', room:'Living Room', recur:'weekly', owner:'Adam', done:false, sub:['Living room only'] },
-  { name:'Take trash out', section:'Odds and Ends', day:'Monday', room:'Kitchen', recur:'weekly', owner:'Adam', done:true }
-];
-const adamDays = [
-  { day:'Mon', load:'light', tasks:['Take trash out','Clear nightstand'], note:'Quick wins first' },
-  { day:'Tue', load:'light', tasks:['Unload dishwasher','Water porch plants'], note:'Two light tasks only' },
-  { day:'Wed', load:'medium', tasks:['Vacuum living room'], note:'Room-level subtask' },
-  { day:'Thu', load:'light', tasks:['Put laundry in hamper','Wipe bathroom counter'], note:'Contained finish' },
-  { day:'Fri', load:'light', tasks:['Reset car trash'], note:'Tiny pre-weekend task' },
-  { day:'Sat', load:'heavy', tasks:['Yard work block'], note:'Only heavy day' },
-  { day:'Sun', load:'rest', tasks:['Rest day'], note:'Always protected' }
-];
-const vehicles = [
-  { name:'2016 Toyota Corolla', type:'Gas', miles:'134,000', color:'purple', status:'2 critical', items:[
-    ['Spark plugs','Overdue','Iridium plugs due at 120k; no record.','urgent'],
-    ['Transmission fluid','Unknown','No record at 134k miles.','warning'],
-    ['Brake pads & rotors','Logged','Completed in 2025.','success']
-  ]},
-  { name:'2013 Nissan Leaf', type:'EV', miles:'82,500', color:'green', status:'2 critical', items:[
-    ['12V auxiliary battery','Critical','2013 car; likely due based on age.','urgent'],
-    ['HV battery health check','Due soon','Georgia heat can accelerate degradation.','warning'],
-    ['Registration','Tracked','Renewal tied to Kaylee birthday.','success']
-  ]}
-];
-const suggestions = [
-  { title:'Replace HVAC filter', why:'Georgia pollen + renter-safe maintenance.', urgency:'urgent', room:'Utility', effort:'10 min' },
-  { title:'Check under sinks for leaks', why:'Tenant-only prevention before humidity damage.', urgency:'warning', room:'Kitchen/Bath', effort:'15 min' },
-  { title:'Pest entry walkthrough', why:'Canton summer pest pressure.', urgency:'success', room:'Whole home', effort:'20 min' },
-  { title:'Clean dryer lint path', why:'Low-cost fire prevention.', urgency:'purple', room:'Laundry', effort:'15 min' }
-];
-const events = [
-  { title:'Lynn’s Friday Night Dinner', time:'Fri 6:00–8:00 PM', source:'Places To Be', color:'#534AB7' },
-  { title:'Adam Pay Day', time:'Jun 19', source:'Pay Day', color:'#0F6E56', amount:'+$' },
-  { title:'Watch Paxton for Scott & Nicole', time:'Jun 19–21', source:'Family', color:'#854F0B' },
-  { title:'Kaylee Pay Day', time:'Jun 26', source:'Pay Day', color:'#0F6E56', amount:'+$' }
-];
-const students = [
-  { name:'Andrea', last:'Jun 16', next:'Needs reply', momentum:'Medium', risk:'Watch', goal:'Stay active in current study plan', grow:{ goal:'Complete current study-plan checkpoint.', reality:'Already working through D316 and practical applications of prompt.', options:'Keep pacing steady and use course resources early.', will:'Send a short update by Friday.' }, copied:false },
-  { name:'A.', last:'Jun 16', next:'This week', momentum:'Low-medium', risk:'Support', goal:'Increase weekly study time', grow:{ goal:'Get back on track this week.', reality:'Progress slowed but student plans to recommit.', options:'Block focused study time and reach out early.', will:'Set aside more study time this week.' }, copied:true },
-  { name:'Haley', last:'Jun 15', next:'After vacation', momentum:'Good', risk:'Low', goal:'Continue next course after travel', grow:{ goal:'Stay steady while traveling.', reality:'Started the next course and feels good so far.', options:'Skip check-in during vacation or book when back.', will:'Reach out if she wants an appointment.' }, copied:false }
+export const brand = {
+  purple: '#534AB7', purpleBg: '#EEEDFE', purpleDark: '#3C3489',
+  green: '#0F6E56', greenBg: '#E1F5EE', red: '#A32D2D', redBg: '#FCEBEB', amber: '#854F0B', amberBg: '#FAEEDA'
+};
+
+export const inventoryLocations = [
+  'Fridge','Indoor Pantry','Outdoor Pantry','Backstock','Kitchen','Living Room','Bedroom','Guest Bedroom','Office','Bathroom','Laundry Room','Library','Basement','Garage','Outdoor / Yard'
 ];
 
-function App(){
-  const [mode,setMode] = useState<Mode>('home');
-  const [page,setPage] = useState<Page>('dashboard');
-  const [sidebarOpen,setSidebarOpen] = useState(false);
-  const allowed = useMemo(() => [...nav.shared, ...(mode === 'home' ? nav.home : nav.work)], [mode]);
-  const safePage = allowed.some(([id]) => id === page) ? page : 'dashboard';
-  function changeMode(next: Mode){ setMode(next); if (![...nav.shared, ...(next === 'home' ? nav.home : nav.work)].some(([id]) => id === page)) setPage('dashboard'); }
-  function navTo(next: Page){ setPage(next); setSidebarOpen(false); }
-  return <div className="app-shell">
-    <header className="topbar">
-      <button className="icon-button mobile-only" onClick={()=>setSidebarOpen(!sidebarOpen)}><Menu size={20}/></button>
-      <div className="logo"><span className="kh">KH</span><span>Kaylee’s Hub</span></div>
-      <div className="toggle-wrap" aria-label="Mode toggle"><button className={mode==='home'?'active':''} onClick={()=>changeMode('home')}><Home size={15}/>Home</button><button className={mode==='work'?'active':''} onClick={()=>changeMode('work')}><Users size={15}/>Work</button></div>
-      <div className="top-actions"><button className="icon-button"><Bell size={17}/></button><span className="avatar k">K</span><span className="avatar a">A</span></div>
-    </header>
-    <div className="main">
-      <aside className={`sidebar ${sidebarOpen?'open':''}`}>
-        <NavSection label="Shared" items={nav.shared} page={safePage} setPage={navTo}/>
-        <NavSection label={mode === 'home' ? 'Home' : 'Work'} items={mode === 'home' ? nav.home : nav.work} page={safePage} setPage={navTo}/>
-        <div className={`side-note ${mode}`}><strong>{mode==='home'?'Canton tenant mode':'FERPA-safe mode'}</strong><p>{mode==='home'?'Tenant-only suggestions; Adam has limited visibility.':'First name/nickname only. GROW notes only. Clipboard copy only.'}</p></div>
-      </aside>
-      <main className="content"><PageRouter page={safePage} mode={mode}/></main>
-    </div>
-  </div>;
-}
-function NavSection({ label, items, page, setPage }:{label:string;items:readonly NavItem[];page:Page;setPage:(p:Page)=>void}){return <div className="nav-section"><div className="nav-label">{label}</div>{items.map(([id,label,Icon,dot])=><button key={id} className={`nav-item ${page===id?'active':''}`} onClick={()=>setPage(id)}><Icon size={16}/><span>{label}</span>{dot&&<span className="new-dot"/>}</button>)}</div>}
-function PageRouter({page,mode}:{page:Page;mode:Mode}){ const pages: Record<Page, React.ReactNode> = { dashboard:<Dashboard mode={mode}/>, today:<Today/>, briefing:<Briefing mode={mode}/>, calendar:<Calendar/>, budget:<Budget/>, inventory:<Inventory/>, chores:<Chores/>, adam:<Adam/>, vehicles:<Vehicles/>, suggestions:<Suggestions/>, students:<Students/>, meetings:<Placeholder title="Meetings" sub="Outlook calendar prep will connect here."/>, emails:<Placeholder title="Emails" sub="Draft queue for WGU follow-ups will connect here."/>}; return pages[page]; }
-function Header({title,sub,children}:{title:string;sub:string;children?:React.ReactNode}){return <div className="page-header"><div><h1 className="page-title">{title}</h1><p className="page-sub">{sub}</p></div>{children&&<div className="action-bar">{children}</div>}</div>}
-function Stats({stats}:{stats:[string,string,string?][]}){return <div className="stats-row">{stats.map(([label,value,sub])=><div className="stat-card" key={label}><div className="stat-label">{label}</div><div className="stat-val">{value}</div>{sub&&<div className="stat-sub">{sub}</div>}</div>)}</div>}
-function Tabs({tabs,active,setActive}:{tabs:string[];active:string;setActive:(t:string)=>void}){return <div className="tab-bar">{tabs.map(tab=><button key={tab} className={`tab-btn ${active===tab?'active':''}`} onClick={()=>setActive(tab)}>{tab}</button>)}</div>}
-function Badge({children,tone='neutral'}:{children:React.ReactNode;tone?:Tone|string}){return <span className={`badge ${tone}`}>{children}</span>}
+export const inventoryItems = [
+  { id:'i1', name:'Chicken broth', brand:'Swanson', location:'Indoor Pantry', category:'Food', quantity:3, expires:'2026-07-03', value:8.97 },
+  { id:'i2', name:'Laundry detergent', brand:'Tide', location:'Laundry Room', category:'Cleaning', quantity:1, expires:null, value:18.99 },
+  { id:'i3', name:'Air fryer', brand:'Ninja', location:'Kitchen', category:'Appliance', quantity:1, expires:null, value:129.00, serial:'INSURANCE-READY' },
+  { id:'i4', name:'Greek yogurt', brand:'Chobani', location:'Fridge', category:'Food', quantity:2, expires:'2026-06-19', value:11.98 }
+];
 
-function Dashboard({mode}:{mode:Mode}){return <><Header title={mode==='home'?'Home command center':'Work command center'} sub={mode==='home'?'The daily hub for tasks, approvals, inventory, vehicles, and tenant-safe home care.':'FERPA-safe WGU workflow: students, GROW notes, meetings, and briefing.'}><button className="btn primary"><Plus size={16}/>Quick add</button></Header><Stats stats={mode==='home' ? [['Open tasks','8','home + shared'],['Adam pending','3','approval needed'],['Expiring soon','1','fridge'],['Vehicle alerts','4','critical/due']] : [['Students','3','MVP list'],['Need notes','2','copy pending'],['Calls today','0','Outlook later'],['FERPA','On','clipboard only']]}/><div className="grid two"><Today compact/><Briefing mode={mode} compact/></div><section className="panel quick-actions"><h2>Quick Actions</h2><button className="btn ghost">Add inventory</button><button className="btn ghost">Approve Adam plan</button><button className="btn ghost">Log vehicle service</button><button className="btn ghost">Write GROW note</button></section></>}
-function Today({compact=false}:{compact?:boolean}){ const list = compact ? todayTasks.slice(0,3) : todayTasks; return <section className="panel"><div className="panel-head"><h2>Today’s Tasks</h2>{!compact&&<button className="btn ghost"><Plus size={15}/>Add task</button>}</div>{list.map(t=><div className={`task-card ${t.tone}`} key={t.title}><span className="task-check"/><div className="task-body"><div className="task-name">{t.title}</div><div className="task-meta"><span>{t.owner}</span><span>{t.meta}</span><Badge tone={t.tone}>{t.source}</Badge></div></div></div>)}</section>}
-function Briefing({mode,compact=false}:{mode:Mode;compact?:boolean}){const home=['Adam stays at 2–3 tasks max. Sunday remains rest, no exceptions.','Greek yogurt expires soon; scan-to-use flow should catch it.','Corolla spark plugs and transmission fluid remain critical.']; const work=['Student data remains first-name/nickname only.','Copy-to-Salesforce is clipboard-only; no auto-sync.','GROW notes are formatted for fast outreach.']; const items=(mode==='home'?home:work).slice(0,compact?2:3);return <section className="panel"><div className="panel-head"><h2>Daily Briefing</h2><Sparkles size={17}/></div>{items.map(i=><div className="brief-item" key={i}>{i}</div>)}</section>}
-function Inventory(){const [tab,setTab]=useState('List'); const rooms=['All','Fridge','Pantry','Kitchen','Laundry','Bathroom']; return <><Header title="Inventory" sub="Barcode lookup, scan-to-use, room view, and insurance export styling ported from Claude."><button className="btn primary">Scan to add</button><button className="btn ghost">Export insurance CSV</button></Header><Stats stats={[[String(inventory.length),'Total items'],['$178.93','Estimated value'],['1','Expiring soon'],['15','Locations']].map(([v,l])=>[l,v]) as [string,string][]}/><Tabs tabs={['List','By Room','Scan to Use']} active={tab} setActive={setTab}/><div className="pill-row">{rooms.map(r=><button className={`pill ${r==='All'?'active':''}`} key={r}>{r}</button>)}</div>{tab==='By Room'?<div className="room-card-grid">{rooms.slice(1).map(r=><div className="room-card" key={r}><Inbox size={22}/><h3>{r}</h3><p>{inventory.filter(i=>i.room.includes(r)||r==='Pantry'&&i.room.includes('Pantry')).length} items</p></div>)}</div>:<div className="table-card"><table><thead><tr><th>Item</th><th>Room</th><th>Category</th><th>Qty</th><th>Expiry</th><th>Value</th></tr></thead><tbody>{inventory.map(i=><tr key={i.name}><td><strong>{i.name}</strong><small>{i.brand}</small></td><td><Badge>{i.room}</Badge></td><td><Badge tone="purple">{i.cat}</Badge></td><td>{i.qty}</td><td><span className={`text-${i.tone}`}>{i.exp}</span></td><td>${i.value.toFixed(2)}</td></tr>)}</tbody></table></div>}</>}
-function Chores(){const [tab,setTab]=useState('Today'); return <><Header title="Chores & Tasks" sub="Todoist-style task grouping with room, owner, recurrence, and expandable subtasks."><button className="btn primary"><Plus size={16}/>Add chore</button></Header><Stats stats={[[String(chores.length),'Tasks'],['2','Adam'],['2','Kaylee'],['1','Done']].map(([v,l])=>[l,v]) as [string,string][]}/><Tabs tabs={['Today','All recurring','One-off','Garden','All']} active={tab} setActive={setTab}/><section className="panel">{chores.map(c=><div className={`task-card ${c.done?'done':'neutral'}`} key={c.name}><span className={`task-check ${c.done?'checked':''}`}>{c.done&&<Check size={12}/>}</span><div className="task-body"><div className="task-name">{c.name}</div><div className="task-meta"><Badge>{c.owner}</Badge><span>{c.room}</span><span>{c.recur}</span><span>{c.section}</span></div>{c.sub&&<div className="subtask">↳ {c.sub.join(', ')}</div>}</div></div>)}</section></>}
-function Adam(){const [tab,setTab]=useState('Week Plan'); return <><Header title="Adam’s ADHD Task System" sub="Kaylee-approved, positive, low-load task planning before anything reaches Todoist."><button className="btn green">Approve selected</button></Header><Stats stats={[["3",'Pending approval'],['2–3','Max tasks/day'],['Sat','Only heavy day'],['Sun','Always rest']].map(([v,l])=>[l,v]) as [string,string][]}/><Tabs tabs={['Week Plan','Approve & Send','Notifications','Rules']} active={tab} setActive={setTab}/>{tab==='Week Plan'&&<div className="day-col-grid">{adamDays.map(d=><div className={`day-col ${d.load}`} key={d.day}><div className="day-col-head"><div className="day-col-name">{d.day}</div><div className="day-col-count">{d.note}</div></div><div className="day-col-body">{d.tasks.map(t=><div className={`day-task-chip ${d.load}`} key={t}><div className="chip-name">{t}</div><div className="chip-room">{d.load}</div></div>)}</div></div>)}</div>}{tab==='Approve & Send'&&<section className="approval-card"><div className="approval-head"><strong>Friday plan</strong><Badge tone="warning">pending</Badge></div><p>Reset car trash only. This keeps Friday light and avoids back-to-back tedious tasks.</p><div className="actions"><button className="btn green">Approve</button><button className="btn ghost">Skip</button></div></section>}{tab==='Notifications'&&<section className="panel"><h2>Adam notification schedule</h2><div className="brief-item">11:00 AM push — daily recap.</div><div className="brief-item">5:30 PM SMS — incomplete task reminder.</div><div className="brief-item">8:30–9:00 PM SMS — wind-down reminder if still incomplete.</div></section>}{tab==='Rules'&&<section className="panel"><h2>Non-negotiable rules</h2>{['Max 2–3 tasks/day','No back-to-back tedious tasks','Saturday is the only heavy day','Sunday is always rest','Quick wins first','Room-level subtasks','Silent escalation after 2 days','Kaylee approves before Todoist'].map(r=><div className="brief-item" key={r}>{r}</div>)}</section>}</>}
-function Vehicles(){const [idx,setIdx]=useState(0); const v=vehicles[idx]; return <><Header title="Vehicle Maintenance" sub="Corolla + Leaf maintenance status, critical flags, mileage, and service log shell."><button className="btn primary"><Wrench size={16}/>Log service</button></Header><div className="car-switcher">{vehicles.map((car,i)=><button key={car.name} onClick={()=>setIdx(i)} className={`car-card-sel ${idx===i?'active-'+car.color:''}`}><div className="car-name">{car.name}</div><div className="car-miles">{car.miles} mi</div><Badge tone={car.color==='green'?'success':'warning'}>{car.type}</Badge><div className="car-status">{car.status}</div></button>)}</div><Stats stats={[[v.items.length.toString(),'Tracked items'],['2','Critical'],[v.miles,'Mileage'],[v.type,'Type']].map(([val,label])=>[label,val]) as [string,string][]}/>{v.items.map(([name,status,note,tone])=><div className={`maint-item ${tone}`} key={name}><div className="maint-icon"><Wrench size={18}/></div><div className="maint-body"><div className="maint-name">{name}</div><div className="maint-note">{note}</div><div className="maint-meta"><Badge tone={tone}>{status}</Badge></div></div></div>)}</>}
-function Suggestions(){return <><Header title="Home Suggestions" sub="Tenant-only, Canton/Georgia-aware maintenance ideas with approval flow."><button className="btn primary">Generate ideas</button></Header><Stats stats={[[String(suggestions.length),'Pending'],['1','Urgent'],['100%','Tenant-safe'],['GA','Localized']].map(([v,l])=>[l,v]) as [string,string][]}/>{suggestions.map(s=><div className={`suggest-card ${s.urgency}`} key={s.title}><div className="suggest-head"><div className="suggest-icon"><Home size={18}/></div><div className="suggest-body"><div className="suggest-name">{s.title}</div><div className="suggest-why">{s.why}</div><div className="suggest-meta"><Badge tone={s.urgency}>{s.room}</Badge><Badge>{s.effort}</Badge><Badge>tenant</Badge></div></div><button className="btn green">Add</button><button className="btn ghost">Snooze</button></div></div>)}</>}
-function Calendar(){const [tab,setTab]=useState('Agenda'); return <><Header title="Unified Calendar" sub="Google calendars now mocked in React; OAuth integration comes after the UI is stable."/><Stats stats={[['4','Visible events'],['2','Paydays'],['1','Family commitment'],['9','Google calendars']]}/><Tabs tabs={['Agenda','Month','Money']} active={tab} setActive={setTab}/>{tab==='Agenda'&&events.map(e=><div className="evt" key={e.title}><div className="evt-bar" style={{background:e.color}}/><div className="evt-body"><div className="evt-title">{e.title}</div><div className="evt-meta"><span>{e.time}</span><span>{e.source}</span></div></div><div className="evt-amount">{e.amount}</div></div>)}{tab==='Month'&&<div className="month-card"><div className="month-head">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=><div key={d}>{d}</div>)}</div><div className="month-body">{Array.from({length:35},(_,i)=><div className="month-cell" key={i}>{i>0&&i<31?i:''}{i===19&&<em>Pay Day</em>}{i===20&&<em>Paxton</em>}</div>)}</div></div>}{tab==='Money'&&<section className="panel"><h2>Cashflow timeline</h2><div className="brief-item">Adam Pay Day — Jun 19</div><div className="brief-item">Kaylee Pay Day — Jun 26</div></section>}</>}
-function Students(){const [active,setActive]=useState(students[0].name); const student=students.find(s=>s.name===active)!; const note=`Goal: ${student.grow.goal}\nReality: ${student.grow.reality}\nOptions: ${student.grow.options}\nWill: ${student.grow.will}`; return <><Header title="Students" sub="FERPA-safe GROW notes: first name/nickname only, no Salesforce auto-sync."><button className="btn primary"><Plus size={16}/>Add student</button></Header><Stats stats={[[String(students.length),'Students'],['2','Need copy'],['0','IDs stored'],['Manual','Salesforce']].map(([v,l])=>[l,v]) as [string,string][]}/><div className="students-layout"><section className="panel student-list"><h2>Student list</h2>{students.map(s=><button key={s.name} onClick={()=>setActive(s.name)} className={`student-row ${active===s.name?'active':''}`}><strong>{s.name}</strong><span>{s.goal}</span><Badge tone={s.risk==='Low'?'success':s.risk==='Watch'?'warning':'purple'}>{s.risk}</Badge></button>)}</section><section className="panel student-detail"><div className="panel-head"><h2>{student.name}</h2><Badge tone={student.copied?'success':'warning'}>{student.copied?'Copied':'Needs copy'}</Badge></div><div className="grow-grid"><Grow label="Goal" text={student.grow.goal}/><Grow label="Reality" text={student.grow.reality}/><Grow label="Options" text={student.grow.options}/><Grow label="Will" text={student.grow.will}/></div><textarea value={note} readOnly/><div className="actions"><button className="btn primary" onClick={()=>navigator.clipboard?.writeText(note)}><Copy size={15}/>Copy to Salesforce</button><button className="btn ghost"><MessageSquareText size={15}/>Draft follow-up</button></div></section></div></>}
-function Grow({label,text}:{label:string;text:string}){return <div className="grow-card"><strong>{label}</strong><p>{text}</p></div>}
-function Budget(){return <><Header title="Budget" sub="Calendar-based cashflow shell: read from Expenses and Pay Day calendars; no transaction replacement."/><Stats stats={[['$0','Transactions stored'],['2','Paydays visible'],['Read-only','Rule'],['Phase 1','Scaffold']]}/><section className="panel"><h2>Budget next steps</h2><div className="brief-item">Build month cashflow from calendar events.</div><div className="brief-item">Separate household bills, subscriptions, annual expenses, and paydays.</div></section></>}
-function Placeholder({title,sub}:{title:string;sub:string}){return <section className="panel"><div className="placeholder"><Sparkles size={20}/><div><h2>{title}</h2><p>{sub}</p></div></div></section>}
+export const todayTasks = [
+  { id:'t1', title:'Check fridge items expiring this week', owner:'Kaylee', mode:'home', minutes:8, priority:'warning' as Priority },
+  { id:'t2', title:'Draft 3 student follow-ups from GROW notes', owner:'Kaylee', mode:'work', minutes:20, priority:'normal' as Priority },
+  { id:'t3', title:'Approve Adam’s Friday task plan', owner:'Kaylee', mode:'home', minutes:5, priority:'urgent' as Priority },
+  { id:'t4', title:'Quick dishwasher reset', owner:'Adam', mode:'home', minutes:7, priority:'good' as Priority }
+];
 
-createRoot(document.getElementById('root')!).render(<App/>);
+export const adamPlan = [
+  { day:'Mon', tasks:['Take trash out','Clear nightstand'], rationale:'Quick wins first; no tedious stacking.' },
+  { day:'Tue', tasks:['Unload dishwasher','Water porch plants'], rationale:'Two light tasks only.' },
+  { day:'Wed', tasks:['Vacuum living room'], rationale:'Room-level subtask, not whole-house vacuuming.' },
+  { day:'Thu', tasks:['Put laundry in hamper','Wipe bathroom counter'], rationale:'Short, contained, visible finish.' },
+  { day:'Fri', tasks:['Reset car trash'], rationale:'One tiny task before weekend.' },
+  { day:'Sat', tasks:['Yard work block'], rationale:'Saturday heavy day; only task.' },
+  { day:'Sun', tasks:['Rest day'], rationale:'Sunday is always rest.' }
+];
+
+export const vehicles = [
+  { name:'2016 Toyota Corolla', miles:134000, type:'Gas', urgent:['Spark plugs overdue','Transmission fluid unknown'], ok:['Brakes completed 2025','Tire rotation at 133,900 mi'] },
+  { name:'2013 Nissan Leaf', miles:82500, type:'EV', urgent:['12V auxiliary battery likely due','HV battery health check'], ok:['Registration tracked'] }
+];
+
+export const homeSuggestions = [
+  { title:'Replace HVAC filter', urgency:'urgent', reason:'Georgia pollen + renter-safe maintenance.', effort:'10 min' },
+  { title:'Check under sinks for leaks', urgency:'soon', reason:'Tenant-only prevention before humidity damage.', effort:'15 min' },
+  { title:'Pest entry point walkthrough', urgency:'seasonal', reason:'Canton summer pest pressure.', effort:'20 min' },
+  { title:'Clean dryer lint path', urgency:'routine', reason:'Low-cost fire prevention.', effort:'15 min' }
+];
+
+export const briefing = [
+  'Today focuses on approval, quick wins, and expiring inventory.',
+  'Adam should stay at 2–3 tasks max; no Sunday tasks should be generated.',
+  'Work mode should keep student records FERPA-safe: first name or nickname only, GROW notes only, clipboard copy only.',
+  'Budget page is scaffolded next; calendar cashflow is the source of truth.'
+];
+
+export const students = [
+  { displayName:'Andrea', goal:'Finish current study plan checkpoint', grow:'Goal: complete D316 checkpoint. Reality: already on study plan. Options: keep steady pace and use course resources. Will: send update by Friday.', copied:false },
+  { displayName:'A.', goal:'Increase weekly study time', grow:'Goal: get back on track. Reality: progress slowed. Options: block study time and ask for help early. Will: set aside focused study this week.', copied:true }
+];
