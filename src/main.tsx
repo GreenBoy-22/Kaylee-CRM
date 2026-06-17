@@ -1,66 +1,88 @@
 import React, { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { CalendarDays, Car, ClipboardCheck, Home, Inbox, LayoutDashboard, ShieldCheck, Sparkles, Users, WalletCards } from 'lucide-react';
-import { adamPlan, briefing, homeSuggestions, inventoryItems, inventoryLocations, students, todayTasks, users, vehicles } from './data/seed';
+import { CalendarDays, Car, CheckCircle2, ClipboardCheck, Home, Inbox, LayoutDashboard, ListTodo, Moon, ShieldCheck, Sparkles, Sun, Users, WalletCards, Wrench } from 'lucide-react';
 import './styles.css';
 
 type Mode = 'home' | 'work';
-type Page = 'dashboard' | 'inventory' | 'today' | 'briefing' | 'adam' | 'vehicles' | 'suggestions' | 'calendar' | 'budget' | 'students';
+type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'inventory' | 'chores' | 'adam' | 'vehicles' | 'suggestions' | 'budget' | 'students' | 'meetings' | 'emails';
+type Tab = string;
 
-const pageMeta: Record<Page, { label: string; icon: React.ReactNode; modes: Mode[] | 'shared' }> = {
-  dashboard: { label: 'Dashboard', icon: <LayoutDashboard size={18}/>, modes: 'shared' },
-  today: { label: "Today's Tasks", icon: <ClipboardCheck size={18}/>, modes: 'shared' },
-  briefing: { label: 'Daily Briefing', icon: <Sparkles size={18}/>, modes: 'shared' },
-  inventory: { label: 'Inventory', icon: <Inbox size={18}/>, modes: ['home'] },
-  adam: { label: "Adam's Tasks", icon: <ShieldCheck size={18}/>, modes: ['home'] },
-  vehicles: { label: 'Vehicles', icon: <Car size={18}/>, modes: ['home'] },
-  suggestions: { label: 'Home Suggestions', icon: <Home size={18}/>, modes: ['home'] },
-  calendar: { label: 'Calendar', icon: <CalendarDays size={18}/>, modes: 'shared' },
-  budget: { label: 'Budget', icon: <WalletCards size={18}/>, modes: 'shared' },
-  students: { label: 'Students', icon: <Users size={18}/>, modes: ['work'] },
+const brand = { purple:'#534AB7', purpleBg:'#EEEDFE', purpleDark:'#3C3489', green:'#0F6E56', greenBg:'#E1F5EE', red:'#A32D2D', redBg:'#FCEBEB', amber:'#854F0B', amberBg:'#FAEEDA' };
+const nav = {
+  shared: [ ['dashboard','Dashboard',LayoutDashboard], ['today',"Today's Tasks",ClipboardCheck], ['briefing','Daily Briefing',Sparkles], ['calendar','Calendar',CalendarDays], ['budget','Budget',WalletCards] ] as const,
+  home: [ ['inventory','Inventory',Inbox], ['chores','Chores & Tasks',ListTodo], ['adam',"Adam's Tasks",ShieldCheck], ['vehicles','Vehicles',Car], ['suggestions','Home Suggestions',Home] ] as const,
+  work: [ ['students','Students',Users], ['meetings','Meetings',CalendarDays], ['emails','Emails',Inbox] ] as const
 };
 
-function App() {
-  const [mode, setMode] = useState<Mode>('home');
-  const [page, setPage] = useState<Page>('dashboard');
-  const navPages = useMemo(() => Object.entries(pageMeta).filter(([, meta]) => meta.modes === 'shared' || meta.modes.includes(mode)) as [Page, typeof pageMeta[Page]][], [mode]);
+const inventory = [
+  {name:'Greek yogurt',brand:'Chobani',room:'Fridge',cat:'Food',qty:2,exp:'Jun 19',value:11.98,status:'soon'},
+  {name:'Chicken broth',brand:'Swanson',room:'Indoor Pantry',cat:'Food',qty:3,exp:'Jul 3',value:8.97,status:'ok'},
+  {name:'Laundry detergent',brand:'Tide',room:'Laundry',cat:'Cleaning',qty:1,exp:'—',value:18.99,status:'ok'},
+  {name:'Air fryer',brand:'Ninja',room:'Kitchen',cat:'Appliance',qty:1,exp:'Insurance',value:129,status:'ok'},
+  {name:'Dog shampoo',brand:'Burt’s Bees',room:'Bathroom',cat:'Pet',qty:1,exp:'—',value:9.99,status:'ok'}
+];
+const chores = [
+  {name:'Reset dishwasher',section:'Daily Life',day:'Today',room:'Kitchen',recur:'daily',owner:'Kaylee',done:false},
+  {name:'Water porch plants',section:'Gardening',day:'Today',room:'Outdoor',recur:'every 2 days',owner:'Adam',done:false},
+  {name:'Vacuum living room',section:'House & Daily Life',day:'Wednesday',room:'Living Room',recur:'weekly',owner:'Adam',done:false,sub:['Living room only']},
+  {name:'Take trash out',section:'Odds and Ends',day:'Monday',room:'Kitchen',recur:'weekly',owner:'Adam',done:true}
+];
+const adamDays = [
+  {day:'Mon',load:'light',tasks:['Take trash out','Clear nightstand'],note:'Quick wins first'},
+  {day:'Tue',load:'light',tasks:['Unload dishwasher','Water porch plants'],note:'Two light tasks only'},
+  {day:'Wed',load:'medium',tasks:['Vacuum living room'],note:'Room-level subtask'},
+  {day:'Thu',load:'light',tasks:['Put laundry in hamper','Wipe bathroom counter'],note:'Visible finish'},
+  {day:'Fri',load:'light',tasks:['Reset car trash'],note:'Tiny pre-weekend task'},
+  {day:'Sat',load:'heavy',tasks:['Yard work block'],note:'Only heavy day'},
+  {day:'Sun',load:'rest',tasks:['Rest day'],note:'Always protected'}
+];
+const vehicles = [
+  {name:'2016 Toyota Corolla',type:'Gas',miles:'134,000',status:'2 critical',color:'purple',items:[['Spark plugs','Overdue','Iridium plugs due at 120k; no record.','overdue'],['Transmission fluid','Unknown','No record at 134k miles.','unknown'],['Brake pads & rotors','Logged','Completed in 2025.','ok']]},
+  {name:'2013 Nissan Leaf',type:'EV',miles:'82,500',status:'2 critical',color:'green',items:[['12V auxiliary battery','Critical','2013 car; typical battery life is much shorter.','overdue'],['HV battery health check','Due soon','Georgia heat can accelerate degradation.','soon'],['Registration','Tracked','Renewal tied to Kaylee birthday.','ok']]}
+];
+const suggestions = [
+  {title:'Replace HVAC filter',why:'Georgia pollen + renter-safe maintenance.',urgency:'urgent',room:'Utility',effort:'10 min'},
+  {title:'Check under sinks for leaks',why:'Tenant-only prevention before humidity damage.',urgency:'soon',room:'Kitchen/Bath',effort:'15 min'},
+  {title:'Pest entry walkthrough',why:'Canton summer pest pressure.',urgency:'seasonal',room:'Whole home',effort:'20 min'},
+  {title:'Clean dryer lint path',why:'Low-cost fire prevention.',urgency:'routine',room:'Laundry',effort:'15 min'}
+];
+const events = [
+  {title:'Lynn’s Friday Night Dinner',time:'Fri 6:00–8:00 PM',source:'Places To Be',color:'#534AB7'},
+  {title:'Adam Pay Day',time:'Jun 19',source:'Pay Day',color:'#0F6E56',amount:'+$'},
+  {title:'Watch Paxton for Scott & Nicole',time:'Jun 19–21',source:'Family',color:'#854F0B'},
+  {title:'Kaylee Pay Day',time:'Jun 26',source:'Pay Day',color:'#0F6E56',amount:'+$'}
+];
+const students = [
+  {name:'Andrea',goal:'Stay active in current study plan',grow:'Goal: complete study-plan checkpoint. Reality: already working D316/practical applications of prompt. Options: keep pacing and use resources early. Will: send an update by Friday.'},
+  {name:'A.',goal:'Increase weekly study time',grow:'Goal: get back on track. Reality: progress slowed. Options: block focused study time and ask for support early. Will: set aside more study time this week.'}
+];
 
-  function switchMode(next: Mode) {
-    setMode(next);
-    if (!navPages.some(([key]) => key === page)) setPage('dashboard');
-  }
-
-  return <div className="app">
-    <aside className="sidebar">
-      <div className="logo"><span>KH</span><div><strong>Kaylee's Hub</strong><small>Home + Work CRM</small></div></div>
-      <div className="modeToggle" aria-label="Mode toggle">
-        <button className={mode === 'home' ? 'active' : ''} onClick={() => switchMode('home')}>Home</button>
-        <button className={mode === 'work' ? 'active' : ''} onClick={() => switchMode('work')}>Work</button>
-      </div>
-      <nav>
-        {navPages.map(([key, meta]) => <button key={key} className={page === key ? 'nav active' : 'nav'} onClick={() => setPage(key)}>{meta.icon}<span>{meta.label}</span></button>)}
-      </nav>
-      <div className="profileCard"><strong>{mode === 'home' ? 'Tenant-safe Canton home' : 'FERPA-safe WGU mode'}</strong><p>{mode === 'home' ? 'Adam is limited to his tasks only. No finances.' : 'First name/nickname only. GROW notes only.'}</p></div>
-    </aside>
-    <main>
-      <Topbar mode={mode}/>
-      {page === 'dashboard' && <Dashboard mode={mode}/>} {page === 'inventory' && <Inventory/>} {page === 'today' && <Today/>} {page === 'briefing' && <Briefing/>} {page === 'adam' && <AdamTasks/>} {page === 'vehicles' && <Vehicles/>} {page === 'suggestions' && <Suggestions/>} {page === 'calendar' && <Placeholder title="Calendar" text="Google Calendar OAuth route comes later. This page is ready for all 9 calendar sources, agenda/month/money tabs, and Budget dependency."/>} {page === 'budget' && <Placeholder title="Budget" text="Dedicated cashflow page scaffold. Next step: import Expenses + Pay Day calendar events into Supabase budget_events_cache."/>} {page === 'students' && <Students/>}
-    </main>
-  </div>;
+function App(){
+  const [mode,setMode] = useState<Mode>('home');
+  const [page,setPage] = useState<Page>('dashboard');
+  const visibleNav = useMemo(() => [...nav.shared, ...(mode === 'home' ? nav.home : nav.work)], [mode]);
+  const safePage = visibleNav.some(([id]) => id === page) ? page : 'dashboard';
+  function changeMode(next: Mode){ setMode(next); if (![...nav.shared, ...(next === 'home' ? nav.home : nav.work)].some(([id]) => id === page)) setPage('dashboard'); }
+  return <div className="shell">
+    <div className="topbar"><div className="logo"><span className="kh">KH</span> Kaylee’s Hub</div><div className="toggle-wrap"><button className={mode==='home'?'active':''} onClick={()=>changeMode('home')}><Home size={15}/>Home</button><button className={mode==='work'?'active':''} onClick={()=>changeMode('work')}><Users size={15}/>Work</button></div><div className="avatars"><span className="avatar k">K</span><span className="avatar a">A</span></div></div>
+    <div className="main"><aside className="sidebar"><Section label="Shared" items={nav.shared} page={safePage} setPage={setPage}/><Section label={mode==='home'?'Home':'Work'} items={mode==='home'?nav.home:nav.work} page={safePage} setPage={setPage}/><div className="side-note"><strong>{mode==='home'?'Canton tenant mode':'FERPA-safe mode'}</strong><p>{mode==='home'?'Tenant-only suggestions; Adam has limited visibility.':'First name/nickname only; clipboard movement only.'}</p></div></aside><main className="content"><PageRouter page={safePage} mode={mode}/></main></div>
+  </div>
 }
-
-function Topbar({ mode }: { mode: Mode }) { return <header><div><h1>{mode === 'home' ? 'Home command center' : 'Work command center'}</h1><p>Dual-mode shell with role boundaries, brand palette, and Phase 1 module scaffolding.</p></div><div className="userPills"><span className="pill purple">{users.kaylee.name} Admin</span><span className="pill green">{users.adam.name} Limited</span></div></header>; }
-function Card({ children, className='' }: React.PropsWithChildren<{ className?: string }>) { return <section className={`card ${className}`}>{children}</section>; }
-function Stat({ label, value }: { label:string; value:string|number }) { return <div className="stat"><strong>{value}</strong><span>{label}</span></div>; }
-
-function Dashboard({ mode }: { mode: Mode }) { return <div className="grid"><Card><h2>Phase 1 build status</h2><div className="stats"><Stat value="7" label="Completed prototype modules"/><Stat value="4" label="Immediate priorities"/><Stat value="2" label="Users"/></div><p className="muted">This starter app is deployable now and leaves integrations behind clean API boundaries for Phase 2.</p></Card><Card><h2>{mode === 'home' ? 'Home rules locked' : 'Work rules locked'}</h2><ul className="checklist">{mode === 'home' ? ['Adam: max 2–3 tasks/day','Saturday heavy only','Sunday always rest','Tenant-only suggestions'] : ['FERPA-safe student data','GROW notes only','No Salesforce auto-sync','Clipboard copy only'].map(x => <li key={x}>{x}</li>)}</ul></Card><Today compact/><Briefing compact/></div>; }
-function Today({ compact=false }: { compact?: boolean }) { const visible = compact ? todayTasks.slice(0,3) : todayTasks; return <Card><h2>Today's Tasks</h2><div className="taskList">{visible.map(t => <div className={`task ${t.priority}`} key={t.id}><div><strong>{t.title}</strong><p>{t.owner} • {t.minutes} min • {t.mode}</p></div><button>Done</button></div>)}</div></Card>; }
-function Briefing({ compact=false }: { compact?: boolean }) { return <Card><h2>Daily Briefing</h2>{briefing.slice(0, compact ? 3 : briefing.length).map((b, i) => <p className="brief" key={i}>{b}</p>)}</Card>; }
-function Inventory() { const total = inventoryItems.reduce((s,i)=>s+i.value,0); return <div className="grid"><Card><h2>Inventory</h2><div className="stats"><Stat value={inventoryItems.length} label="Items seeded"/><Stat value={`$${total.toFixed(2)}`} label="Estimated value"/><Stat value={inventoryLocations.length} label="Locations"/></div><div className="scanBox"><strong>Barcode lookup ready</strong><p>Production route should proxy Open Food Facts first, then Open Beauty Facts.</p></div></Card><Card><h2>Items</h2><table><tbody>{inventoryItems.map(i=><tr key={i.id}><td><strong>{i.name}</strong><br/><small>{i.brand}</small></td><td>{i.location}</td><td>Qty {i.quantity}</td><td>${i.value.toFixed(2)}</td></tr>)}</tbody></table></Card></div>; }
-function AdamTasks() { return <div className="grid"><Card><h2>Adam's ADHD-safe week</h2><p className="muted">Kaylee approval is required before anything goes to Todoist.</p><div className="week">{adamPlan.map(d => <div className={d.day === 'Sun' ? 'day rest' : 'day'} key={d.day}><strong>{d.day}</strong>{d.tasks.map(t=><span key={t}>{t}</span>)}<small>{d.rationale}</small></div>)}</div></Card></div>; }
-function Vehicles() { return <div className="grid two">{vehicles.map(v => <Card key={v.name}><h2>{v.name}</h2><div className="stats"><Stat value={v.miles.toLocaleString()} label="Miles"/><Stat value={v.type} label="Type"/></div><h3>Critical</h3>{v.urgent.map(x => <p className="alert" key={x}>{x}</p>)}<h3>Logged</h3>{v.ok.map(x => <p className="ok" key={x}>{x}</p>)}</Card>)}</div>; }
-function Suggestions() { return <Card><h2>Tenant-only Home Suggestions</h2><div className="suggestions">{homeSuggestions.map(s => <div className={`suggestion ${s.urgency}`} key={s.title}><strong>{s.title}</strong><p>{s.reason}</p><small>{s.effort}</small><button>Add to my tasks</button></div>)}</div></Card>; }
-function Students() { function copyNote(text:string){ navigator.clipboard?.writeText(text); } return <Card><h2>Students — FERPA-safe</h2><p className="muted">No IDs, legal names, grades, or enrollment data. Copy-to-Salesforce is clipboard only.</p>{students.map(s => <div className="student" key={s.displayName}><strong>{s.displayName}</strong><p>{s.grow}</p><button onClick={() => copyNote(s.grow)}>{s.copied ? 'Copied once' : 'Copy to Salesforce'}</button></div>)}</Card>; }
-function Placeholder({ title, text }: { title:string; text:string }) { return <Card><h2>{title}</h2><p>{text}</p><div className="placeholder">Coming in the next implementation session</div></Card>; }
+function Section({label,items,page,setPage}:{label:string;items:readonly (readonly [string,string,any])[];page:Page;setPage:(p:Page)=>void}){return <div className="nav-section"><div className="nav-label">{label}</div>{items.map(([id,label,Icon])=><button key={id} className={`nav-item ${page===id?'active':''}`} onClick={()=>setPage(id as Page)}><Icon size={16}/>{label}{id==='adam'&&<span className="new-dot"/>}</button>)}</div>}
+function PageRouter({page,mode}:{page:Page;mode:Mode}){ if(page==='dashboard')return <Dashboard mode={mode}/>; if(page==='inventory')return <Inventory/>; if(page==='chores')return <Chores/>; if(page==='adam')return <Adam/>; if(page==='vehicles')return <Vehicles/>; if(page==='suggestions')return <Suggestions/>; if(page==='calendar')return <Calendar/>; if(page==='students')return <Students/>; if(page==='today')return <Today/>; if(page==='briefing')return <Briefing mode={mode}/>; return <Placeholder title={page==='budget'?'Budget':page==='meetings'?'Meetings':'Emails'}/>; }
+function Header({title,sub,children}:{title:string;sub:string;children?:React.ReactNode}){return <div className="page-header"><div><h1 className="page-title">{title}</h1><p className="page-sub">{sub}</p></div><div className="action-bar">{children}</div></div>}
+function Stats({stats}:{stats:[string,string,string?][]}){return <div className="stats-row">{stats.map(([l,v,s])=><div className="stat-card" key={l}><div className="stat-label">{l}</div><div className="stat-val">{v}</div>{s&&<div className="stat-sub">{s}</div>}</div>)}</div>}
+function Tabs({tabs,active,setActive}:{tabs:string[];active:string;setActive:(t:string)=>void}){return <div className="tab-bar">{tabs.map(t=><button key={t} className={`tab-btn ${active===t?'active':''}`} onClick={()=>setActive(t)}>{t}</button>)}</div>}
+function Dashboard({mode}:{mode:Mode}){return <><Header title={mode==='home'?'Home command center':'Work command center'} sub="Claude-style shell rebuilt as the deployed React app."/><Stats stats={mode==='home' ? [['Open tasks','8','home + shared'],['Adam pending','3','approval needed'],['Expiring soon','1','fridge'],['Vehicle alerts','4','critical/due']] : [['Students','2','sample GROW notes'],['Calls today','0','Outlook later'],['Drafts','0','planned'],['FERPA rule','On','clipboard only']]}/><div className="grid two"><Today compact/><Briefing mode={mode} compact/></div></>}
+function Today({compact=false}:{compact?:boolean}){const list=[['Approve Adam’s Friday task plan','Kaylee','Urgent','urgent'],['Check Greek yogurt before it expires','Kaylee','8 min','soon'],['Reset dishwasher','Kaylee','Quick win','ok'],['Draft student follow-ups','Kaylee','Work','normal']].slice(0,compact?3:4);return <section className="panel"><h2>Today’s Tasks</h2>{list.map(([n,o,m,c])=><div className={`task-card ${c}`} key={n}><span className="task-check"/><div className="task-body"><div className="task-name">{n}</div><div className="task-meta"><span>{o}</span><span>{m}</span></div></div></div>)}</section>}
+function Briefing({mode,compact=false}:{mode:Mode;compact?:boolean}){const items=mode==='home'?['Adam stays at 2–3 tasks max. Sunday remains rest, no exceptions.','Greek yogurt expires soon; scan-to-use flow should catch it.','Corolla spark plugs and transmission fluid remain critical.']:['Student module stays intentionally incomplete for FERPA.','GROW notes only; no IDs, grades, or enrollment data.','Salesforce copy is manual clipboard only.'];return <section className="panel"><h2>Daily Briefing</h2>{items.slice(0,compact?2:3).map(x=><p className="brief" key={x}>{x}</p>)}</section>}
+function Inventory(){const [tab,setTab]=useState<Tab>('List');return <><Header title="Inventory" sub="Barcode lookup, scan-to-use, room view, and insurance export styling ported from Claude."><button className="btn-primary">Scan to add</button><button className="btn-sec">Export insurance CSV</button></Header><Stats stats={[[String(inventory.length),'Total items'],['$178.93','Estimated value'],['1','Expiring soon'],['15','Locations']]}/><Tabs tabs={['List','By Room','Scan to Use']} active={tab} setActive={setTab}/><div className="room-tabs">{['All','Fridge','Pantry','Kitchen','Laundry','Bathroom'].map(r=><span className={`room-tab ${r==='All'?'active':''}`} key={r}>{r}</span>)}</div>{tab==='By Room'?<div className="room-card-grid">{['Fridge','Indoor Pantry','Kitchen','Laundry','Bathroom'].map(r=><div className="room-card" key={r}><div className="room-card-icon">📦</div><div className="room-card-name">{r}</div><div className="room-card-count">{inventory.filter(i=>i.room===r).length} items</div></div>)}</div>:<div className="inv-table"><table><thead><tr><th>Item</th><th>Room</th><th>Category</th><th>Qty</th><th>Expiry</th><th>Value</th></tr></thead><tbody>{inventory.map(i=><tr key={i.name}><td><strong>{i.name}</strong><br/><small>{i.brand}</small></td><td><span className="room-badge">{i.room}</span></td><td><span className="cat-badge">{i.cat}</span></td><td>{i.qty}</td><td><span className={`expiry-${i.status}`}>{i.exp}</span></td><td>${i.value.toFixed(2)}</td></tr>)}</tbody></table></div>}</>}
+function Chores(){const [tab,setTab]=useState('Today');return <><Header title="Chores & Tasks" sub="Todoist-style section filters and recurring task cards."><button className="btn-sec">Sync Todoist</button></Header><Stats stats={[[String(chores.length),'Tasks pulled'],['2','Adam tasks'],['1','Completed'],['3','Sections']]}/><Tabs tabs={['Today','All recurring','One-off','Garden','All']} active={tab} setActive={setTab}/>{chores.map(t=><div className={`task-card ${t.done?'done':''}`} key={t.name}><span className={`task-check ${t.done?'checked':''}`}/><div className="task-body"><div className="task-name">{t.name}</div><div className="task-meta"><span>{t.day}</span><span>{t.section}</span><span>{t.room}</span><span>{t.owner}</span><span>{t.recur}</span></div>{t.sub&&<div className="subtasks">{t.sub.map(s=><span key={s}>{s}</span>)}</div>}</div></div>)}</>}
+function Adam(){const [tab,setTab]=useState('Week plan');return <><Header title="Adam’s ADHD Task System" sub="Kaylee approves before Todoist. Positive framing, no overload."><button className="btn-green">Approve selected</button></Header><Stats stats={[["2–3",'Max/day'],['Sat','Heavy day'],['Sun','Rest always'],['2 days','Silent escalation']]}/><Tabs tabs={['Week plan','Approve & send','Notifications','ADHD rules']} active={tab} setActive={setTab}/>{tab==='Week plan'?<div className="day-col-grid">{adamDays.map(d=><div className={`day-col ${d.load==='rest'?'rest':''}`} key={d.day}><div className="day-col-head"><div className="day-col-name">{d.day}</div><div className="day-col-count">{d.tasks.length} item</div></div><div className="day-col-body">{d.tasks.map(t=><div className={`day-task-chip ${d.load}`} key={t}><div className="chip-name">{t}</div><div className="chip-room">{d.note}</div></div>)}</div></div>)}</div>:<div className="approval-card"><div className="approval-head"><strong>{tab}</strong><span className="status-pending">Prototype</span></div><p>Next production step: wire approval to Todoist API after Kaylee review.</p></div>}</>}
+function Vehicles(){const [car,setCar]=useState(0);const v=vehicles[car];return <><Header title="Vehicle Maintenance" sub="Corolla + Leaf tracker with critical service indicators."><button className="btn-sec">Update mileage</button></Header><div className="car-switcher">{vehicles.map((x,i)=><button key={x.name} className={`car-card-sel ${i===car?'active-'+x.color:''}`} onClick={()=>setCar(i)}><div className="car-name">{x.name}</div><div className="car-miles">{x.miles} miles</div><span className={`car-type type-${x.type.toLowerCase()}`}>{x.type}</span><div className="car-status warn">{x.status}</div></button>)}</div><Stats stats={[[v.miles,'Mileage'],[v.type,'Vehicle type'],['2','Critical'],['3','Logged items']]}/>{v.items.map(([name,status,note,s])=><div className={`maint-item ${s}`} key={name}><div className="maint-icon"><Wrench size={18}/></div><div className="maint-body"><div className="maint-name">{name}</div><div className="maint-note">{note}</div><div className="maint-meta"><span className={`status-badge sb-${s}`}>{status}</span></div></div><button className="btn-sec">Mark done</button></div>)}</>}
+function Suggestions(){const [tab,setTab]=useState('Pending');return <><Header title="Home Suggestions" sub="Tenant-only, Georgia/Canton-specific maintenance recommendations."><button className="btn-primary">Add custom</button></Header><Stats stats={[[String(suggestions.length),'Pending'],['1','Urgent'],['4','Tenant-safe'],['June','Current month']]}/><Tabs tabs={['Pending','Approved','Year calendar']} active={tab} setActive={setTab}/>{suggestions.map(s=><div className={`suggest-card ${s.urgency}`} key={s.title}><div className="suggest-head"><div className="suggest-icon"><Home size={18}/></div><div className="suggest-body"><div className="suggest-name">{s.title}</div><div className="suggest-why">{s.why}</div><div className="suggest-meta"><span className="meta-badge">{s.urgency}</span><span className="meta-badge">{s.room}</span><span className="meta-badge">{s.effort}</span></div></div><button className="btn-green">Add to my tasks</button><button className="btn-sec">Snooze</button></div></div>)}</>}
+function Calendar(){const [tab,setTab]=useState('Agenda');return <><Header title="Unified Calendar" sub="All 9 Google Calendars design port: agenda, month, and money views."><button className="btn-sec">Refresh</button></Header><div className="cal-filters">{['Kaylee','Adam','Expenses','Pay Day','Places To Be','Birthdays'].map((c,i)=><span className="cal-chip" key={c}><span className="dot" style={{background:i%2?brand.green:brand.purple}}/> {c}</span>)}</div><Stats stats={[[String(events.length),'Events shown'],['2','Payday items'],['1','Family commitment'],['Money','View ready']]}/><Tabs tabs={['Agenda','Month','Money view']} active={tab} setActive={setTab}/>{tab==='Month'?<div className="month-view"><div className="month-head">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=><div key={d}>{d}</div>)}</div><div className="month-body">{Array.from({length:35},(_,i)=><div className="month-cell" key={i}><span>{i+1<=30?i+1:''}</span>{i===18&&<em>Pay Day</em>}</div>)}</div></div>:events.map(e=><div className="evt" key={e.title}><div className="evt-bar" style={{background:e.color}}/><div className="evt-body"><div className="evt-title">{e.title}</div><div className="evt-meta"><span>{e.time}</span><span className="evt-cal-tag">{e.source}</span></div></div>{e.amount&&<div className="evt-amount">{e.amount}</div>}</div>)}</>}
+function Students(){return <><Header title="Students" sub="FERPA-safe GROW notes only. No Salesforce auto-sync."><button className="btn-primary">Add student</button></Header><Stats stats={[[String(students.length),'Students'],['0','Student IDs'],['GROW','Note model'],['Clipboard','Only movement']]}/>{students.map(s=><div className="student-card" key={s.name}><strong>{s.name}</strong><p>{s.grow}</p><button className="btn-sec" onClick={()=>navigator.clipboard?.writeText(s.grow)}>Copy to Salesforce</button></div>)}</>}
+function Placeholder({title}:{title:string}){return <><Header title={title} sub="Placeholder preserved for the next implementation sprint."/><section className="panel placeholder"><CheckCircle2/> Ready for the next build.</section></>}
 
 createRoot(document.getElementById('root')!).render(<App />);
