@@ -1,36 +1,27 @@
-# Kaylee's Hub v0.5 — Auth + Adam Permissions
+# Kaylee's Hub v0.6 - Settings + Adam Access Levels
 
-This build adds Supabase Auth, two roles, and a Settings page for controlling Adam's Home-side access.
+This build updates v0.5 authentication to use the `module_permissions` table and a three-level Adam permission system:
+
+- Hidden
+- View Only
+- Edit
 
 ## What changed
 
-- Login screen using Supabase Auth
-- Kaylee profile = `admin`
-- Adam profile = `limited`
-- Adam is Home-only and cannot access Work mode
-- Settings page for Kaylee/admin
-- Per-section Adam toggles:
-  - View: Adam can see the section
-  - Edit: Adam can change/complete/save things in that section
-- Students remain admin-only and FERPA-safe
-- Inventory save still works, but Adam is view-only unless Inventory Edit is turned on
+- Settings page now uses dropdowns instead of view/edit checkboxes.
+- Settings loads from `public.module_permissions` where `role = 'limited'`.
+- Saving a dropdown updates Supabase using `upsert`.
+- Adam's sidebar hides modules with `hidden` access.
+- View-only modules show a read-only banner and hide/disable edit controls where currently implemented.
+- Kaylee/admin still sees everything.
+- Adam is still Home-only. Students remains admin-only.
 
-## Deploy steps
+## SQL
 
-1. Upload/replace these files in GitHub.
-2. In Supabase SQL Editor, run:
-   - `supabase/v0_5_auth_schema.sql`
-3. In Supabase Auth, create users or sign up from the app:
-   - Kaylee: `kayleet.green@gmail.com` or `green.kayleet@gmail.com`
-   - Adam: `adamlamargreen@gmail.com`
-4. In Vercel, confirm env vars exist:
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
-5. Redeploy.
+You already created/populated `module_permissions`. If you need to repair or recreate it, run:
 
-## Notes
+`supabase/v0_6_module_permissions.sql`
 
-- Adam sees Home sections by default.
-- Adam's Edit toggles default off.
-- Work mode, Students, and FERPA-safe work data remain Kaylee/admin only.
-- v0.6 should tighten RLS for every home table to match the section permissions server-side.
+## Deploy
+
+Upload/replace the files in GitHub and let Vercel redeploy.

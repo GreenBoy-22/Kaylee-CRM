@@ -20,13 +20,13 @@ type Profile = {
   role: Role;
 };
 
-type SectionPermission = {
+type AccessLevel = 'hidden' | 'view' | 'edit';
+
+type ModulePermission = {
   id?: string;
-  user_key: string;
-  section_key: Page;
-  label: string;
-  can_view: boolean;
-  can_edit: boolean;
+  module_name: string;
+  role: 'limited';
+  access_level: AccessLevel;
 };
 
 type InventoryItem = {
@@ -87,14 +87,25 @@ const workNav: readonly NavEntry[] = [
   ['students', 'Students', Users]
 ];
 
-const configurableHomeSections = homeNav.filter(([id]) => id !== 'dashboard') as readonly NavEntry[];
+const moduleMeta: { page: Page; module_name: string; label: string; default_access: AccessLevel }[] = [
+  { page: 'dashboard', module_name: 'dashboard', label: 'Dashboard', default_access: 'edit' },
+  { page: 'today', module_name: 'today_tasks', label: 'Today’s Tasks', default_access: 'edit' },
+  { page: 'briefing', module_name: 'daily_briefing', label: 'Daily Briefing', default_access: 'view' },
+  { page: 'calendar', module_name: 'calendar', label: 'Calendar', default_access: 'edit' },
+  { page: 'inventory', module_name: 'inventory', label: 'Inventory', default_access: 'edit' },
+  { page: 'chores', module_name: 'chores', label: 'Chores & Tasks', default_access: 'edit' },
+  { page: 'adam', module_name: 'adam_tasks', label: 'Adam’s Tasks', default_access: 'edit' },
+  { page: 'vehicles', module_name: 'vehicles', label: 'Vehicles', default_access: 'view' },
+  { page: 'suggestions', module_name: 'home_suggestions', label: 'Home Suggestions', default_access: 'edit' },
+  { page: 'budget', module_name: 'budget', label: 'Budget', default_access: 'view' },
+  { page: 'students', module_name: 'students', label: 'Students', default_access: 'hidden' }
+];
 
-const defaultAdamPermissions: SectionPermission[] = configurableHomeSections.map(([section_key, label]) => ({
-  user_key: 'adam',
-  section_key,
-  label,
-  can_view: true,
-  can_edit: false
+const pageToModule = Object.fromEntries(moduleMeta.map((item) => [item.page, item.module_name])) as Record<string, string>;
+const defaultAdamPermissions: ModulePermission[] = moduleMeta.map((item) => ({
+  module_name: item.module_name,
+  role: 'limited',
+  access_level: item.default_access
 }));
 
 const seedInventory: InventoryItem[] = [
@@ -167,7 +178,7 @@ function App() {
   const [inventory, setInventory] = useState<InventoryItem[]>(seedInventory);
   const [students, setStudents] = useState<Student[]>(seedStudents);
   const [tasks, setTasks] = useState<TaskItem[]>(seedTasks);
-  const [permissions, setPermissions] = useState<SectionPermission[]>(defaultAdamPermissions);
+  const [permissions, setPermissions] = useState<ModulePermission[]>(defaultAdamPermissions);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('Ready.');
 
@@ -239,14 +250,14 @@ function App() {
         supabase.from('inventory_items').select('*').order('created_at', { ascending: false }),
         supabase.from('students').select('*').order('created_at', { ascending: false }),
         supabase.from('tasks').select('*').order('created_at', { ascending: false }),
-        supabase.from('section_permissions').select('*').eq('user_key', 'adam').order('section_key', { ascending: true })
+        supabase.from('module_permissions').select('*').eq('role', 'limited').order('module_name', { ascending: true })
       ]);
 
       if (!invResult.error && invResult.data) setInventory(invResult.data as InventoryItem[]);
       if (!studentResult.error && studentResult.data) setStudents(studentResult.data as Student[]);
       if (!taskResult.error && taskResult.data) setTasks(taskResult.data as TaskItem[]);
       if (!permissionResult.error && permissionResult.data && permissionResult.data.length) {
-        setPermissions(mergePermissions(permissionResult.data as SectionPermission[]));
+        setPermissions(mergePermissions(permissionResult.data as ModulePermission[]));
       }
       setMessage('Supabase data loaded.');
     } catch (error) {
@@ -256,42 +267,52 @@ function App() {
     }
   }
 
-  function mergePermissions(rows: SectionPermission[]) {
-    return defaultAdamPermissions.map((fallback) => rows.find((row) => row.section_key === fallback.section_key) || fallback);
+  function mergePermissions(rows: ModulePermission[]) {
+    return defaultAdamPermissions.map((fallback) => rows.find((row) => row.module_name === fallback.module_name) || fallback);
   }
 
   function isAdmin() {
     return profile?.role === 'admin';
   }
 
+  function moduleFor(section: Page) {
+    return pageToModule[section] || section;
+  }
+
   function permissionFor(section: Page) {
-    if (isAdmin()) return { can_view: true, can_edit: true };
-    if (section === 'dashboard') return { can_view: true, can_edit: false };
-    return permissions.find((permission) => permission.section_key === section) || { can_view: true, can_edit: false };
+    if (isAdmin()) return { access_level: 'edit' as AccessLevel };
+    if (section === 'settings') return { access_level: 'hidden' as AccessLevel };
+    if (section === 'students') return { access_level: 'hidden' as AccessLevel };
+    const module_name = moduleFor(section);
+    return permissions.find((permission) => permission.module_name === module_name) || { access_level: 'hidden' as AccessLevel };
   }
 
   function canView(section: Page) {
     if (isAdmin()) return true;
     if (mode === 'work') return false;
-    return permissionFor(section).can_view;
+    return permissionFor(section).access_level !== 'hidden';
   }
 
   function canEdit(section: Page) {
     if (isAdmin()) return true;
     if (mode === 'work') return false;
-    return permissionFor(section).can_edit;
+    return permissionFor(section).access_level === 'edit';
   }
 
-  async function updatePermission(section_key: Page, patch: Partial<SectionPermission>) {
-    const existing = permissions.find((permission) => permission.section_key === section_key);
-    if (!existing || !isAdmin()) return;
-    const next = { ...existing, ...patch };
-    setPermissions((current) => current.map((permission) => permission.section_key === section_key ? next : permission));
+  async function updatePermission(module_name: string, access_level: AccessLevel) {
+    if (!isAdmin()) return;
+    const next = { module_name, role: 'limited' as const, access_level };
+    setPermissions((current) => {
+      const exists = current.some((permission) => permission.module_name === module_name);
+      return exists
+        ? current.map((permission) => permission.module_name === module_name ? { ...permission, access_level } : permission)
+        : [...current, next];
+    });
 
     if (!supabase) return setMessage('Permission saved locally.');
     const { error } = await supabase
-      .from('section_permissions')
-      .upsert({ user_key: 'adam', section_key: section_key, label: next.label, can_view: next.can_view, can_edit: next.can_edit }, { onConflict: 'user_key,section_key' });
+      .from('module_permissions')
+      .upsert(next, { onConflict: 'module_name,role' });
     if (error) setMessage(`Permission save failed: ${error.message}`);
     else setMessage('Adam permission saved.');
   }
@@ -391,7 +412,7 @@ function App() {
           <div className="nav-label">{activeRole === 'limited' ? 'Home' : mode === 'home' ? 'Home' : 'Work'}</div>
           {navItems.map(([id, label, Icon]) => (
             <button key={id} className={`nav-item ${page === id ? 'active' : ''}`} onClick={() => setPage(id)}>
-              <Icon size={16} /><span>{label}</span>{activeRole === 'limited' && id !== 'dashboard' && !permissionFor(id).can_edit && <Lock size={13} className="nav-lock" />}
+              <Icon size={16} /><span>{label}</span>{activeRole === 'limited' && id !== 'dashboard' && permissionFor(id).access_level !== 'edit' && <Lock size={13} className="nav-lock" />}
             </button>
           ))}
           {activeRole === 'admin' && (
@@ -535,8 +556,15 @@ function Students({ students, createStudent, markCopied }: { students: Student[]
   return <><Header title="Students" sub="FERPA-safe GROW notes. First name/nickname only. Clipboard copy only."><button className="btn primary" onClick={() => setOpen(!open)}><Plus size={15} /> Add Student</button></Header>{open && <section className="panel"><h2>Add student</h2><div className="form-grid"><input placeholder="First name or nickname only" value={form.display_name} onChange={(e) => setForm({ ...form, display_name: e.target.value })} /><input placeholder="Goal" value={form.goal} onChange={(e) => setForm({ ...form, goal: e.target.value })} /><input placeholder="Risk level" value={form.risk} onChange={(e) => setForm({ ...form, risk: e.target.value })} /></div><textarea placeholder="GROW note" value={form.grow_note} onChange={(e) => setForm({ ...form, grow_note: e.target.value })} /><div className="form-actions"><button className="btn primary" onClick={submit}><Save size={15} /> Save Student</button></div></section>}<div className="grid two">{students.map((student) => <section className="panel" key={student.id}><div className="panel-head"><h2>{student.display_name}</h2><span className={`copy-pill ${student.copied ? 'done' : ''}`}>{student.copied ? 'Copied' : 'Needs copy'}</span></div><p>{student.goal}</p><textarea readOnly value={student.grow_note} /><button className="btn primary" onClick={() => markCopied(student.id, student.grow_note)}><Copy size={15} /> Copy to Salesforce</button></section>)}</div></>;
 }
 
-function SettingsPage({ permissions, updatePermission }: { permissions: SectionPermission[]; updatePermission: (section: Page, patch: Partial<SectionPermission>) => void }) {
-  return <><Header title="Settings" sub="Control Adam's Home-side access as the app grows." /><section className="panel"><h2>Adam section access</h2><p className="settings-intro">Adam never sees Work mode. For Home sections, keep View on if he can see it. Turn Edit on only when he should be able to change or complete things.</p><div className="permission-list">{permissions.map((permission) => <div className="permission-row" key={permission.section_key}><div><strong>{permission.label}</strong><p>{permission.can_view ? 'Visible to Adam' : 'Hidden from Adam'} · {permission.can_edit ? 'Editable' : 'View-only'}</p></div><label className="switch-row"><Eye size={15} /> View <input type="checkbox" checked={permission.can_view} onChange={(e) => updatePermission(permission.section_key, { can_view: e.target.checked, can_edit: e.target.checked ? permission.can_edit : false })} /></label><label className="switch-row"><Save size={15} /> Edit <input type="checkbox" checked={permission.can_edit} disabled={!permission.can_view} onChange={(e) => updatePermission(permission.section_key, { can_edit: e.target.checked })} /></label></div>)}</div></section><section className="panel"><h2>Access rules</h2><div className="brief-item"><strong>Kaylee:</strong> admin, full Home + Work access.</div><div className="brief-item"><strong>Adam:</strong> Home only. Can see sections when View is on. Can edit only when Edit is on.</div><div className="brief-item"><strong>Students:</strong> always admin-only and FERPA-safe.</div></section></>;
+function SettingsPage({ permissions, updatePermission }: { permissions: ModulePermission[]; updatePermission: (module_name: string, access_level: AccessLevel) => void }) {
+  function accessFor(module_name: string) {
+    return permissions.find((permission) => permission.module_name === module_name)?.access_level || 'hidden';
+  }
+
+  return <><Header title="Settings" sub="Control Adam's Home-side access as the app grows." /><section className="panel"><h2>Adam section access</h2><p className="settings-intro">Adam never sees Work mode or Students. For Home sections, choose Hidden, View Only, or Edit. This avoids confusing combinations like edit without view.</p><div className="permission-list">{moduleMeta.filter((item) => item.page !== 'students').map((item) => {
+    const current = accessFor(item.module_name);
+    return <div className="permission-row" key={item.module_name}><div><strong>{item.label}</strong><p>{current === 'hidden' ? 'Hidden from Adam' : current === 'view' ? 'Visible · View-only' : 'Visible · Editable'}</p></div><label className="switch-row"><Eye size={15} /> Adam Access <select value={current} onChange={(e) => updatePermission(item.module_name, e.target.value as AccessLevel)}><option value="hidden">Hidden</option><option value="view">View Only</option><option value="edit">Edit</option></select></label></div>;
+  })}</div></section><section className="panel"><h2>Access rules</h2><div className="brief-item"><strong>Kaylee:</strong> admin, full Home + Work access.</div><div className="brief-item"><strong>Adam:</strong> Home only. Hidden means no sidebar item. View Only means no add/save/edit buttons. Edit means full access.</div><div className="brief-item"><strong>Students:</strong> always admin-only and FERPA-safe.</div></section></>;
 }
 
 function Placeholder({ title, sub }: { title: string; sub: string }) {
