@@ -276,14 +276,20 @@ function Inventory({
           </div>
 
           {action === 'manual' ? (
-            <div className="form-grid">
-              <input placeholder="Item name" />
-              <input placeholder="Brand" />
-              <input placeholder="Location" />
-              <input placeholder="Category" />
-              <input placeholder="Quantity" />
-              <input placeholder="Estimated value" />
-            </div>
+           <div>
+  <div className="form-grid">
+    <input placeholder="Item name" />
+    <input placeholder="Brand" />
+    <input placeholder="Location" />
+    <input placeholder="Category" />
+    <input placeholder="Quantity" />
+    <input placeholder="Estimated value" />
+  </div>
+
+  <div className="form-actions">
+    <button className="btn primary">Save Item</button>
+  </div>
+</div>
           ) : (
             <div className="scan-row">
               <input placeholder="Scan or type barcode" />
