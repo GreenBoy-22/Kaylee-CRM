@@ -56,7 +56,7 @@ This build adds the first mentor-intelligence layer on the Work dashboard.
 - Outlook calendar integration is still a later build; Calls Today uses the manual `next_appointment_date` field for now.
 
 
-## v0.8b Student Health Engine
+## v0.8c FERPA CSV Import + Call Prep
 
 This build adds the second mentor-intelligence layer.
 
@@ -76,3 +76,19 @@ Run this once before testing the graduation goal field:
 - Health scoring is rule-based for now, not AI.
 - Outlook calendar integration is still later; appointments remain manual.
 - Salesforce remains clipboard-only.
+
+
+## v0.8c additions
+
+- Adds a FERPA-safe CSV import button on the Students page.
+- Imports the cleaned CSV format with columns such as DisplayName, CourseCode, StudentGraduationGoal, Momentum, LastAcademicActivityDate, CourseEndDate, TermRemainingCU, TermCompletedCU, LatestCourseNote.
+- Auto-populates current course, graduation goal date, momentum, course dates, CU progress, latest course note, next conversation focus, and next-call prep.
+- Skips duplicate students based on DisplayName + CurrentCourse.
+
+Run this SQL before importing:
+
+```sql
+supabase/v0_8c_csv_import.sql
+```
+
+Use the FERPA-safe CSV only. Do not import student IDs, full names, emails, phone numbers, or addresses.
