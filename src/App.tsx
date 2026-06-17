@@ -446,33 +446,63 @@ Kaylee`;
 
 
   function parseCsv(text: string) {
+    // Robust RFC 4180 CSV parser. Handles quoted fields, escaped quotes (""),
+    // and newlines (LF, CR, CRLF) both as row terminators and inside quoted fields.
     const rows: string[][] = [];
     let row: string[] = [];
     let value = '';
     let inQuotes = false;
-    for (let i = 0; i < text.length; i += 1) {
+    let i = 0;
+    while (i < text.length) {
       const char = text[i];
-      const next = text[i + 1];
-      if (char === '"' && inQuotes && next === '"') {
-        value += '"';
+      if (inQuotes) {
+        if (char === '"') {
+          if (text[i + 1] === '"') {
+            // Escaped quote inside quoted field
+            value += '"';
+            i += 2;
+            continue;
+          }
+          // End of quoted field
+          inQuotes = false;
+          i += 1;
+          continue;
+        }
+        // Any other char (including newlines and commas) is literal inside quotes
+        value += char;
         i += 1;
-      } else if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
+        continue;
+      }
+      // Not in quotes
+      if (char === '"') {
+        inQuotes = true;
+        i += 1;
+        continue;
+      }
+      if (char === ',') {
         row.push(value.trim());
         value = '';
-      } else if ((char === '\n' || char === '\r') && !inQuotes) {
-        if (char === '\r' && next === '\n') i += 1;
+        i += 1;
+        continue;
+      }
+      if (char === '\r' || char === '\n') {
+        // Handle CRLF as one terminator
+        if (char === '\r' && text[i + 1] === '\n') i += 1;
         row.push(value.trim());
         if (row.some((cell) => cell !== '')) rows.push(row);
         row = [];
         value = '';
-      } else {
-        value += char;
+        i += 1;
+        continue;
       }
+      value += char;
+      i += 1;
     }
-    row.push(value.trim());
-    if (row.some((cell) => cell !== '')) rows.push(row);
+    // Flush trailing value/row at EOF
+    if (value !== '' || row.length > 0) {
+      row.push(value.trim());
+      if (row.some((cell) => cell !== '')) rows.push(row);
+    }
     return rows;
   }
 
@@ -480,6 +510,16 @@ Kaylee`;
     if (!value) return null;
     const trimmed = value.trim();
     if (!trimmed) return null;
+    // ISO format YYYY-MM-DD passes through
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    // US format M/D/YYYY or MM/DD/YYYY -> normalize to YYYY-MM-DD
+    const us = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (us) {
+      const month = us[1].padStart(2, '0');
+      const day = us[2].padStart(2, '0');
+      return `${us[3]}-${month}-${day}`;
+    }
+    // Fallback: try Date parsing
     const date = new Date(trimmed);
     if (Number.isNaN(date.getTime())) return null;
     return date.toISOString().slice(0, 10);
