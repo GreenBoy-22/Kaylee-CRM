@@ -675,34 +675,80 @@ Kaylee`;
         };
       });
 
-    if (!cleaned.length) return setMessage('No importable students found. Make sure the CSV includes DisplayName.');
+    if (!cleaned.length) return setMessage('No importable students found. Make sure the CSV includes Name and StudentID.');
 
-    // Dedup: prefer student_id when present (most reliable); fall back to display_name + course.
-    const existingIds = new Set(students.map((s) => String(s.student_id || '').trim()).filter(Boolean));
-    const existingNameCourse = new Set(students.map((student) => `${student.display_name.toLowerCase()}|${String(student.course || '').toLowerCase()}`));
-    const newStudents = cleaned.filter((student) => {
-      const sid = String(student.student_id || '').trim();
-      if (sid && existingIds.has(sid)) return false;
-      const key = `${student.display_name.toLowerCase()}|${String(student.course || '').toLowerCase()}`;
-      if (!sid && existingNameCourse.has(key)) return false;
-      return true;
-    });
-    if (!newStudents.length) return setMessage('CSV processed, but all students already appear to exist.');
+    // Update-only mode: match by student_id. Skip any CSV row whose ID isn't already in the DB.
+    // Only update fields that come from Salesforce; preserve everything Kaylee has edited in the UI.
+    const existingById = new Map<string, Student>();
+    for (const s of students) {
+      const sid = String(s.student_id || '').trim();
+      if (sid) existingById.set(sid, s);
+    }
+
+    type UpdateRow = {
+      id: string;
+      patch: Partial<Student>;
+    };
+    const updates: UpdateRow[] = [];
+    let skippedNoId = 0;
+    let skippedNotFound = 0;
+    for (const row of cleaned) {
+      const sid = String(row.student_id || '').trim();
+      if (!sid) { skippedNoId++; continue; }
+      const match = existingById.get(sid);
+      if (!match) { skippedNotFound++; continue; }
+      // Salesforce-sourced fields ONLY. Manual fields (admin_notes, goal, status,
+      // missed_call_count, next_appointment_date, last_contact_date, next_call_prep,
+      // next_conversation_focus, constructive_note, grow_note, display_name) are preserved.
+      const patch: Partial<Student> = {
+        course: row.course || match.course,
+        risk: riskFromMomentum(row.momentum) || match.risk,
+        graduation_goal_date: row.graduation_goal_date ?? match.graduation_goal_date,
+        momentum: row.momentum || match.momentum,
+        last_academic_activity_date: row.last_academic_activity_date ?? match.last_academic_activity_date,
+        course_end_date: row.course_end_date ?? match.course_end_date,
+        term_end_date: row.term_end_date ?? match.term_end_date,
+        enrolled_cu: row.enrolled_cu ?? match.enrolled_cu,
+        term_remaining_cu: row.term_remaining_cu ?? match.term_remaining_cu,
+        term_completed_cu: row.term_completed_cu ?? match.term_completed_cu,
+        contact_term: row.contact_term ?? match.contact_term,
+        weeks_in_course: row.weeks_in_course ?? match.weeks_in_course,
+        student_timezone: row.student_timezone || match.student_timezone
+      };
+      updates.push({ id: match.id, patch });
+    }
+
+    if (!updates.length) {
+      const parts = [];
+      if (skippedNotFound) parts.push(`${skippedNotFound} student${skippedNotFound === 1 ? '' : 's'} not in system (skipped)`);
+      if (skippedNoId) parts.push(`${skippedNoId} row${skippedNoId === 1 ? '' : 's'} missing Student ID (skipped)`);
+      return setMessage(`No updates applied. ${parts.join(', ') || 'CSV had no matching rows.'}`);
+    }
 
     if (!supabase) {
-      setStudents((current) => [...newStudents.map((student) => ({ ...student, id: crypto.randomUUID() } as Student)), ...current]);
-      return setMessage(`Imported ${newStudents.length} students locally.`);
+      setStudents((current) => current.map((s) => {
+        const u = updates.find((u) => u.id === s.id);
+        return u ? { ...s, ...u.patch } : s;
+      }));
+      return setMessage(`Updated ${updates.length} students locally${skippedNotFound ? ` · ${skippedNotFound} not in system, skipped` : ''}.`);
     }
 
-    const { data, error } = await supabase.from('students').insert(newStudents).select();
-    if (error) {
-      if (error.code === '23505' || error.message.includes('students_student_id_unique')) {
-        return setMessage('CSV import failed: one or more student IDs already exist in the database.');
-      }
-      return setMessage(`CSV import failed: ${error.message}`);
+    // Apply updates in parallel (small batch, fine for ~150 students).
+    const results = await Promise.all(updates.map(async (u) => {
+      const { data, error } = await supabase.from('students').update(u.patch).eq('id', u.id).select().single();
+      return { id: u.id, data: data as Student | null, error };
+    }));
+    const errors = results.filter((r) => r.error);
+    if (errors.length === results.length) {
+      return setMessage(`CSV update failed: ${errors[0].error?.message || 'unknown error'}`);
     }
-    setStudents((current) => normalizeStudents([...(data as Student[]), ...current]));
-    setMessage(`Imported ${data?.length || newStudents.length} FERPA-safe students.`);
+    setStudents((current) => current.map((s) => {
+      const r = results.find((r) => r.id === s.id && r.data);
+      return r && r.data ? r.data : s;
+    }));
+    const skipMsg = skippedNotFound ? ` · ${skippedNotFound} not in system, skipped` : '';
+    const errMsg = errors.length ? ` · ${errors.length} failed` : '';
+    setMessage(`Updated ${results.length - errors.length} students from CSV${skipMsg}${errMsg}.`);
   }
 
   async function createStudent(student: Omit<Student, 'id' | 'copied' | 'archived'>) {
@@ -1272,7 +1318,7 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
   return <>
     <Header title="Students" sub="FERPA-safe student history, touchpoints, next-call prep, and follow-up drafts.">
       <button className="btn primary" onClick={() => setAddingStudent(!addingStudent)}><Plus size={15} /> Add Student</button>
-      <label className="btn ghost upload-button"><Upload size={15} /> {importingCsv ? 'Importing...' : 'Import FERPA CSV'}<input type="file" accept=".csv,text/csv" onChange={(e) => handleCsvUpload(e.target.files?.[0])} /></label>
+      <label className="btn ghost upload-button" title="Updates existing students from Salesforce CSV by Student ID. Does not create new students or overwrite your notes."><Upload size={15} /> {importingCsv ? 'Updating...' : 'Update from Salesforce CSV'}<input type="file" accept=".csv,text/csv" onChange={(e) => handleCsvUpload(e.target.files?.[0])} /></label>
       <button className="btn ghost" onClick={() => setShowArchived(!showArchived)}><Archive size={15} /> {showArchived ? 'Active' : 'Archived'}</button>
     </Header>
     <Stats items={[["Active", String(activeStudents.length)], ["Archived", String(archivedStudents.length)], ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived).length)], ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived).length)]]} />
