@@ -54,3 +54,25 @@ This build adds the first mentor-intelligence layer on the Work dashboard.
 - No new Supabase table is required for v0.8a.
 - This uses the existing `students` and `student_touchpoints` tables from v0.7.
 - Outlook calendar integration is still a later build; Calls Today uses the manual `next_appointment_date` field for now.
+
+
+## v0.8b Student Health Engine
+
+This build adds the second mentor-intelligence layer.
+
+### Added
+- Student Health Score on each student profile
+- Component scores: Momentum, Engagement, Risk Safety, Goal Progress
+- Ghost/support/portal-only signals included in scoring
+- Graduation Goal Date field on add/edit student
+- Student Timeline combining touchpoints, next appointment, and graduation goal
+- Health badges in the Work Dashboard priority queue
+
+### Supabase
+Run this once before testing the graduation goal field:
+- `supabase/v0_8b_student_health.sql`
+
+### Notes
+- Health scoring is rule-based for now, not AI.
+- Outlook calendar integration is still later; appointments remain manual.
+- Salesforce remains clipboard-only.

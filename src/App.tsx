@@ -55,6 +55,7 @@ type Student = {
   constructive_note: string | null;
   last_contact_date: string | null;
   next_appointment_date: string | null;
+  graduation_goal_date?: string | null;
   missed_call_count: number;
   archived: boolean;
 };
@@ -140,8 +141,8 @@ const seedInventory: InventoryItem[] = [
 ];
 
 const seedStudents: Student[] = [
-  { id: 's1', display_name: 'Andrea', course: 'D316', goal: 'Finish current study plan checkpoint', risk: 'Medium', status: 'Active', copied: false, grow_note: 'Goal: complete D316 checkpoint. Reality: already on study plan. Options: keep steady pace and use course resources. Will: send update by Friday.', admin_notes: '', next_call_prep: 'Ask about the study plan checkpoint and what resource helped most this week.', constructive_note: 'Ask one concrete pacing question before giving advice.', last_contact_date: null, next_appointment_date: null, missed_call_count: 0, archived: false },
-  { id: 's2', display_name: 'A.', course: 'Current course', goal: 'Increase weekly study time', risk: 'High', status: 'Support', copied: true, grow_note: 'Goal: get back on track. Reality: progress slowed. Options: block study time and ask for help early. Will: set aside focused study this week.', admin_notes: '', next_call_prep: 'Start with encouragement, then ask what study block worked best.', constructive_note: 'Keep questions open-ended and end with one small commitment.', last_contact_date: null, next_appointment_date: null, missed_call_count: 1, archived: false }
+  { id: 's1', display_name: 'Andrea', course: 'D316', goal: 'Finish current study plan checkpoint', risk: 'Medium', status: 'Active', copied: false, grow_note: 'Goal: complete D316 checkpoint. Reality: already on study plan. Options: keep steady pace and use course resources. Will: send update by Friday.', admin_notes: '', next_call_prep: 'Ask about the study plan checkpoint and what resource helped most this week.', constructive_note: 'Ask one concrete pacing question before giving advice.', last_contact_date: null, next_appointment_date: null, graduation_goal_date: null, missed_call_count: 0, archived: false },
+  { id: 's2', display_name: 'A.', course: 'Current course', goal: 'Increase weekly study time', risk: 'High', status: 'Support', copied: true, grow_note: 'Goal: get back on track. Reality: progress slowed. Options: block study time and ask for help early. Will: set aside focused study this week.', admin_notes: '', next_call_prep: 'Start with encouragement, then ask what study block worked best.', constructive_note: 'Keep questions open-ended and end with one small commitment.', last_contact_date: null, next_appointment_date: null, graduation_goal_date: null, missed_call_count: 1, archived: false }
 ];
 
 const seedTouchpoints: Touchpoint[] = [];
@@ -311,6 +312,7 @@ function App() {
       constructive_note: row.constructive_note || '',
       last_contact_date: row.last_contact_date || null,
       next_appointment_date: row.next_appointment_date || null,
+      graduation_goal_date: row.graduation_goal_date || null,
       missed_call_count: Number(row.missed_call_count || 0),
       archived: Boolean(row.archived)
     }));
@@ -640,6 +642,87 @@ function priorityScore(student: Student, touchpoints: Touchpoint[]) {
   return score;
 }
 
+
+function daysSince(dateValue?: string | null) {
+  if (!dateValue) return 999;
+  const value = new Date(dateValue).getTime();
+  if (Number.isNaN(value)) return 999;
+  return Math.max(0, Math.floor((Date.now() - value) / 86400000));
+}
+
+function daysUntil(dateValue?: string | null) {
+  if (!dateValue) return null;
+  const value = new Date(dateValue).getTime();
+  if (Number.isNaN(value)) return null;
+  return Math.ceil((value - Date.now()) / 86400000);
+}
+
+function riskPenalty(student: Student, touchpoints: Touchpoint[]) {
+  const signals = studentStatusSignals(student, touchpoints);
+  let penalty = 0;
+  if (String(student.risk).toLowerCase().includes('high risk')) penalty += 32;
+  else if (String(student.risk).toLowerCase().includes('high')) penalty += 22;
+  else if (String(student.risk).toLowerCase().includes('medium')) penalty += 10;
+  if (signals.isGhost) penalty += 28;
+  if (signals.isPortalOnly) penalty += 22;
+  if (signals.isSupport) penalty += 8;
+  penalty += Math.min(signals.missedCalls * 7, 24);
+  const gap = Math.min(daysSince(student.last_contact_date || signals.lastMeaningful?.touchpoint_date || signals.lastTouchpoint?.touchpoint_date), 30);
+  if (gap >= 21) penalty += 24;
+  else if (gap >= 14) penalty += 16;
+  else if (gap >= 7) penalty += 8;
+  return Math.min(100, penalty);
+}
+
+function studentHealth(student: Student, touchpoints: Touchpoint[]) {
+  const signals = studentStatusSignals(student, touchpoints);
+  const meaningfulGap = daysSince(student.last_contact_date || signals.lastMeaningful?.touchpoint_date || signals.lastTouchpoint?.touchpoint_date);
+  const momentumText = `${student.goal || ''} ${student.grow_note || ''} ${student.admin_notes || ''} ${signals.lastTouchpoint?.note || ''} ${signals.lastTouchpoint?.momentum || ''}`.toLowerCase();
+  let momentum = 62;
+  if (momentumText.includes('passed') || momentumText.includes('complete') || momentumText.includes('scheduled') || momentumText.includes('progress')) momentum += 18;
+  if (momentumText.includes('behind') || momentumText.includes('stuck') || momentumText.includes('overwhelm') || momentumText.includes('slow')) momentum -= 18;
+  if (meaningfulGap > 14) momentum -= 12;
+  let engagement = 78;
+  if (signals.isSupport) engagement += 8;
+  if (meaningfulGap <= 7) engagement += 10;
+  if (signals.missedCalls >= 1) engagement -= Math.min(signals.missedCalls * 12, 36);
+  if (signals.isGhost || signals.isPortalOnly) engagement -= 28;
+  const risk = Math.max(0, 100 - riskPenalty(student, touchpoints));
+  let goalProgress = 58;
+  const gradDays = daysUntil(student.graduation_goal_date);
+  if (gradDays !== null && gradDays <= 90 && String(student.risk).toLowerCase().includes('high')) goalProgress -= 18;
+  if (momentum >= 75) goalProgress += 12;
+  const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
+  momentum = clamp(momentum);
+  engagement = clamp(engagement);
+  goalProgress = clamp(goalProgress);
+  const overall = clamp(momentum * .3 + engagement * .3 + risk * .25 + goalProgress * .15);
+  return { overall, momentum, engagement, risk, goalProgress };
+}
+
+function healthClass(score: number) {
+  if (score >= 80) return 'good';
+  if (score >= 60) return 'medium';
+  if (score >= 40) return 'high';
+  return 'high-risk';
+}
+
+function timelineForStudent(student: Student, touchpoints: Touchpoint[]) {
+  const studentTouchpoints = touchpoints.filter((touchpoint) => touchpoint.student_id === student.id);
+  const profileEvents = [
+    student.next_appointment_date ? { id: `next-${student.id}`, date: student.next_appointment_date, title: 'Next appointment', detail: 'Manual appointment date · Outlook sync later', kind: 'appointment' } : null,
+    student.graduation_goal_date ? { id: `grad-${student.id}`, date: student.graduation_goal_date, title: 'Graduation goal date', detail: 'Student success target date', kind: 'goal' } : null
+  ].filter(Boolean) as { id: string; date: string; title: string; detail: string; kind: string }[];
+  const touchEvents = studentTouchpoints.map((touchpoint) => ({
+    id: touchpoint.id,
+    date: touchpoint.touchpoint_date,
+    title: touchpoint.touchpoint_type,
+    detail: touchpoint.note,
+    kind: 'touchpoint'
+  }));
+  return [...profileEvents, ...touchEvents].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+}
+
 function Dashboard({ mode, inventory, students, touchpoints, tasks, role, setPage }: { mode: Mode; inventory: InventoryItem[]; students: Student[]; touchpoints: Touchpoint[]; tasks: TaskItem[]; role: Role; setPage: (page: Page) => void }) {
   const expiring = inventory.filter((item) => item.expires).length;
   const pending = tasks.filter((task) => task.status === 'pending_approval').length;
@@ -670,6 +753,7 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, role, setPag
           {priorityQueue.map((student, index) => {
             const signals = studentStatusSignals(student, touchpoints);
             const score = priorityScore(student, touchpoints);
+            const health = studentHealth(student, touchpoints);
             return <button className="mentor-queue-row" key={student.id} onClick={() => setPage('students')}>
               <span className="queue-rank">{index + 1}</span>
               <div>
@@ -677,7 +761,7 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, role, setPag
                 <p>{student.course || 'No course'} · {student.status} · Last: {student.last_contact_date || signals.lastTouchpoint?.touchpoint_date || '—'}</p>
               </div>
               <span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span>
-              <small>{signals.isGhost ? 'Ghost risk' : signals.isSupport ? 'Support' : score >= 35 ? 'Watch closely' : 'Prep ready'}</small>
+              <span className={`health-pill ${healthClass(health.overall)}`}>Health {health.overall}</span><small>{signals.isGhost ? 'Ghost risk' : signals.isSupport ? 'Support' : score >= 35 ? 'Watch closely' : 'Prep ready'}</small>
             </button>;
           })}
         </section>
@@ -778,7 +862,7 @@ function Students({ students, touchpoints, createStudent, updateStudent, archive
   const [editingProfile, setEditingProfile] = useState(false);
   const [studentForm, setStudentForm] = useState({
     display_name: '', course: '', goal: '', risk: 'Medium', status: 'Active',
-    admin_notes: '', next_appointment_date: '', missed_call_count: '0'
+    admin_notes: '', next_appointment_date: '', graduation_goal_date: '', missed_call_count: '0'
   });
   const [touchForm, setTouchForm] = useState({
     touchpoint_type: 'Call to student', touchpoint_date: new Date().toISOString().slice(0, 10),
@@ -790,7 +874,7 @@ function Students({ students, touchpoints, createStudent, updateStudent, archive
   }, [showArchived, students.length]);
 
   function resetStudentForm() {
-    setStudentForm({ display_name: '', course: '', goal: '', risk: 'Medium', status: 'Active', admin_notes: '', next_appointment_date: '', missed_call_count: '0' });
+    setStudentForm({ display_name: '', course: '', goal: '', risk: 'Medium', status: 'Active', admin_notes: '', next_appointment_date: '', graduation_goal_date: '', missed_call_count: '0' });
   }
 
   function submitStudent() {
@@ -804,6 +888,7 @@ function Students({ students, touchpoints, createStudent, updateStudent, archive
       status: studentForm.status,
       admin_notes: studentForm.admin_notes,
       next_appointment_date: studentForm.next_appointment_date || null,
+      graduation_goal_date: studentForm.graduation_goal_date || null,
       missed_call_count: Number(studentForm.missed_call_count || 0),
       last_contact_date: null,
       grow_note: '',
@@ -824,6 +909,7 @@ function Students({ students, touchpoints, createStudent, updateStudent, archive
       status: selected.status || 'Active',
       admin_notes: selected.admin_notes || '',
       next_appointment_date: selected.next_appointment_date || '',
+      graduation_goal_date: selected.graduation_goal_date || '',
       missed_call_count: String(selected.missed_call_count || 0)
     });
     setEditingProfile(true);
@@ -841,6 +927,7 @@ function Students({ students, touchpoints, createStudent, updateStudent, archive
       status: studentForm.status,
       admin_notes: studentForm.admin_notes,
       next_appointment_date: studentForm.next_appointment_date || null,
+      graduation_goal_date: studentForm.graduation_goal_date || null,
       missed_call_count: Number(studentForm.missed_call_count || 0)
     });
     setEditingProfile(false);
@@ -869,19 +956,54 @@ function Students({ students, touchpoints, createStudent, updateStudent, archive
       <button className="btn ghost" onClick={() => setShowArchived(!showArchived)}><Archive size={15} /> {showArchived ? 'Active' : 'Archived'}</button>
     </Header>
     <Stats items={[["Active", String(activeStudents.length)], ["Archived", String(archivedStudents.length)], ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived).length)], ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived).length)]]} />
-    {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Course" value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
+    {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Course" value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
     <div className="students-crm-layout">
       <section className="panel student-scroll-list"><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div>{visibleStudents.length === 0 && <div className="brief-item">No students in this view yet.</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} onClick={() => setSelectedId(student.id)}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>
       {selected ? <section className="student-detail-pane">
-        <section className="panel"><div className="panel-head"><div><h2>{selected.display_name}</h2><p>{selected.course || 'No course'} · {selected.status} · {selected.risk}</p></div><div className="actions"><button className="btn ghost" onClick={startEditProfile}><Edit3 size={15} /> Edit</button>{!selected.archived && <button className="btn warning" onClick={() => archiveStudent(selected.id)}><Archive size={15} /> Archive</button>}</div></div>{activeWarnings.length > 0 && <FerpaWarning warnings={activeWarnings} />}<div className="profile-grid"><div><strong>Goal</strong><p>{selected.goal || 'No goal saved yet.'}</p></div><div><strong>Last contact</strong><p>{selected.last_contact_date || '—'}</p></div><div><strong>Next appointment</strong><p>{selected.next_appointment_date || '—'}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div></div></section>
-        {editingProfile && <section className="panel"><h2>Edit profile</h2><div className="form-grid"><input value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.map((status) => <option key={status}>{status}</option>)}</select><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></div><textarea value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} /><div className="form-actions"><button className="btn primary" onClick={saveProfileEdit}><Save size={15} /> Save Profile</button></div></section>}
+        <section className="panel"><div className="panel-head"><div><h2>{selected.display_name}</h2><p>{selected.course || 'No course'} · {selected.status} · {selected.risk}</p></div><div className="actions"><button className="btn ghost" onClick={startEditProfile}><Edit3 size={15} /> Edit</button>{!selected.archived && <button className="btn warning" onClick={() => archiveStudent(selected.id)}><Archive size={15} /> Archive</button>}</div></div>{activeWarnings.length > 0 && <FerpaWarning warnings={activeWarnings} />}<StudentHealthPanel student={selected} touchpoints={touchpoints} />
+        <div className="profile-grid"><div><strong>Goal</strong><p>{selected.goal || 'No goal saved yet.'}</p></div><div><strong>Last contact</strong><p>{selected.last_contact_date || '—'}</p></div><div><strong>Next appointment</strong><p>{selected.next_appointment_date || '—'}</p></div><div><strong>Graduation goal</strong><p>{selected.graduation_goal_date || '—'}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div></div></section>
+        {editingProfile && <section className="panel"><h2>Edit profile</h2><div className="form-grid"><input value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} /><div className="form-actions"><button className="btn primary" onClick={saveProfileEdit}><Save size={15} /> Save Profile</button></div></section>}
         <section className="panel"><h2>Admin Notes</h2><textarea value={selected.admin_notes || ''} onChange={(e) => updateStudent(selected.id, { admin_notes: e.target.value })} placeholder="Private notes for Kaylee. Keep FERPA-safe." /></section>
         <section className="panel"><div className="panel-head"><h2>Next Call Prep</h2><FileText size={17} /></div><div className="brief-item"><strong>Prepared talking points:</strong><br />{selected.next_call_prep || 'Add a touchpoint note to generate next-call prep.'}</div><div className="brief-item"><strong>Constructive coaching note for Kaylee:</strong><br />{selected.constructive_note || 'Add a touchpoint to generate a self-coaching reminder.'}</div></section>
         <section className="panel"><h2>Add Touchpoint</h2><div className="form-grid"><select value={touchForm.touchpoint_type} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_type: e.target.value })}>{touchpointTypes.map((type) => <option key={type}>{type}</option>)}</select><input type="date" value={touchForm.touchpoint_date} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_date: e.target.value })} /><input placeholder="Course" value={touchForm.course || selected.course || ''} onChange={(e) => setTouchForm({ ...touchForm, course: e.target.value })} /><input placeholder="Momentum" value={touchForm.momentum} onChange={(e) => setTouchForm({ ...touchForm, momentum: e.target.value })} /></div><textarea placeholder="What happened? What did the student say? What is the next step?" value={touchForm.note} onChange={(e) => setTouchForm({ ...touchForm, note: e.target.value })} />{ferpaWarnings(touchForm.note).length > 0 && <FerpaWarning warnings={ferpaWarnings(touchForm.note)} />}<div className="form-actions"><button className="btn primary" onClick={submitTouchpoint}><Save size={15} /> Save Touchpoint + Generate Prep</button></div></section>
+        <StudentTimeline student={selected} touchpoints={selectedTouchpoints} />
         <section className="panel"><h2>Touchpoint Log</h2>{selectedTouchpoints.length === 0 && <div className="brief-item">No touchpoints yet. Add the first call, email, text, or voicemail above.</div>}{selectedTouchpoints.map((touchpoint) => <div className="touchpoint-card" key={touchpoint.id}><div className="panel-head"><div><strong>{touchpoint.touchpoint_type}</strong><p>{touchpoint.touchpoint_date} · {touchpoint.course || selected.course || 'No course'} · {touchpoint.momentum || 'Momentum not set'}</p></div>{touchpoint.touchpoint_type.includes('Email') ? <Mail size={17} /> : touchpoint.touchpoint_type.includes('Text') ? <MessageSquare size={17} /> : <Phone size={17} />}</div><p>{touchpoint.note}</p><details><summary>Next-call prep and follow-up drafts</summary><div className="brief-item"><strong>Next call:</strong> {touchpoint.next_call_prep}</div><div className="brief-item"><strong>Kaylee coaching:</strong> {touchpoint.constructive_note}</div><textarea readOnly value={touchpoint.follow_up_email || ''} /><button className="btn primary" onClick={() => copyText(touchpoint.follow_up_email || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Email Draft</button><textarea readOnly value={touchpoint.follow_up_text || ''} /><button className="btn ghost" onClick={() => copyText(touchpoint.follow_up_text || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Text Draft</button></details></div>)}</section>
       </section> : <section className="panel"><h2>Select a student</h2><p>Add or select a student to view their profile, touchpoints, and next-call prep.</p></section>}
     </div>
   </>;
+}
+
+
+function StudentHealthPanel({ student, touchpoints }: { student: Student; touchpoints: Touchpoint[] }) {
+  const health = studentHealth(student, touchpoints);
+  const signals = studentStatusSignals(student, touchpoints);
+  const gradDays = daysUntil(student.graduation_goal_date);
+  return <section className="health-panel">
+    <div className={`health-score ${healthClass(health.overall)}`}>
+      <span>Student Health</span>
+      <strong>{health.overall}</strong>
+      <small>{signals.isGhost ? 'Ghost risk' : signals.isSupport ? 'Support active' : signals.isPortalOnly ? 'Portal-only risk' : 'Monitor weekly'}</small>
+    </div>
+    <div className="health-bars">
+      <HealthBar label="Momentum" value={health.momentum} />
+      <HealthBar label="Engagement" value={health.engagement} />
+      <HealthBar label="Risk safety" value={health.risk} />
+      <HealthBar label="Goal progress" value={health.goalProgress} />
+    </div>
+    <div className="health-insights">
+      <div><strong>Contact gap</strong><p>{daysSince(student.last_contact_date || signals.lastMeaningful?.touchpoint_date || signals.lastTouchpoint?.touchpoint_date) >= 999 ? 'No meaningful contact logged yet' : `${daysSince(student.last_contact_date || signals.lastMeaningful?.touchpoint_date || signals.lastTouchpoint?.touchpoint_date)} day(s) since contact`}</p></div>
+      <div><strong>Graduation timing</strong><p>{gradDays === null ? 'No graduation goal date yet' : gradDays >= 0 ? `${gradDays} day(s) until goal` : `${Math.abs(gradDays)} day(s) past goal`}</p></div>
+    </div>
+  </section>;
+}
+
+function HealthBar({ label, value }: { label: string; value: number }) {
+  return <div className="health-bar-row"><div><strong>{label}</strong><span>{value}/100</span></div><div className="health-bar-track"><span className={`health-bar-fill ${healthClass(value)}`} style={{ width: `${value}%` }} /></div></div>;
+}
+
+function StudentTimeline({ student, touchpoints }: { student: Student; touchpoints: Touchpoint[] }) {
+  const events = timelineForStudent(student, touchpoints).slice(0, 8);
+  return <section className="panel"><div className="panel-head"><h2>Student Timeline</h2><span className="readonly-pill"><CalendarDays size={14} /> {events.length}</span></div>{events.length === 0 && <div className="brief-item">No timeline events yet.</div>}{events.map((event) => <div className={`timeline-item ${event.kind}`} key={event.id}><div className="timeline-date">{event.date}</div><div><strong>{event.title}</strong><p>{event.detail}</p></div></div>)}</section>;
 }
 
 function FerpaWarning({ warnings }: { warnings: string[] }) {
