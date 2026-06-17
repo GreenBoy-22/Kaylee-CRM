@@ -400,3 +400,19 @@ td small { display: block; margin-top: 2px; color: var(--muted); }
   .health-panel { grid-template-columns: 1fr; }
   .timeline-item { grid-template-columns: 1fr; }
 }
+
+.upload-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.upload-button input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.focus-item {
+  border-left: 4px solid var(--purple);
+}

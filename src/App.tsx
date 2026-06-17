@@ -3,7 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import {
   Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Plus, Copy, RefreshCw, Settings, LogOut,
-  Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3
+  Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 
@@ -56,6 +56,20 @@ type Student = {
   last_contact_date: string | null;
   next_appointment_date: string | null;
   graduation_goal_date?: string | null;
+  momentum?: string | null;
+  last_academic_activity_date?: string | null;
+  course_end_date?: string | null;
+  term_end_date?: string | null;
+  enrolled_cu?: number | null;
+  term_remaining_cu?: number | null;
+  term_completed_cu?: number | null;
+  contact_term?: number | null;
+  weeks_in_course?: number | null;
+  latest_course_note?: string | null;
+  next_conversation_focus?: string | null;
+  known_blockers?: string | null;
+  preferred_contact_method?: string | null;
+  student_timezone?: string | null;
   missed_call_count: number;
   archived: boolean;
 };
@@ -313,6 +327,20 @@ function App() {
       last_contact_date: row.last_contact_date || null,
       next_appointment_date: row.next_appointment_date || null,
       graduation_goal_date: row.graduation_goal_date || null,
+      momentum: row.momentum || '',
+      last_academic_activity_date: row.last_academic_activity_date || null,
+      course_end_date: row.course_end_date || null,
+      term_end_date: row.term_end_date || null,
+      enrolled_cu: row.enrolled_cu ?? null,
+      term_remaining_cu: row.term_remaining_cu ?? null,
+      term_completed_cu: row.term_completed_cu ?? null,
+      contact_term: row.contact_term ?? null,
+      weeks_in_course: row.weeks_in_course ?? null,
+      latest_course_note: row.latest_course_note || '',
+      next_conversation_focus: row.next_conversation_focus || '',
+      known_blockers: row.known_blockers || '',
+      preferred_contact_method: row.preferred_contact_method || '',
+      student_timezone: row.student_timezone || '',
       missed_call_count: Number(row.missed_call_count || 0),
       archived: Boolean(row.archived)
     }));
@@ -413,6 +441,152 @@ Kaylee`;
     if (!supabase) return;
     const { error } = await supabase.from('inventory_items').update({ quantity: nextQty }).eq('id', id);
     if (error) setMessage(`Quantity update failed: ${error.message}`);
+  }
+
+
+  function parseCsv(text: string) {
+    const rows: string[][] = [];
+    let row: string[] = [];
+    let value = '';
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i += 1) {
+      const char = text[i];
+      const next = text[i + 1];
+      if (char === '"' && inQuotes && next === '"') {
+        value += '"';
+        i += 1;
+      } else if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        row.push(value.trim());
+        value = '';
+      } else if ((char === '\n' || char === '\r') && !inQuotes) {
+        if (char === '\r' && next === '\n') i += 1;
+        row.push(value.trim());
+        if (row.some((cell) => cell !== '')) rows.push(row);
+        row = [];
+        value = '';
+      } else {
+        value += char;
+      }
+    }
+    row.push(value.trim());
+    if (row.some((cell) => cell !== '')) rows.push(row);
+    return rows;
+  }
+
+  function csvDate(value?: string) {
+    if (!value) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const date = new Date(trimmed);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toISOString().slice(0, 10);
+  }
+
+  function csvNumber(value?: string) {
+    if (!value) return null;
+    const parsed = Number(String(value).replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function riskFromMomentum(momentum?: string) {
+    const m = String(momentum || '').toLowerCase();
+    if (m.includes('low') && !m.includes('med')) return 'High Risk';
+    if (m.includes('med low')) return 'High';
+    if (m.includes('med')) return 'Medium';
+    if (m.includes('high')) return 'Low';
+    return 'Medium';
+  }
+
+  function buildNextConversationFocus(row: Record<string, string>) {
+    const course = row.coursecode || 'current course';
+    const momentum = row.momentum || 'not set';
+    const courseEnd = row.courseenddate || '';
+    const note = row.latestcoursenote || '';
+    const pieces = [
+      `Review progress in ${course}.`,
+      courseEnd ? `Confirm the plan to complete by ${courseEnd}.` : 'Confirm the next course milestone and target date.',
+      `Check whether momentum is still ${momentum}.`
+    ];
+    if (note) pieces.push('Follow up on the latest course note and ask what support is needed next.');
+    return pieces.join(' ');
+  }
+
+  function buildImportedNextCallPrep(row: Record<string, string>) {
+    const course = row.coursecode || 'the current course';
+    const momentum = row.momentum || 'not set';
+    const lastActivity = row.lastacademicactivitydate || 'not available';
+    const termRemaining = row.termremainingcu || '';
+    const termCompleted = row.termcompletedcu || '';
+    return [
+      `Current course: ${course}.`,
+      `Momentum: ${momentum}. Last academic activity: ${lastActivity}.`,
+      termRemaining || termCompleted ? `Term CUs: ${termCompleted || '0'} completed, ${termRemaining || 'unknown'} remaining.` : '',
+      'Suggested questions: What progress did you make since our last touchpoint? What is your next measurable course action? What blocker could keep you from completing that action before our next call? What support do you need from me this week?'
+    ].filter(Boolean).join(' ');
+  }
+
+  async function importStudentsFromCsv(text: string) {
+    if (!isAdmin()) return setMessage('CSV import is admin-only.');
+    const rows = parseCsv(text);
+    if (rows.length < 2) return setMessage('No student rows found in CSV.');
+    const headers = rows[0].map((header) => header.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
+    const records = rows.slice(1).map((cells) => Object.fromEntries(headers.map((header, index) => [header, cells[index] || ''])));
+
+    const cleaned = records
+      .filter((row) => row.displayname)
+      .map((row) => {
+        const course = row.coursecode || '';
+        const latestNote = row.latestcoursenote || '';
+        return {
+          display_name: row.displayname,
+          course,
+          goal: course ? `Progress steadily through ${course}.` : 'Progress steadily toward current course goal.',
+          risk: riskFromMomentum(row.momentum),
+          status: 'Active',
+          copied: false,
+          grow_note: '',
+          admin_notes: latestNote ? `Latest course note: ${latestNote}` : '',
+          next_call_prep: buildImportedNextCallPrep(row),
+          constructive_note: 'Use GROW: confirm the goal, clarify current reality, offer options, and end with one measurable commitment.',
+          last_contact_date: null,
+          next_appointment_date: null,
+          graduation_goal_date: csvDate(row.studentgraduationgoal),
+          missed_call_count: 0,
+          archived: false,
+          momentum: row.momentum || '',
+          last_academic_activity_date: csvDate(row.lastacademicactivitydate),
+          course_end_date: csvDate(row.courseenddate),
+          term_end_date: csvDate(row.termenddate),
+          enrolled_cu: csvNumber(row.enrolledcu),
+          term_remaining_cu: csvNumber(row.termremainingcu),
+          term_completed_cu: csvNumber(row.termcompletedcu),
+          contact_term: csvNumber(row.contactterm),
+          weeks_in_course: csvNumber(row.weeksincourse),
+          latest_course_note: latestNote,
+          next_conversation_focus: buildNextConversationFocus(row),
+          known_blockers: '',
+          preferred_contact_method: '',
+          student_timezone: row.timezone || ''
+        };
+      });
+
+    if (!cleaned.length) return setMessage('No importable students found. Make sure the CSV includes DisplayName.');
+
+    const existingKeys = new Set(students.map((student) => `${student.display_name.toLowerCase()}|${String(student.course || '').toLowerCase()}`));
+    const newStudents = cleaned.filter((student) => !existingKeys.has(`${student.display_name.toLowerCase()}|${String(student.course || '').toLowerCase()}`));
+    if (!newStudents.length) return setMessage('CSV processed, but all students already appear to exist.');
+
+    if (!supabase) {
+      setStudents((current) => [...newStudents.map((student) => ({ ...student, id: crypto.randomUUID() } as Student)), ...current]);
+      return setMessage(`Imported ${newStudents.length} students locally.`);
+    }
+
+    const { data, error } = await supabase.from('students').insert(newStudents).select();
+    if (error) return setMessage(`CSV import failed: ${error.message}`);
+    setStudents((current) => normalizeStudents([...(data as Student[]), ...current]));
+    setMessage(`Imported ${data?.length || newStudents.length} FERPA-safe students.`);
   }
 
   async function createStudent(student: Omit<Student, 'id' | 'copied' | 'archived'>) {
@@ -556,7 +730,7 @@ Kaylee`;
           {page === 'adam' && <Adam editable={canEdit('adam')} />}
           {page === 'vehicles' && <Vehicles />}
           {page === 'suggestions' && <Suggestions editable={canEdit('suggestions')} />}
-          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} />}
+          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} />}
           {page === 'settings' && activeRole === 'admin' && <SettingsPage permissions={permissions} updatePermission={updatePermission} />}
         </main>
       </div>
@@ -841,9 +1015,10 @@ const touchpointTypes = [
 const riskLevels = ['Low', 'Medium', 'High', 'High Risk'];
 const studentStatuses = ['Active', 'Support', 'Ghost', 'Portal-only', 'Archived'];
 
-function Students({ students, touchpoints, createStudent, updateStudent, archiveStudent, createTouchpoint, copyText, ferpaWarnings }: {
+function Students({ students, touchpoints, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, createTouchpoint, copyText, ferpaWarnings }: {
   students: Student[];
   touchpoints: Touchpoint[];
+  importStudentsFromCsv: (text: string) => Promise<void>;
   createStudent: (student: Omit<Student, 'id' | 'copied' | 'archived'>) => void;
   updateStudent: (id: string, patch: Partial<Student>) => void;
   archiveStudent: (id: string) => void;
@@ -859,6 +1034,7 @@ function Students({ students, touchpoints, createStudent, updateStudent, archive
   const selected = students.find((student) => student.id === selectedId) || visibleStudents[0] || students[0];
   const selectedTouchpoints = selected ? touchpoints.filter((touchpoint) => touchpoint.student_id === selected.id) : [];
   const [addingStudent, setAddingStudent] = useState(false);
+  const [importingCsv, setImportingCsv] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [studentForm, setStudentForm] = useState({
     display_name: '', course: '', goal: '', risk: 'Medium', status: 'Active',
@@ -948,11 +1124,24 @@ function Students({ students, touchpoints, createStudent, updateStudent, archive
     setTouchForm({ touchpoint_type: 'Call to student', touchpoint_date: new Date().toISOString().slice(0, 10), course: selected.course || '', momentum: '', note: '' });
   }
 
+
+  async function handleCsvUpload(file?: File) {
+    if (!file) return;
+    setImportingCsv(true);
+    try {
+      const text = await file.text();
+      await importStudentsFromCsv(text);
+    } finally {
+      setImportingCsv(false);
+    }
+  }
+
   const activeWarnings = selected ? ferpaWarnings(`${selected.display_name} ${selected.goal} ${selected.admin_notes || ''}`) : [];
 
   return <>
     <Header title="Students" sub="FERPA-safe student history, touchpoints, next-call prep, and follow-up drafts.">
       <button className="btn primary" onClick={() => setAddingStudent(!addingStudent)}><Plus size={15} /> Add Student</button>
+      <label className="btn ghost upload-button"><Upload size={15} /> {importingCsv ? 'Importing...' : 'Import FERPA CSV'}<input type="file" accept=".csv,text/csv" onChange={(e) => handleCsvUpload(e.target.files?.[0])} /></label>
       <button className="btn ghost" onClick={() => setShowArchived(!showArchived)}><Archive size={15} /> {showArchived ? 'Active' : 'Archived'}</button>
     </Header>
     <Stats items={[["Active", String(activeStudents.length)], ["Archived", String(archivedStudents.length)], ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived).length)], ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived).length)]]} />
@@ -961,10 +1150,10 @@ function Students({ students, touchpoints, createStudent, updateStudent, archive
       <section className="panel student-scroll-list"><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div>{visibleStudents.length === 0 && <div className="brief-item">No students in this view yet.</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} onClick={() => setSelectedId(student.id)}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>
       {selected ? <section className="student-detail-pane">
         <section className="panel"><div className="panel-head"><div><h2>{selected.display_name}</h2><p>{selected.course || 'No course'} · {selected.status} · {selected.risk}</p></div><div className="actions"><button className="btn ghost" onClick={startEditProfile}><Edit3 size={15} /> Edit</button>{!selected.archived && <button className="btn warning" onClick={() => archiveStudent(selected.id)}><Archive size={15} /> Archive</button>}</div></div>{activeWarnings.length > 0 && <FerpaWarning warnings={activeWarnings} />}<StudentHealthPanel student={selected} touchpoints={touchpoints} />
-        <div className="profile-grid"><div><strong>Goal</strong><p>{selected.goal || 'No goal saved yet.'}</p></div><div><strong>Last contact</strong><p>{selected.last_contact_date || '—'}</p></div><div><strong>Next appointment</strong><p>{selected.next_appointment_date || '—'}</p></div><div><strong>Graduation goal</strong><p>{selected.graduation_goal_date || '—'}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div></div></section>
+        <div className="profile-grid"><div><strong>Goal</strong><p>{selected.goal || 'No goal saved yet.'}</p></div><div><strong>Last contact</strong><p>{selected.last_contact_date || '—'}</p></div><div><strong>Next appointment</strong><p>{selected.next_appointment_date || '—'}</p></div><div><strong>Graduation goal</strong><p>{selected.graduation_goal_date || '—'}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Last academic activity</strong><p>{selected.last_academic_activity_date || '—'}</p></div><div><strong>Course end date</strong><p>{selected.course_end_date || '—'}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
         {editingProfile && <section className="panel"><h2>Edit profile</h2><div className="form-grid"><input value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} /><div className="form-actions"><button className="btn primary" onClick={saveProfileEdit}><Save size={15} /> Save Profile</button></div></section>}
         <section className="panel"><h2>Admin Notes</h2><textarea value={selected.admin_notes || ''} onChange={(e) => updateStudent(selected.id, { admin_notes: e.target.value })} placeholder="Private notes for Kaylee. Keep FERPA-safe." /></section>
-        <section className="panel"><div className="panel-head"><h2>Next Call Prep</h2><FileText size={17} /></div><div className="brief-item"><strong>Prepared talking points:</strong><br />{selected.next_call_prep || 'Add a touchpoint note to generate next-call prep.'}</div><div className="brief-item"><strong>Constructive coaching note for Kaylee:</strong><br />{selected.constructive_note || 'Add a touchpoint to generate a self-coaching reminder.'}</div></section>
+        <section className="panel"><div className="panel-head"><h2>Next Call Prep</h2><FileText size={17} /></div><div className="brief-item focus-item"><strong>Next conversation focus:</strong><br />{selected.next_conversation_focus || 'Set a next conversation focus after your next touchpoint.'}</div><div className="brief-item"><strong>Prepared talking points:</strong><br />{selected.next_call_prep || 'Add a touchpoint note to generate next-call prep.'}</div><div className="brief-item"><strong>Latest course note:</strong><br />{selected.latest_course_note || 'No imported course note yet.'}</div><div className="brief-item"><strong>Constructive coaching note for Kaylee:</strong><br />{selected.constructive_note || 'Add a touchpoint to generate a self-coaching reminder.'}</div></section>
         <section className="panel"><h2>Add Touchpoint</h2><div className="form-grid"><select value={touchForm.touchpoint_type} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_type: e.target.value })}>{touchpointTypes.map((type) => <option key={type}>{type}</option>)}</select><input type="date" value={touchForm.touchpoint_date} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_date: e.target.value })} /><input placeholder="Course" value={touchForm.course || selected.course || ''} onChange={(e) => setTouchForm({ ...touchForm, course: e.target.value })} /><input placeholder="Momentum" value={touchForm.momentum} onChange={(e) => setTouchForm({ ...touchForm, momentum: e.target.value })} /></div><textarea placeholder="What happened? What did the student say? What is the next step?" value={touchForm.note} onChange={(e) => setTouchForm({ ...touchForm, note: e.target.value })} />{ferpaWarnings(touchForm.note).length > 0 && <FerpaWarning warnings={ferpaWarnings(touchForm.note)} />}<div className="form-actions"><button className="btn primary" onClick={submitTouchpoint}><Save size={15} /> Save Touchpoint + Generate Prep</button></div></section>
         <StudentTimeline student={selected} touchpoints={selectedTouchpoints} />
         <section className="panel"><h2>Touchpoint Log</h2>{selectedTouchpoints.length === 0 && <div className="brief-item">No touchpoints yet. Add the first call, email, text, or voicemail above.</div>}{selectedTouchpoints.map((touchpoint) => <div className="touchpoint-card" key={touchpoint.id}><div className="panel-head"><div><strong>{touchpoint.touchpoint_type}</strong><p>{touchpoint.touchpoint_date} · {touchpoint.course || selected.course || 'No course'} · {touchpoint.momentum || 'Momentum not set'}</p></div>{touchpoint.touchpoint_type.includes('Email') ? <Mail size={17} /> : touchpoint.touchpoint_type.includes('Text') ? <MessageSquare size={17} /> : <Phone size={17} />}</div><p>{touchpoint.note}</p><details><summary>Next-call prep and follow-up drafts</summary><div className="brief-item"><strong>Next call:</strong> {touchpoint.next_call_prep}</div><div className="brief-item"><strong>Kaylee coaching:</strong> {touchpoint.constructive_note}</div><textarea readOnly value={touchpoint.follow_up_email || ''} /><button className="btn primary" onClick={() => copyText(touchpoint.follow_up_email || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Email Draft</button><textarea readOnly value={touchpoint.follow_up_text || ''} /><button className="btn ghost" onClick={() => copyText(touchpoint.follow_up_text || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Text Draft</button></details></div>)}</section>
