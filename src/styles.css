@@ -426,3 +426,8 @@ td small {
     padding: 12px;
   }
 }
+.form-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
