@@ -3,7 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import {
   Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Plus, Copy, RefreshCw, Settings, LogOut,
-  Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload
+  Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 
@@ -347,24 +347,78 @@ function App() {
     }));
   }
 
-  function generateStudentSupport(note: string, course?: string | null, momentum?: string | null) {
+  function generateStudentSupport(
+    note: string,
+    course?: string | null,
+    momentum?: string | null,
+    student?: Student | null,
+    pastTouchpoints?: Touchpoint[]
+  ) {
     const lower = note.toLowerCase();
-    const courseText = course ? ` in ${course}` : '';
-    const next_call_prep = [
-      `Check progress${courseText} and ask what changed since the last touchpoint.`,
-      momentum ? `Confirm whether momentum is still ${momentum.toLowerCase()} and what support would make next week easier.` : 'Ask the student to name one realistic study block before the next call.',
-      lower.includes('assessment') || lower.includes('oa') || lower.includes('pa') ? 'Ask what is left before the assessment and whether pacing or confidence is the blocker.' : 'Ask what the next measurable course action is.'
-    ].join(' ');
-    const constructive_note = lower.includes('behind') || lower.includes('miss') || lower.includes('ghost')
-      ? 'Lead with empathy, then ask for a specific commitment and confirm the next appointment before ending the call.'
-      : 'Ask one clarifying question before offering resources; keep the next step small and specific.';
+    const courseText = course ? course : (student?.course || 'their current course');
+    const m = (momentum || student?.momentum || '').toLowerCase();
+    const missedCount = Number(student?.missed_call_count || 0);
+    const courseEnd = student?.course_end_date || '';
+    const gradGoal = student?.graduation_goal_date || '';
+    const lastActivity = student?.last_academic_activity_date || '';
+
+    // Pull recent touchpoint history (most recent 3, excluding this note)
+    const recent = (pastTouchpoints || []).slice(0, 3);
+    const recentSummary = recent.map((t) => `${t.touchpoint_date} (${t.touchpoint_type}): ${(t.note || '').slice(0, 140)}`).filter(Boolean);
+
+    // Theme detection from current + past notes
+    const allText = [note, ...recent.map((t) => t.note || '')].join(' ').toLowerCase();
+    const hasAssessment = /\b(assessment|oa\b|pa\b|exam|test|proctored)/.test(allText);
+    const hasZyBooks = /\bzy ?books?|labs?\b/.test(allText);
+    const hasBlocked = /\b(block|stuck|behind|struggl|overwhelm|hard time|confus|fail)/.test(allText);
+    const hasLife = /\b(work|job|family|kid|sick|health|move|moving|loss|funeral|childcare)/.test(allText);
+    const hasGhost = missedCount >= 2 || /\b(no answer|voicemail|no reply|no response|haven.?t heard)/.test(allText);
+    const isLowMomentum = m.includes('low');
+    const isHighMomentum = m.includes('high') && !m.includes('low');
+
+    // ===== Talking points: things to definitely curate / dig into =====
+    const talkingPoints: string[] = [];
+    talkingPoints.push(`Open with a specific reference to last contact${recent[0] ? ` (${recent[0].touchpoint_date}, ${recent[0].touchpoint_type})` : ''} so the student knows you remember.`);
+    if (hasAssessment) talkingPoints.push(`Curate from past notes any assessment chatter — confirm which OA/PA is up next in ${courseText} and whether they have a scheduled date.`);
+    if (hasZyBooks) talkingPoints.push(`Follow up on ZyBooks participation and labs — ask which module they are on and what percent complete.`);
+    if (hasBlocked) talkingPoints.push(`Past notes show a blocker theme — gently surface it: "Last time you mentioned ___; how is that piece going now?"`);
+    if (hasLife) talkingPoints.push(`Past notes flagged a life circumstance — acknowledge it briefly without prying, then ask how it is affecting study time this week.`);
+    if (courseEnd) talkingPoints.push(`Course end date is ${courseEnd} — calculate weeks remaining out loud and confirm pacing is realistic.`);
+    if (gradGoal) talkingPoints.push(`Graduation goal is ${gradGoal} — tie this week's action back to that target.`);
+    if (lastActivity) talkingPoints.push(`Most recent academic activity was ${lastActivity} — ask what they have done in the course since then.`);
+    if (isLowMomentum) talkingPoints.push(`Momentum is low — ask what one small win this week would look like. Avoid overwhelming with multiple goals.`);
+    if (isHighMomentum) talkingPoints.push(`Momentum is high — celebrate it explicitly and ask what is fueling the rhythm so you can help protect it.`);
+    if (hasGhost) talkingPoints.push(`Multiple missed touches — lead with "I have been trying to reach you because I care about your progress, not to chase you." Then confirm best contact method and time.`);
+    if (recentSummary.length) talkingPoints.push(`Recent notes for cross-reference: ${recentSummary.join(' | ')}`);
+
+    const next_call_prep = '• ' + talkingPoints.join('\n• ');
+
+    // ===== Coaching questions for Kaylee (specific, GROW-aligned) =====
+    const coachQuestions: string[] = [];
+    coachQuestions.push(`Goal — "What do you most want to walk away from today's call with?"`);
+    coachQuestions.push(`Reality — "On a scale of 1-10, where are you with ${courseText} this week, and what makes it that number?"`);
+    if (hasBlocked || isLowMomentum) {
+      coachQuestions.push(`Reality — "What is the one thing that has been hardest to make progress on lately?"`);
+      coachQuestions.push(`Options — "What have you already tried, and what is one thing you haven't tried yet?"`);
+    } else {
+      coachQuestions.push(`Options — "What are two or three different ways you could get to your next milestone?"`);
+    }
+    if (hasAssessment) coachQuestions.push(`Options — "If we mapped your study time backward from your assessment date, what does each week need to look like?"`);
+    if (hasLife) coachQuestions.push(`Reality — "How is your study time fitting around what is going on outside of school right now?"`);
+    coachQuestions.push(`Will — "By our next call, what is the ONE specific thing you will have completed, and what day?"`);
+    coachQuestions.push(`Will — "What could get in the way of that, and what is your plan if it does?"`);
+    coachQuestions.push(`Self-check for Kaylee: did I ask before I offered? Did I end with a commitment in the student's own words?`);
+
+    const constructive_note = '• ' + coachQuestions.join('\n• ');
+
     const follow_up_email = `Hi {first_name},
 
-Thank you for connecting with me. Based on our last touchpoint, the next best step is to focus on one specific course action before our next check-in. Please reply with what you plan to complete next and what support you need from me.
+Thank you for connecting with me${recent[0] ? ` on ${recent[0].touchpoint_date}` : ''}. Based on our conversation, the next best step is to focus on one specific course action in ${courseText} before our next check-in${courseEnd ? ` (course end ${courseEnd})` : ''}. Please reply with what you plan to complete next and what support you need from me.
 
 Best,
 Kaylee`;
-    const follow_up_text = `Hi {first_name}, this is Kaylee checking in. Before our next call, what is the one course task you plan to complete next?`;
+    const follow_up_text = `Hi {first_name}, this is Kaylee checking in. Before our next call, what is the one ${courseText} task you plan to complete next?`;
+
     return { next_call_prep, constructive_note, follow_up_email, follow_up_text };
   }
 
@@ -678,12 +732,13 @@ Kaylee`;
 
   async function createTouchpoint(input: Omit<Touchpoint, 'id' | 'next_call_prep' | 'constructive_note' | 'follow_up_email' | 'follow_up_text' | 'copied'>) {
     if (!isAdmin()) return setMessage('Touchpoint logs are admin-only.');
-    const generated = generateStudentSupport(input.note, input.course, input.momentum);
+    const student = students.find((s) => s.id === input.student_id);
+    const pastForStudent = touchpoints.filter((t) => t.student_id === input.student_id);
+    const generated = generateStudentSupport(input.note, input.course, input.momentum, student, pastForStudent);
     const touchpoint: Touchpoint = { ...input, ...generated, copied: false, id: crypto.randomUUID() };
     setTouchpoints((current) => [touchpoint, ...current]);
 
     const isMissed = input.touchpoint_type.toLowerCase().includes('missed') || input.touchpoint_type.toLowerCase().includes('no-show');
-    const student = students.find((s) => s.id === input.student_id);
     const missed_call_count = isMissed ? Number(student?.missed_call_count || 0) + 1 : Number(student?.missed_call_count || 0);
     const status = missed_call_count >= 3 ? 'Ghost' : student?.status || 'Active';
     await updateStudent(input.student_id, {
@@ -1091,7 +1146,18 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
   const activeStudents = students.filter((student) => !student.archived);
   const archivedStudents = students.filter((student) => student.archived);
   const [showArchived, setShowArchived] = useState(false);
-  const visibleStudents = showArchived ? archivedStudents : activeStudents;
+  const [search, setSearch] = useState('');
+  const baseList = showArchived ? archivedStudents : activeStudents;
+  const visibleStudents = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const filtered = q
+      ? baseList.filter((s) =>
+          s.display_name.toLowerCase().includes(q) ||
+          String(s.student_id || '').toLowerCase().includes(q)
+        )
+      : baseList;
+    return [...filtered].sort((a, b) => a.display_name.localeCompare(b.display_name, undefined, { sensitivity: 'base' }));
+  }, [baseList, search]);
   const [selectedId, setSelectedId] = useState(visibleStudents[0]?.id || students[0]?.id || '');
   const selected = students.find((student) => student.id === selectedId) || visibleStudents[0] || students[0];
   const selectedTouchpoints = selected ? touchpoints.filter((touchpoint) => touchpoint.student_id === selected.id) : [];
@@ -1212,7 +1278,7 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
     <Stats items={[["Active", String(activeStudents.length)], ["Archived", String(archivedStudents.length)], ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived).length)], ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived).length)]]} />
     {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input placeholder="Course" value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
     <div className="students-crm-layout">
-      <section className="panel student-scroll-list"><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div>{visibleStudents.length === 0 && <div className="brief-item">No students in this view yet.</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} onClick={() => setSelectedId(student.id)}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>
+      <section className="panel student-scroll-list"><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div><div className="student-search-row"><Search size={15} /><input type="text" placeholder="Search by name or ID" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search students" /></div>{visibleStudents.length === 0 && <div className="brief-item">{search ? 'No students match that search.' : 'No students in this view yet.'}</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} onClick={() => setSelectedId(student.id)}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>
       {selected ? <section className="student-detail-pane">
         {/* TOP ZONE: header + health + quick facts + next call prep — always visible without scrolling */}
         <section className="panel student-top-zone">
@@ -1284,8 +1350,71 @@ function HealthBar({ label, value }: { label: string; value: number }) {
 }
 
 function StudentTimeline({ student, touchpoints }: { student: Student; touchpoints: Touchpoint[] }) {
-  const events = timelineForStudent(student, touchpoints).slice(0, 8);
-  return <section className="panel"><div className="panel-head"><h2>Student Timeline</h2><span className="readonly-pill"><CalendarDays size={14} /> {events.length}</span></div>{events.length === 0 && <div className="brief-item">No timeline events yet.</div>}{events.map((event) => <div className={`timeline-item ${event.kind}`} key={event.id}><div className="timeline-date">{event.date}</div><div><strong>{event.title}</strong><p>{event.detail}</p></div></div>)}</section>;
+  const events = timelineForStudent(student, touchpoints).slice(0, 12);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const touchpointDates = new Set(touchpoints.map((t) => t.touchpoint_date).filter(Boolean));
+  return <section className="panel">
+    <div className="panel-head">
+      <h2>Student Timeline</h2>
+      <button className="readonly-pill timeline-cal-btn" onClick={() => setCalendarOpen(!calendarOpen)} aria-expanded={calendarOpen}>
+        <CalendarDays size={14} /> {touchpointDates.size} touchpoint{touchpointDates.size === 1 ? '' : 's'}
+      </button>
+    </div>
+    {calendarOpen && <TouchpointCalendar dates={touchpointDates} />}
+    {events.length === 0 && <div className="brief-item">No timeline events yet.</div>}
+    {events.map((event) => <details className={`timeline-item-collapsible ${event.kind}`} key={event.id}>
+      <summary><span className="timeline-date">{event.date}</span> <strong>{event.title}</strong></summary>
+      <p>{event.detail}</p>
+    </details>)}
+  </section>;
+}
+
+function TouchpointCalendar({ dates }: { dates: Set<string> }) {
+  // Determine the latest touchpoint to anchor the calendar view; default to today.
+  const sorted = [...dates].sort();
+  const initialMonth = (() => {
+    const last = sorted[sorted.length - 1];
+    const d = last ? new Date(last + 'T00:00:00') : new Date();
+    return { year: d.getFullYear(), month: d.getMonth() };
+  })();
+  const [view, setView] = useState(initialMonth);
+
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const firstDay = new Date(view.year, view.month, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(view.year, view.month + 1, 0).getDate();
+
+  function shift(delta: number) {
+    let m = view.month + delta;
+    let y = view.year;
+    if (m < 0) { m = 11; y -= 1; }
+    if (m > 11) { m = 0; y += 1; }
+    setView({ year: y, month: m });
+  }
+
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const monthKey = `${view.year}-${String(view.month + 1).padStart(2, '0')}`;
+
+  return <div className="touchpoint-calendar">
+    <div className="touchpoint-calendar-head">
+      <button type="button" onClick={() => shift(-1)} aria-label="Previous month">‹</button>
+      <strong>{monthNames[view.month]} {view.year}</strong>
+      <button type="button" onClick={() => shift(1)} aria-label="Next month">›</button>
+    </div>
+    <div className="touchpoint-calendar-grid">
+      {['S','M','T','W','T','F','S'].map((d, i) => <span key={`hdr-${i}`} className="touchpoint-calendar-dow">{d}</span>)}
+      {cells.map((d, i) => {
+        if (d === null) return <span key={`empty-${i}`} className="touchpoint-calendar-cell empty" />;
+        const iso = `${monthKey}-${String(d).padStart(2, '0')}`;
+        const hit = dates.has(iso);
+        return <span key={iso} className={`touchpoint-calendar-cell ${hit ? 'has-touchpoint' : ''}`} title={hit ? `Touchpoint on ${iso}` : iso}>{d}</span>;
+      })}
+    </div>
+    <p className="touchpoint-calendar-legend"><span className="touchpoint-calendar-dot" /> Day with a logged touchpoint</p>
+  </div>;
 }
 
 function FerpaWarning({ warnings }: { warnings: string[] }) {

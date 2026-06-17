@@ -515,3 +515,192 @@ td small { display: block; margin-top: 2px; color: var(--muted); }
     grid-column: span 2;
   }
 }
+
+/* v0.11 Search box, collapsible timeline, touchpoint calendar */
+
+.student-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f7f7fa;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  color: var(--muted);
+}
+
+.student-search-row input {
+  border: none;
+  background: transparent;
+  padding: 0;
+  height: auto;
+  flex: 1;
+  outline: none;
+}
+
+.student-search-row input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Collapsible timeline items */
+
+.timeline-item-collapsible {
+  border-left: 4px solid var(--purple);
+  background: #f7f7fa;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.timeline-item-collapsible.appointment { border-left-color: var(--green); }
+.timeline-item-collapsible.goal { border-left-color: var(--amber); }
+
+.timeline-item-collapsible summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.timeline-item-collapsible summary::-webkit-details-marker {
+  display: none;
+}
+
+.timeline-item-collapsible summary::before {
+  content: '▸';
+  color: var(--muted);
+  font-size: 11px;
+  transition: transform .15s ease;
+}
+
+.timeline-item-collapsible[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.timeline-item-collapsible .timeline-date {
+  color: var(--purple-dark);
+  font-weight: 700;
+  font-size: 13px;
+  min-width: 100px;
+}
+
+.timeline-item-collapsible p {
+  margin: 8px 0 0 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Touchpoint calendar */
+
+.timeline-cal-btn {
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: border-color .15s ease;
+}
+
+.timeline-cal-btn:hover {
+  border-color: var(--purple);
+  color: var(--purple-dark);
+}
+
+.touchpoint-calendar {
+  background: #f7f7fa;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 10px 0 14px;
+  max-width: 320px;
+}
+
+.touchpoint-calendar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.touchpoint-calendar-head strong {
+  font-size: 13px;
+}
+
+.touchpoint-calendar-head button {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: white;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.touchpoint-calendar-head button:hover {
+  border-color: var(--purple);
+  color: var(--purple-dark);
+}
+
+.touchpoint-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+
+.touchpoint-calendar-dow {
+  font-size: 10px;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 4px 0;
+}
+
+.touchpoint-calendar-cell {
+  aspect-ratio: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: #aaa;
+  border-radius: 4px;
+}
+
+.touchpoint-calendar-cell.empty {
+  visibility: hidden;
+}
+
+.touchpoint-calendar-cell.has-touchpoint {
+  background: var(--purple);
+  color: white;
+  font-weight: 600;
+}
+
+.touchpoint-calendar-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.touchpoint-calendar-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--purple);
+  border-radius: 2px;
+  display: inline-block;
+}
+
+/* Make next-call-prep render bullet-by-line so it's scannable */
+.next-call-compact .brief-item,
+.touchpoint-card .brief-item {
+  white-space: pre-line;
+}
