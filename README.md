@@ -1,39 +1,47 @@
-# Kaylee's Hub
+# Kaylee's Hub v0.3
 
-Version 0.2 rebuild: Claude-style UI port.
+Dual-mode personal CRM + household management app for Kaylee and Adam Green.
 
-## What changed
+## What changed in v0.3
 
-- Reworked the app shell to match the Claude artifact style: topbar, Home/Work toggle, 200px sidebar, grouped nav, card-based modules.
-- Added styled prototype pages for Inventory, Chores & Tasks, Adam's Tasks, Vehicles, Home Suggestions, Calendar, Today's Tasks, Daily Briefing, and Students.
-- Preserved the non-negotiables: Adam limited/approval-first workflow, Sunday rest, tenant-only home suggestions, and FERPA-safe student notes.
+- Reworked the app into one unified Claude-style shell.
+- Every module now loads inside the same topbar/sidebar layout.
+- Added responsive mobile sidebar behavior.
+- Added the Students MVP page with FERPA-safe GROW note layout.
+- Expanded Today's Tasks, Daily Briefing, Calendar, Budget, Inventory, Chores, Adam's Tasks, Vehicles, and Home Suggestions pages.
+- Kept Adam's rules visible: max 2–3 tasks/day, Saturday heavy day, Sunday rest, Kaylee approval before Todoist.
 
-## Vercel settings
+## Deploy settings for Vercel
 
 Framework preset: Vite
-Build command: `npm run build`
-Output directory: `dist`
-Install command: `npm install`
 
-## Environment variables
-
-Optional until live Supabase reads/writes are connected:
+Build command:
 
 ```bash
-VITE_SUPABASE_URL=
-VITE_SUPABASE_ANON_KEY=
+npm run build
 ```
 
-## Local run
+Output directory:
+
+```bash
+dist
+```
+
+Install command:
 
 ```bash
 npm install
-npm run dev
 ```
 
-## Next build candidates
+## Environment variables
 
-1. Wire Inventory to Supabase CRUD.
-2. Add real barcode lookup proxy.
-3. Wire Vehicles/Home Suggestions to Supabase.
-4. Add auth and role-based routing for Kaylee vs. Adam.
+```bash
+VITE_SUPABASE_URL=your_supabase_project_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
+The current build uses seeded/mock data in React. Supabase is scaffolded but not yet required for the UI to load.
+
+## Next recommended build
+
+v0.4 should connect the Students MVP to Supabase and add real CRUD for FERPA-safe student records and GROW session notes.
