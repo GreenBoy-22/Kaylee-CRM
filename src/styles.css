@@ -223,3 +223,71 @@ td small { display: block; margin-top: 2px; color: var(--muted); }
     grid-template-columns: 1fr 1fr;
   }
 }
+
+.mentor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, .9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.mentor-action-panel {
+  min-height: 260px;
+}
+
+.mentor-queue-row {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 14px;
+  padding: 12px;
+  margin-bottom: 10px;
+  display: grid;
+  grid-template-columns: 34px 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mentor-queue-row:hover {
+  border-color: var(--purple);
+  background: var(--purple-bg);
+}
+
+.mentor-queue-row p,
+.mentor-queue-row small {
+  margin: 3px 0 0;
+  color: var(--muted);
+}
+
+.queue-rank {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--purple);
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.call-prep-card {
+  border-left: 4px solid var(--purple);
+  background: #f7f7fa;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.call-prep-card p { margin: 6px 0; }
+
+@media (max-width: 1050px) {
+  .mentor-grid,
+  .mentor-queue-row {
+    grid-template-columns: 1fr;
+  }
+  .queue-rank { margin-bottom: 4px; }
+}

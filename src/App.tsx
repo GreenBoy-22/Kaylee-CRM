@@ -544,7 +544,7 @@ Kaylee`;
         </aside>
         <main className="content">
           {!activeCanEdit && activeRole === 'limited' && page !== 'dashboard' && <ViewOnlyBanner />}
-          {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} tasks={tasks} role={activeRole} />}
+          {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} role={activeRole} setPage={setPage} />}
           {page === 'today' && <Today tasks={tasks.filter((task) => activeRole === 'admin' || task.mode === 'home')} completeTask={completeTask} editable={canEdit('today')} />}
           {page === 'briefing' && <Briefing />}
           {page === 'calendar' && <Placeholder title="Calendar" sub="Google Calendar integration will connect here after auth basics are stable." />}
@@ -613,12 +613,97 @@ function Stats({ items }: { items: [string, string, string?][] }) {
   return <div className="stats-row">{items.map(([label, value, sub]) => <div className="stat-card" key={label}><div className="stat-label">{label}</div><div className="stat-val">{value}</div>{sub && <div className="stat-sub">{sub}</div>}</div>)}</div>;
 }
 
-function Dashboard({ mode, inventory, students, tasks, role }: { mode: Mode; inventory: InventoryItem[]; students: Student[]; tasks: TaskItem[]; role: Role }) {
+function studentStatusSignals(student: Student, touchpoints: Touchpoint[]) {
+  const studentTouchpoints = touchpoints.filter((touchpoint) => touchpoint.student_id === student.id);
+  const meaningfulTouchpoints = studentTouchpoints.filter((touchpoint) => !touchpoint.touchpoint_type.toLowerCase().includes('missed') && !touchpoint.touchpoint_type.toLowerCase().includes('no-show'));
+  const lastTouchpoint = studentTouchpoints[0];
+  const lastMeaningful = meaningfulTouchpoints[0];
+  const missedCalls = Number(student.missed_call_count || 0);
+  const isGhost = String(student.status).toLowerCase().includes('ghost') || missedCalls >= 3;
+  const isSupport = String(student.status).toLowerCase().includes('support');
+  const isPortalOnly = String(student.status).toLowerCase().includes('portal');
+  const isHighRisk = String(student.risk).toLowerCase().includes('high') || isGhost || isPortalOnly;
+  const needsFollowUp = !student.copied || isHighRisk || isSupport;
+  return { studentTouchpoints, lastTouchpoint, lastMeaningful, missedCalls, isGhost, isSupport, isPortalOnly, isHighRisk, needsFollowUp };
+}
+
+function priorityScore(student: Student, touchpoints: Touchpoint[]) {
+  const signals = studentStatusSignals(student, touchpoints);
+  let score = 0;
+  if (signals.isGhost) score += 50;
+  if (signals.isHighRisk) score += 35;
+  if (signals.isSupport) score += 20;
+  if (!student.copied) score += 12;
+  score += Math.min(signals.missedCalls * 8, 30);
+  if (student.next_appointment_date) score += 8;
+  if (!student.last_contact_date && signals.studentTouchpoints.length === 0) score += 10;
+  return score;
+}
+
+function Dashboard({ mode, inventory, students, touchpoints, tasks, role, setPage }: { mode: Mode; inventory: InventoryItem[]; students: Student[]; touchpoints: Touchpoint[]; tasks: TaskItem[]; role: Role; setPage: (page: Page) => void }) {
   const expiring = inventory.filter((item) => item.expires).length;
   const pending = tasks.filter((task) => task.status === 'pending_approval').length;
+  const activeStudents = students.filter((student) => !student.archived);
+  const highRiskStudents = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).isHighRisk);
+  const ghostRiskStudents = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).isGhost);
+  const supportStudents = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).isSupport);
+  const followUpsDue = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).needsFollowUp);
+  const today = new Date().toISOString().slice(0, 10);
+  const callsToday = activeStudents.filter((student) => student.next_appointment_date === today);
+  const priorityQueue = [...activeStudents].sort((a, b) => priorityScore(b, touchpoints) - priorityScore(a, touchpoints)).slice(0, 6);
+
+  if (mode === 'work' && role === 'admin') {
+    return <>
+      <Header title="Mentor Success Dashboard" sub="Daily command center for student risk, call prep, follow-ups, and mentor readiness.">
+        <button className="btn primary" onClick={() => setPage('students')}><Users size={15} /> Open Students</button>
+      </Header>
+      <Stats items={[
+        ['High risk', String(highRiskStudents.length), 'needs strategy'],
+        ['Ghost risk', String(ghostRiskStudents.length), '3+ missed/no contact'],
+        ['Calls today', String(callsToday.length), 'manual now · Outlook later'],
+        ['Follow-ups due', String(followUpsDue.length), 'copy/draft needed']
+      ]} />
+      <div className="mentor-grid">
+        <section className="panel mentor-action-panel">
+          <div className="panel-head"><h2>Today’s Priority Queue</h2><span className="readonly-pill"><AlertTriangle size={14} /> Risk ordered</span></div>
+          {priorityQueue.length === 0 && <div className="brief-item">No active students yet. Add students to begin building your call-prep queue.</div>}
+          {priorityQueue.map((student, index) => {
+            const signals = studentStatusSignals(student, touchpoints);
+            const score = priorityScore(student, touchpoints);
+            return <button className="mentor-queue-row" key={student.id} onClick={() => setPage('students')}>
+              <span className="queue-rank">{index + 1}</span>
+              <div>
+                <strong>{student.display_name}</strong>
+                <p>{student.course || 'No course'} · {student.status} · Last: {student.last_contact_date || signals.lastTouchpoint?.touchpoint_date || '—'}</p>
+              </div>
+              <span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span>
+              <small>{signals.isGhost ? 'Ghost risk' : signals.isSupport ? 'Support' : score >= 35 ? 'Watch closely' : 'Prep ready'}</small>
+            </button>;
+          })}
+        </section>
+        <section className="panel mentor-action-panel">
+          <div className="panel-head"><h2>Call Prep Focus</h2><FileText size={17} /></div>
+          {priorityQueue.slice(0, 3).map((student) => {
+            const signals = studentStatusSignals(student, touchpoints);
+            const prep = student.next_call_prep || signals.lastTouchpoint?.next_call_prep || 'Review course momentum, confirm the next measurable action, and end with one clear commitment.';
+            return <div className="call-prep-card" key={student.id}>
+              <strong>{student.display_name}</strong>
+              <p>{prep}</p>
+              <small>{signals.missedCalls ? `${signals.missedCalls} missed call(s)` : 'No missed call flag'} · {student.next_appointment_date || 'No appointment date entered'}</small>
+            </div>;
+          })}
+        </section>
+      </div>
+      <div className="grid two">
+        <section className="panel"><h2>Risk Buckets</h2><div className="brief-item urgent"><strong>High risk:</strong> {highRiskStudents.map((s) => s.display_name).join(', ') || 'None'}</div><div className="brief-item"><strong>Ghost risk:</strong> {ghostRiskStudents.map((s) => s.display_name).join(', ') || 'None'}</div><div className="brief-item good"><strong>Support:</strong> {supportStudents.map((s) => s.display_name).join(', ') || 'None'}</div></section>
+        <section className="panel"><h2>Mentor Metrics</h2><div className="brief-item"><strong>Active students:</strong> {activeStudents.length}</div><div className="brief-item"><strong>Touchpoints logged:</strong> {touchpoints.length}</div><div className="brief-item"><strong>Salesforce copy pending:</strong> {students.filter((s) => !s.copied && !s.archived).length}</div><div className="brief-item"><strong>FERPA mode:</strong> First name/nickname only · clipboard only</div></section>
+      </div>
+    </>;
+  }
+
   return <>
     <Header title={role === 'limited' ? 'Adam home dashboard' : mode === 'home' ? 'Home command center' : 'Work command center'} sub={role === 'limited' ? 'Home-only view. Kaylee controls which sections are editable.' : mode === 'home' ? 'Tasks, approvals, inventory, vehicles, and tenant-safe home care.' : 'FERPA-safe student workflow, GROW notes, and daily planning.'} />
-    <Stats items={mode === 'home' ? [['Open tasks', String(tasks.filter((task) => task.status !== 'completed' && task.mode === 'home').length), 'home'], ['Adam pending', String(pending), 'approval needed'], ['Inventory', String(inventory.length), `${expiring} expiring`], ['Vehicle alerts', '4', 'critical/due']] : [['Active students', String(students.filter((s) => !s.archived).length), 'FERPA-safe'], ['Need copy', String(students.filter((s) => !s.copied).length), 'Salesforce'], ['FERPA', 'On', 'clipboard only'], ['Calls today', '0', 'Outlook later']]} />
+    <Stats items={mode === 'home' ? [['Open tasks', String(tasks.filter((task) => task.status !== 'completed' && task.mode === 'home').length), 'home'], ['Adam pending', String(pending), 'approval needed'], ['Inventory', String(inventory.length), `${expiring} expiring`], ['Vehicle alerts', '4', 'critical/due']] : [['Active students', String(activeStudents.length), 'FERPA-safe'], ['Need copy', String(students.filter((s) => !s.copied).length), 'Salesforce'], ['FERPA', 'On', 'clipboard only'], ['Calls today', String(callsToday.length), 'manual now']]} />
     <div className="grid two"><Today tasks={tasks.filter((task) => mode === 'work' ? task.mode === 'work' : task.mode === 'home').slice(0, 3)} completeTask={() => undefined} editable={false} /><Briefing compact /></div>
   </>;
 }

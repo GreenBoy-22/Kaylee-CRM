@@ -1,42 +1,56 @@
-# Kaylee's Hub v0.7 — Students CRM Foundation
+# Kaylee's Hub v0.5 — Auth + Adam Permissions
 
-Adds the first real Work-side Students CRM foundation on top of v0.6 auth + Adam permissions.
+This build adds Supabase Auth, two roles, and a Settings page for controlling Adam's Home-side access.
 
 ## What changed
 
-- Student list + detail pane layout
-- Add/edit/archive students
-- Course, risk, status, last contact, next appointment, missed-call counter
-- Admin notes section
-- Touchpoint log with WGU-style types:
-  - Email from/to student
-  - Text from/to student
-  - Call from/to student
-  - Voicemail from/to student
-  - Appointment
-  - No-show / missed call
-- Rule-based next-call prep
-- Constructive coaching note for Kaylee
-- Follow-up email/text drafts with copy buttons
-- FERPA guardrail warnings for likely email/phone/ID/SSN-like data
+- Login screen using Supabase Auth
+- Kaylee profile = `admin`
+- Adam profile = `limited`
+- Adam is Home-only and cannot access Work mode
+- Settings page for Kaylee/admin
+- Per-section Adam toggles:
+  - View: Adam can see the section
+  - Edit: Adam can change/complete/save things in that section
+- Students remain admin-only and FERPA-safe
+- Inventory save still works, but Adam is view-only unless Inventory Edit is turned on
 
-## Supabase
+## Deploy steps
 
-Run this in SQL Editor before testing Students:
+1. Upload/replace these files in GitHub.
+2. In Supabase SQL Editor, run:
+   - `supabase/v0_5_auth_schema.sql`
+3. In Supabase Auth, create users or sign up from the app:
+   - Kaylee: `kayleet.green@gmail.com` or `green.kayleet@gmail.com`
+   - Adam: `adamlamargreen@gmail.com`
+4. In Vercel, confirm env vars exist:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+5. Redeploy.
 
-```sql
--- supabase/v0_7_students_crm.sql
-```
+## Notes
 
-## Deploy
+- Adam sees Home sections by default.
+- Adam's Edit toggles default off.
+- Work mode, Students, and FERPA-safe work data remain Kaylee/admin only.
+- v0.6 should tighten RLS for every home table to match the section permissions server-side.
 
-Upload/replace files in GitHub, then let Vercel redeploy.
 
-## Test flow
+## v0.8a Mentor Success Dashboard
 
-1. Log in as Kaylee.
-2. Go to Work → Students.
-3. Add a student with display name only.
-4. Add a touchpoint.
-5. Confirm next-call prep and follow-up drafts appear.
-6. Refresh and confirm data persists.
+This build adds the first mentor-intelligence layer on the Work dashboard.
+
+### Added
+- Mentor Success Dashboard for Kaylee/admin in Work mode
+- High Risk count
+- Ghost Risk count
+- Calls Today count based on manual next appointment dates
+- Follow-ups Due count
+- Risk-ordered Today's Priority Queue
+- Call Prep Focus cards from saved next-call prep/touchpoints
+- Risk Buckets and Mentor Metrics panels
+
+### Notes
+- No new Supabase table is required for v0.8a.
+- This uses the existing `students` and `student_touchpoints` tables from v0.7.
+- Outlook calendar integration is still a later build; Calls Today uses the manual `next_appointment_date` field for now.
