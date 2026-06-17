@@ -538,7 +538,7 @@ Kaylee`;
     // Accept either "Name" or "DisplayName" as the student name column.
     // Also accept several plausible aliases for the WGU student ID column.
     const cleaned = records
-      .map((row) => ({
+      .map((row: Record<string, string>) => ({
         ...row,
         displayname: row.displayname || row.name || '',
         studentid: row.studentid || row.wguid || row.studentidnumber || ''
