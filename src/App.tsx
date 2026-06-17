@@ -1,4 +1,3 @@
-function Inventory({
 import { useState } from 'react';
 import {
   Home,
@@ -243,6 +242,59 @@ function Inventory({
   action: 'none' | 'scanAdd' | 'manual' | 'scanUse';
   setAction: (value: 'none' | 'scanAdd' | 'manual' | 'scanUse') => void;
 }) {
+  const [items, setItems] = useState(inventoryItems);
+  const [form, setForm] = useState({
+    name: '',
+    brand: '',
+    location: '',
+    category: '',
+    quantity: '1',
+    value: ''
+  });
+
+  async function saveItem() {
+    const newItem = {
+      name: form.name || 'Untitled item',
+      brand: form.brand || '',
+      location: form.location || 'Fridge',
+      category: form.category || 'Food',
+      quantity: Number(form.quantity) || 1,
+      value: Number(form.value) || 0,
+      expires: null
+    };
+
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('inventory_items')
+        .insert(newItem)
+        .select()
+        .single();
+
+      if (error) {
+        alert(error.message);
+        return;
+      }
+
+      setItems((current) => [...current, data]);
+    } else {
+      setItems((current) => [
+        ...current,
+        { id: crypto.randomUUID(), ...newItem }
+      ]);
+    }
+
+    setForm({
+      name: '',
+      brand: '',
+      location: '',
+      category: '',
+      quantity: '1',
+      value: ''
+    });
+
+    setAction('none');
+  }
+
   return (
     <>
       <Header
@@ -256,8 +308,8 @@ function Inventory({
 
       <Stats
         items={[
-          ['Total items', String(inventoryItems.length)],
-          ['Estimated value', '$168.94'],
+          ['Total items', String(items.length)],
+          ['Estimated value', `$${items.reduce((sum, item) => sum + Number(item.value || 0), 0).toFixed(2)}`],
           ['Expiring soon', '1'],
           ['Locations', '15']
         ]}
@@ -277,20 +329,20 @@ function Inventory({
           </div>
 
           {action === 'manual' ? (
-           <div>
-  <div className="form-grid">
-    <input placeholder="Item name" />
-    <input placeholder="Brand" />
-    <input placeholder="Location" />
-    <input placeholder="Category" />
-    <input placeholder="Quantity" />
-    <input placeholder="Estimated value" />
-  </div>
+            <div>
+              <div className="form-grid">
+                <input placeholder="Item name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                <input placeholder="Brand" value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} />
+                <input placeholder="Location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
+                <input placeholder="Category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
+                <input placeholder="Quantity" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
+                <input placeholder="Estimated value" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
+              </div>
 
-  <div className="form-actions">
-    <button className="btn primary">Save Item</button>
-  </div>
-</div>
+              <div className="form-actions">
+                <button className="btn primary" onClick={saveItem}>Save Item</button>
+              </div>
+            </div>
           ) : (
             <div className="scan-row">
               <input placeholder="Scan or type barcode" />
@@ -315,14 +367,14 @@ function Inventory({
             </tr>
           </thead>
           <tbody>
-            {inventoryItems.map((item) => (
+            {items.map((item) => (
               <tr key={item.id}>
                 <td><strong>{item.name}</strong><small>{item.brand}</small></td>
                 <td>{item.location}</td>
                 <td>{item.category}</td>
                 <td>{item.quantity}</td>
                 <td>{item.expires ?? '—'}</td>
-                <td>${item.value.toFixed(2)}</td>
+                <td>${Number(item.value || 0).toFixed(2)}</td>
               </tr>
             ))}
           </tbody>
@@ -331,7 +383,6 @@ function Inventory({
     </>
   );
 }
-
 function Adam() {
   return (
     <>
