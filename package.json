@@ -1,25 +1,87 @@
-{
-  "name": "kaylees-hub",
-  "version": "0.3.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.47.10",
-    "lucide-react": "^0.468.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
-  },
-  "devDependencies": {
-  "@types/node": "^22.10.1",
-  "@types/react": "^18.3.12",
-  "@types/react-dom": "^18.3.1",
-  "@vitejs/plugin-react": "^4.3.4",
-  "typescript": "^5.6.3",
-  "vite": "^5.4.11"
-}
-}
+-- Kaylee's Hub v0.4 schema
+-- Run this in Supabase SQL Editor before using real persistence.
+
+create extension if not exists pgcrypto;
+
+create table if not exists public.inventory_items (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  brand text,
+  location text not null default 'Fridge',
+  category text not null default 'Food',
+  quantity integer not null default 1 check (quantity >= 0),
+  expires date,
+  value numeric(10,2),
+  barcode text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.students (
+  id uuid primary key default gen_random_uuid(),
+  display_name text not null,
+  goal text default '',
+  risk text default 'Watch',
+  copied boolean not null default false,
+  grow_note text default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint ferpa_display_name_reasonable check (char_length(display_name) <= 40)
+);
+
+create table if not exists public.tasks (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  owner text not null default 'Kaylee',
+  mode text not null default 'home' check (mode in ('home','work')),
+  minutes integer not null default 5,
+  priority text not null default 'normal' check (priority in ('urgent','warning','normal','good')),
+  status text not null default 'open' check (status in ('open','pending_approval','approved','completed','escalated')),
+  source text not null default 'Manual',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.inventory_items enable row level security;
+alter table public.students enable row level security;
+alter table public.tasks enable row level security;
+
+-- v0.4 prototype policies:
+-- These allow the deployed single-household app to read/write with the anon key while auth is not yet wired.
+-- Tighten these in v0.5 when Kaylee/Admin and Adam/Limited Supabase Auth roles are implemented.
+drop policy if exists "v0.4 prototype read inventory" on public.inventory_items;
+drop policy if exists "v0.4 prototype write inventory" on public.inventory_items;
+drop policy if exists "v0.4 prototype read students" on public.students;
+drop policy if exists "v0.4 prototype write students" on public.students;
+drop policy if exists "v0.4 prototype read tasks" on public.tasks;
+drop policy if exists "v0.4 prototype write tasks" on public.tasks;
+
+create policy "v0.4 prototype read inventory" on public.inventory_items for select to anon, authenticated using (true);
+create policy "v0.4 prototype write inventory" on public.inventory_items for all to anon, authenticated using (true) with check (true);
+
+create policy "v0.4 prototype read students" on public.students for select to anon, authenticated using (true);
+create policy "v0.4 prototype write students" on public.students for all to anon, authenticated using (true) with check (true);
+
+create policy "v0.4 prototype read tasks" on public.tasks for select to anon, authenticated using (true);
+create policy "v0.4 prototype write tasks" on public.tasks for all to anon, authenticated using (true) with check (true);
+
+insert into public.inventory_items (name, brand, location, category, quantity, expires, value, barcode)
+values
+  ('Chicken broth', 'Swanson', 'Indoor Pantry', 'Food', 3, '2026-07-03', 8.97, 'seed-1'),
+  ('Laundry detergent', 'Tide', 'Laundry Room', 'Cleaning', 1, null, 18.99, 'seed-2'),
+  ('Air fryer', 'Ninja', 'Kitchen', 'Appliance', 1, null, 129.00, 'seed-3'),
+  ('Greek yogurt', 'Chobani', 'Fridge', 'Food', 2, '2026-06-19', 11.98, 'seed-4')
+on conflict do nothing;
+
+insert into public.students (display_name, goal, risk, copied, grow_note)
+values
+  ('Andrea', 'Finish current study plan checkpoint', 'Watch', false, 'Goal: complete D316 checkpoint. Reality: already on study plan. Options: keep steady pace and use course resources. Will: send update by Friday.'),
+  ('A.', 'Increase weekly study time', 'Support', true, 'Goal: get back on track. Reality: progress slowed. Options: block study time and ask for help early. Will: set aside focused study this week.')
+on conflict do nothing;
+
+insert into public.tasks (title, owner, mode, minutes, priority, status, source)
+values
+  ('Check fridge items expiring this week', 'Kaylee', 'home', 8, 'warning', 'open', 'Inventory'),
+  ('Draft 3 student follow-ups from GROW notes', 'Kaylee', 'work', 20, 'normal', 'open', 'Students'),
+  ('Approve Adam''s Friday task plan', 'Kaylee', 'home', 5, 'urgent', 'pending_approval', 'Adam')
+on conflict do nothing;
