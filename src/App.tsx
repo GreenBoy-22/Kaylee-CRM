@@ -3,13 +3,13 @@ import type { Session } from '@supabase/supabase-js';
 import {
   Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Plus, Copy, RefreshCw, Settings, LogOut,
-  Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search
+  Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'adam' | 'vehicles' | 'suggestions' | 'students' | 'settings';
+type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'adam' | 'vehicles' | 'suggestions' | 'students' | 'outreach' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -72,6 +72,7 @@ type Student = {
   known_blockers?: string | null;
   preferred_contact_method?: string | null;
   student_timezone?: string | null;
+  email?: string | null;
   missed_call_count: number;
   archived: boolean;
 };
@@ -89,6 +90,19 @@ type Touchpoint = {
   follow_up_email: string | null;
   follow_up_text: string | null;
   copied: boolean;
+};
+
+type EmailDraft = {
+  id: string;
+  student_id: string | null;
+  cohort_label: string | null;
+  template_kind: string;
+  subject: string;
+  body: string;
+  status: 'pending' | 'sent' | 'archived' | string;
+  created_at: string;
+  sent_at: string | null;
+  edited: boolean;
 };
 
 type TaskItem = {
@@ -125,7 +139,8 @@ const workNav: readonly NavEntry[] = [
   ['today', 'Today’s Tasks', ClipboardCheck],
   ['briefing', 'Daily Briefing', Sparkles],
   ['calendar', 'Calendar', CalendarDays],
-  ['students', 'Students', Users]
+  ['students', 'Students', Users],
+  ['outreach', 'Outreach Drafts', Mail]
 ];
 
 const moduleMeta: { page: Page; module_name: string; label: string; default_access: AccessLevel }[] = [
@@ -139,7 +154,8 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'vehicles', module_name: 'vehicles', label: 'Vehicles', default_access: 'view' },
   { page: 'suggestions', module_name: 'home_suggestions', label: 'Home Suggestions', default_access: 'edit' },
   { page: 'budget', module_name: 'budget', label: 'Budget', default_access: 'view' },
-  { page: 'students', module_name: 'students', label: 'Students', default_access: 'hidden' }
+  { page: 'students', module_name: 'students', label: 'Students', default_access: 'hidden' },
+  { page: 'outreach', module_name: 'outreach', label: 'Outreach Drafts', default_access: 'hidden' }
 ];
 
 const pageToModule = Object.fromEntries(moduleMeta.map((item) => [item.page, item.module_name])) as Record<string, string>;
@@ -222,6 +238,7 @@ function App() {
   const [students, setStudents] = useState<Student[]>(seedStudents);
   const [touchpoints, setTouchpoints] = useState<Touchpoint[]>(seedTouchpoints);
   const [tasks, setTasks] = useState<TaskItem[]>(seedTasks);
+  const [drafts, setDrafts] = useState<EmailDraft[]>([]);
   const [permissions, setPermissions] = useState<ModulePermission[]>(defaultAdamPermissions);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('Ready.');
@@ -290,18 +307,20 @@ function App() {
     if (!supabase) return;
     setLoading(true);
     try {
-      const [invResult, studentResult, touchpointResult, taskResult, permissionResult] = await Promise.all([
+      const [invResult, studentResult, touchpointResult, taskResult, permissionResult, draftResult] = await Promise.all([
         supabase.from('inventory_items').select('*').order('created_at', { ascending: false }),
         supabase.from('students').select('*').order('created_at', { ascending: false }),
         supabase.from('student_touchpoints').select('*').order('touchpoint_date', { ascending: false }),
         supabase.from('tasks').select('*').order('created_at', { ascending: false }),
-        supabase.from('module_permissions').select('*').eq('role', 'limited').order('module_name', { ascending: true })
+        supabase.from('module_permissions').select('*').eq('role', 'limited').order('module_name', { ascending: true }),
+        supabase.from('email_drafts').select('*').order('created_at', { ascending: false })
       ]);
 
       if (!invResult.error && invResult.data) setInventory(invResult.data as InventoryItem[]);
       if (!studentResult.error && studentResult.data) setStudents(normalizeStudents(studentResult.data as Student[]));
       if (!touchpointResult.error && touchpointResult.data) setTouchpoints(touchpointResult.data as Touchpoint[]);
       if (!taskResult.error && taskResult.data) setTasks(taskResult.data as TaskItem[]);
+      if (!draftResult.error && draftResult.data) setDrafts(draftResult.data as EmailDraft[]);
       if (!permissionResult.error && permissionResult.data && permissionResult.data.length) {
         setPermissions(mergePermissions(permissionResult.data as ModulePermission[]));
       }
@@ -344,6 +363,7 @@ function App() {
       known_blockers: row.known_blockers || '',
       preferred_contact_method: row.preferred_contact_method || '',
       student_timezone: row.student_timezone || '',
+      email: row.email || '',
       missed_call_count: Number(row.missed_call_count || 0),
       archived: Boolean(row.archived)
     }));
@@ -805,6 +825,152 @@ Kaylee`;
     setMessage('Touchpoint saved and next-call prep generated.');
   }
 
+  function buildDraftForStudent(student: Student, kind: string, cohortLabel: string): { subject: string; body: string } {
+    const name = student.display_name || 'there';
+    const course = student.course || 'your current course';
+    const courseEnd = student.course_end_date ? ` (course end ${student.course_end_date})` : '';
+    const lastContact = student.last_contact_date || '—';
+    const missed = Number(student.missed_call_count || 0);
+
+    const sigBlock = '\n\nBest,\nKaylee Green\nProgram Mentor · BS Cybersecurity & Information Assurance\nWestern Governors University';
+
+    if (kind === 'ghost') {
+      return {
+        subject: `Checking in — let's get you back on track in ${course}`,
+        body: `Hi ${name},\n\nI haven't been able to reach you on our last few attempts and I want you to know I'm still here for you. You're not in trouble — I just want to make sure nothing is getting in the way that I could help with.\n\nCan you reply with a day and time this week that works for a quick 15-minute call? Even a short conversation will help us figure out the next best step in ${course}${courseEnd}.\n\nIf life is happening right now and you need a different kind of support, just say so. We can work with where you are.${sigBlock}`
+      };
+    }
+    if (kind === 'high_risk') {
+      return {
+        subject: `Let's build a plan for ${course}`,
+        body: `Hi ${name},\n\nI've been reviewing your progress and I want us to take a focused look at ${course}${courseEnd} together. My goal is to help you identify one or two concrete steps that will move you forward this week.\n\nWhen you have a moment, please reply with the biggest blocker you're facing right now — even a one-line answer helps me prepare so our next call is as useful as possible.\n\nYou've got this, and I'm in your corner.${sigBlock}`
+      };
+    }
+    if (kind === 'course_ending') {
+      return {
+        subject: `${course} is wrapping up soon — let's plan the finish`,
+        body: `Hi ${name},\n\nWe're approaching the end window for ${course}${courseEnd}. I want to make sure you have a clear path to complete it on time and a plan for what comes next in your term.\n\nCan you let me know where you are in the course and what the last remaining piece looks like? If we need to adjust anything — pacing, resources, an extension conversation — now is the right time to talk through it.${sigBlock}`
+      };
+    }
+    if (kind === 'no_contact_14') {
+      return {
+        subject: `Quick check-in — how are things going?`,
+        body: `Hi ${name},\n\nIt's been a couple of weeks since we last connected (around ${lastContact}) and I wanted to reach out to see how things are going in ${course}.\n\nNo need for a long update — even a quick reply telling me what you've completed or what you're working on this week is helpful. If anything has shifted or you need support, I'd rather hear it from you than guess.${sigBlock}`
+      };
+    }
+    if (kind === 'win') {
+      return {
+        subject: `Nice work on ${course}!`,
+        body: `Hi ${name},\n\nI saw your recent progress in ${course} and wanted to send a quick note: well done. The consistency you're showing matters, and it's what gets students across the finish line at WGU.\n\nKeep the momentum going — let me know what you're tackling next so I can be ready to support.${sigBlock}`
+      };
+    }
+    // generic check-in
+    return {
+      subject: `Checking in on ${course}`,
+      body: `Hi ${name},\n\nI wanted to check in and see how things are going with ${course}${courseEnd}. ${missed > 0 ? `I noticed we've had a couple of missed connections recently. ` : ''}Whenever you have a moment, reply with where you're at and anything you'd like support with on our next call.${sigBlock}`
+    };
+  }
+
+  function selectCohort(cohort: string): Student[] {
+    const active = students.filter((s) => !s.archived);
+    const today = new Date();
+    if (cohort === 'high_risk') return active.filter((s) => String(s.risk).toLowerCase().includes('high'));
+    if (cohort === 'ghost') return active.filter((s) => studentStatusSignals(s, touchpoints).isGhost);
+    if (cohort === 'no_contact_14') return active.filter((s) => {
+      const last = s.last_contact_date ? new Date(s.last_contact_date) : null;
+      if (!last) return true;
+      return (today.getTime() - last.getTime()) / 86400000 >= 14;
+    });
+    if (cohort === 'course_ending') return active.filter((s) => {
+      if (!s.course_end_date) return false;
+      const end = new Date(s.course_end_date);
+      const diff = (end.getTime() - today.getTime()) / 86400000;
+      return diff <= 30 && diff >= 0;
+    });
+    if (cohort.startsWith('course:')) {
+      const code = cohort.slice('course:'.length).toLowerCase();
+      return active.filter((s) => (s.course || '').toLowerCase().includes(code));
+    }
+    if (cohort === 'all_active') return active;
+    return [];
+  }
+
+  async function generateCohortDrafts(cohort: string, cohortLabel: string, kind: string) {
+    if (!isAdmin()) return setMessage('Outreach is admin-only.');
+    const targets = selectCohort(cohort);
+    if (targets.length === 0) {
+      setMessage(`No students in cohort "${cohortLabel}".`);
+      return;
+    }
+    const rows = targets.map((student) => {
+      const { subject, body } = buildDraftForStudent(student, kind, cohortLabel);
+      return { student_id: student.id, cohort_label: cohortLabel, template_kind: kind, subject, body, status: 'pending', edited: false };
+    });
+    if (!supabase) {
+      const locals: EmailDraft[] = rows.map((r) => ({
+        ...r, id: crypto.randomUUID(), created_at: new Date().toISOString(), sent_at: null
+      } as EmailDraft));
+      setDrafts((current) => [...locals, ...current]);
+      setMessage(`Generated ${locals.length} drafts locally.`);
+      return;
+    }
+    const { data, error } = await supabase.from('email_drafts').insert(rows).select();
+    if (error) return setMessage(`Draft generation failed: ${error.message}`);
+    setDrafts((current) => [...(data as EmailDraft[]), ...current]);
+    setMessage(`Generated ${data?.length || 0} drafts for "${cohortLabel}".`);
+  }
+
+  async function generateSingleDraft(studentId: string, kind: string) {
+    if (!isAdmin()) return setMessage('Outreach is admin-only.');
+    const student = students.find((s) => s.id === studentId);
+    if (!student) return;
+    const { subject, body } = buildDraftForStudent(student, kind, 'single');
+    const row = { student_id: student.id, cohort_label: 'single', template_kind: kind, subject, body, status: 'pending', edited: false };
+    if (!supabase) {
+      const local: EmailDraft = { ...row, id: crypto.randomUUID(), created_at: new Date().toISOString(), sent_at: null } as EmailDraft;
+      setDrafts((current) => [local, ...current]);
+      return setMessage('Draft created locally.');
+    }
+    const { data, error } = await supabase.from('email_drafts').insert(row).select().single();
+    if (error) return setMessage(`Draft save failed: ${error.message}`);
+    setDrafts((current) => [data as EmailDraft, ...current]);
+    setMessage(`Draft created for ${student.display_name}.`);
+  }
+
+  async function updateDraft(id: string, patch: Partial<EmailDraft>) {
+    setDrafts((current) => current.map((d) => d.id === id ? { ...d, ...patch } : d));
+    if (!supabase) return;
+    await supabase.from('email_drafts').update(patch).eq('id', id);
+  }
+
+  async function markDraftSent(id: string) {
+    const draft = drafts.find((d) => d.id === id);
+    if (!draft) return;
+    const sentAt = new Date().toISOString();
+    await updateDraft(id, { status: 'sent', sent_at: sentAt });
+    // Auto-log a touchpoint
+    if (draft.student_id) {
+      const student = students.find((s) => s.id === draft.student_id);
+      if (student) {
+        await createTouchpoint({
+          student_id: draft.student_id,
+          touchpoint_type: 'Email sent',
+          touchpoint_date: new Date().toISOString().slice(0, 10),
+          course: student.course || '',
+          momentum: '',
+          note: `[${draft.cohort_label || 'outreach'} · ${draft.template_kind}] ${draft.subject}\n\n${draft.body}`
+        });
+      }
+    }
+    setMessage('Draft marked sent and touchpoint logged.');
+  }
+
+  async function deleteDraft(id: string) {
+    setDrafts((current) => current.filter((d) => d.id !== id));
+    if (!supabase) return;
+    await supabase.from('email_drafts').delete().eq('id', id);
+  }
+
   async function copyStudentText(text: string, id?: string, table: 'students' | 'student_touchpoints' = 'students') {
     if (!isAdmin()) return;
     await navigator.clipboard?.writeText(text);
@@ -895,7 +1061,8 @@ Kaylee`;
           {page === 'adam' && <Adam editable={canEdit('adam')} />}
           {page === 'vehicles' && <Vehicles />}
           {page === 'suggestions' && <Suggestions editable={canEdit('suggestions')} />}
-          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} />}
+          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
+          {page === 'outreach' && activeRole === 'admin' && <Outreach drafts={drafts} students={students} generateCohortDrafts={generateCohortDrafts} updateDraft={updateDraft} markDraftSent={markDraftSent} deleteDraft={deleteDraft} />}
           {page === 'settings' && activeRole === 'admin' && <SettingsPage permissions={permissions} updatePermission={updatePermission} />}
         </main>
       </div>
@@ -1218,7 +1385,7 @@ const touchpointTypes = [
 const riskLevels = ['Low', 'Medium', 'High', 'High Risk'];
 const studentStatuses = ['Active', 'Support', 'Ghost', 'Portal-only', 'Archived'];
 
-function Students({ students, touchpoints, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, createTouchpoint, copyText, ferpaWarnings }: {
+function Students({ students, touchpoints, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, createTouchpoint, copyText, ferpaWarnings, generateSingleDraft, drafts, setPage }: {
   students: Student[];
   touchpoints: Touchpoint[];
   importStudentsFromCsv: (text: string) => Promise<void>;
@@ -1228,6 +1395,9 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
   createTouchpoint: (touchpoint: Omit<Touchpoint, 'id' | 'next_call_prep' | 'constructive_note' | 'follow_up_email' | 'follow_up_text' | 'copied'>) => void;
   copyText: (text: string, id?: string, table?: 'students' | 'student_touchpoints') => void;
   ferpaWarnings: (text: string) => string[];
+  generateSingleDraft: (studentId: string, kind: string) => void;
+  drafts: EmailDraft[];
+  setPage: (page: Page) => void;
 }) {
   const activeStudents = students.filter((student) => !student.archived);
   const archivedStudents = students.filter((student) => student.archived);
@@ -1252,7 +1422,7 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
   const [editingProfile, setEditingProfile] = useState(false);
   const [studentForm, setStudentForm] = useState({
     display_name: '', student_id: '', course: '', goal: '', risk: 'Medium', status: 'Active',
-    admin_notes: '', next_appointment_date: '', graduation_goal_date: '', missed_call_count: '0'
+    admin_notes: '', next_appointment_date: '', graduation_goal_date: '', missed_call_count: '0', email: ''
   });
   const [touchForm, setTouchForm] = useState({
     touchpoint_type: 'Call to student', touchpoint_date: new Date().toISOString().slice(0, 10),
@@ -1264,7 +1434,7 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
   }, [showArchived, students.length]);
 
   function resetStudentForm() {
-    setStudentForm({ display_name: '', student_id: '', course: '', goal: '', risk: 'Medium', status: 'Active', admin_notes: '', next_appointment_date: '', graduation_goal_date: '', missed_call_count: '0' });
+    setStudentForm({ display_name: '', student_id: '', course: '', goal: '', risk: 'Medium', status: 'Active', admin_notes: '', next_appointment_date: '', graduation_goal_date: '', missed_call_count: '0', email: '' });
   }
 
   function submitStudent() {
@@ -1284,8 +1454,9 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
       last_contact_date: null,
       grow_note: '',
       next_call_prep: '',
-      constructive_note: ''
-    });
+      constructive_note: '',
+      email: studentForm.email || null
+    } as Omit<Student, 'id' | 'copied' | 'archived'>);
     resetStudentForm();
     setAddingStudent(false);
   }
@@ -1302,7 +1473,8 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
       admin_notes: selected.admin_notes || '',
       next_appointment_date: selected.next_appointment_date || '',
       graduation_goal_date: selected.graduation_goal_date || '',
-      missed_call_count: String(selected.missed_call_count || 0)
+      missed_call_count: String(selected.missed_call_count || 0),
+      email: selected.email || ''
     });
     setEditingProfile(true);
   }
@@ -1321,7 +1493,8 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
       admin_notes: studentForm.admin_notes,
       next_appointment_date: studentForm.next_appointment_date || null,
       graduation_goal_date: studentForm.graduation_goal_date || null,
-      missed_call_count: Number(studentForm.missed_call_count || 0)
+      missed_call_count: Number(studentForm.missed_call_count || 0),
+      email: studentForm.email || null
     });
     setEditingProfile(false);
   }
@@ -1366,13 +1539,13 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
       <button className="btn ghost" onClick={() => setShowArchived(!showArchived)}><Archive size={15} /> {showArchived ? 'Active' : 'Archived'}</button>
     </Header>
     <Stats items={[["Active", String(activeStudents.length)], ["Archived", String(archivedStudents.length)], ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived).length)], ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived).length)]]} />
-    {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input placeholder="Course" value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
+    {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input placeholder="Course" value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email (for outreach drafts)" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
     <div className="students-crm-layout">
       <section className="panel student-scroll-list"><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div><div className="student-search-row"><Search size={15} /><input type="text" placeholder="Search by name or ID" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search students" /></div>{visibleStudents.length === 0 && <div className="brief-item">{search ? 'No students match that search.' : 'No students in this view yet.'}</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} onClick={() => setSelectedId(student.id)}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>
       {selected ? <section className="student-detail-pane">
         {/* TOP ZONE: header + health + quick facts + next call prep — always visible without scrolling */}
         <section className="panel student-top-zone">
-          <div className="panel-head"><div><h2>{selected.display_name}</h2><p>{selected.course || 'No course'} · {selected.status} · {selected.risk}</p></div><div className="actions"><button className="btn ghost" onClick={startEditProfile}><Edit3 size={15} /> Edit</button>{!selected.archived && <button className="btn warning" onClick={() => archiveStudent(selected.id)}><Archive size={15} /> Archive</button>}</div></div>
+          <div className="panel-head"><div><h2>{selected.display_name}</h2><p>{selected.course || 'No course'} · {selected.status} · {selected.risk}</p></div><div className="actions"><select className="btn ghost" defaultValue="" onChange={(e) => { if (e.target.value) { generateSingleDraft(selected.id, e.target.value); e.target.value = ''; } }}><option value="" disabled>Draft email…</option><option value="check_in">Generic check-in</option><option value="ghost">Ghost outreach</option><option value="high_risk">High-risk plan</option><option value="course_ending">Course ending soon</option><option value="no_contact_14">No contact 14+ days</option><option value="win">Recognize a win</option></select>{drafts.filter((d) => d.student_id === selected.id && d.status === 'pending').length > 0 && <button className="btn ghost" onClick={() => setPage('outreach')}><Mail size={15} /> {drafts.filter((d) => d.student_id === selected.id && d.status === 'pending').length} pending</button>}<button className="btn ghost" onClick={startEditProfile}><Edit3 size={15} /> Edit</button>{!selected.archived && <button className="btn warning" onClick={() => archiveStudent(selected.id)}><Archive size={15} /> Archive</button>}</div></div>
           {activeWarnings.length > 0 && <FerpaWarning warnings={activeWarnings} />}
           <StudentHealthPanel student={selected} touchpoints={touchpoints} />
           <div className="quick-facts">
@@ -1393,7 +1566,7 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
           </div>
         </section>
 
-        {editingProfile && <section className="panel"><h2>Edit profile</h2><div className="form-grid"><input value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} /><div className="form-actions"><button className="btn primary" onClick={saveProfileEdit}><Save size={15} /> Save Profile</button></div></section>}
+        {editingProfile && <section className="panel"><h2>Edit profile</h2><div className="form-grid"><input value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} /><div className="form-actions"><button className="btn primary" onClick={saveProfileEdit}><Save size={15} /> Save Profile</button></div></section>}
 
         {/* TWO-COLUMN ZONE: scrollable history on left, sticky touchpoint form on right */}
         <div className="student-work-area">
@@ -1521,6 +1694,157 @@ function SettingsPage({ permissions, updatePermission }: { permissions: ModulePe
     const current = accessFor(item.module_name);
     return <div className="permission-row" key={item.module_name}><div><strong>{item.label}</strong><p>{current === 'hidden' ? 'Hidden from Adam' : current === 'view' ? 'Visible · View-only' : 'Visible · Editable'}</p></div><label className="switch-row"><Eye size={15} /> Adam Access <select value={current} onChange={(e) => updatePermission(item.module_name, e.target.value as AccessLevel)}><option value="hidden">Hidden</option><option value="view">View Only</option><option value="edit">Edit</option></select></label></div>;
   })}</div></section><section className="panel"><h2>Access rules</h2><div className="brief-item"><strong>Kaylee:</strong> admin, full Home + Work access.</div><div className="brief-item"><strong>Adam:</strong> Home only. Hidden means no sidebar item. View Only means no add/save/edit buttons. Edit means full access.</div><div className="brief-item"><strong>Students:</strong> always admin-only and FERPA-safe.</div></section></>;
+}
+
+function Outreach({ drafts, students, generateCohortDrafts, updateDraft, markDraftSent, deleteDraft }: {
+  drafts: EmailDraft[];
+  students: Student[];
+  generateCohortDrafts: (cohort: string, cohortLabel: string, kind: string) => void;
+  updateDraft: (id: string, patch: Partial<EmailDraft>) => void;
+  markDraftSent: (id: string) => void;
+  deleteDraft: (id: string) => void;
+}) {
+  const [cohort, setCohort] = useState('high_risk');
+  const [kind, setKind] = useState('check_in');
+  const [courseCode, setCourseCode] = useState('');
+  const [filter, setFilter] = useState<'pending' | 'sent' | 'all'>('pending');
+  const [search, setSearch] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editBuffer, setEditBuffer] = useState<{ subject: string; body: string }>({ subject: '', body: '' });
+
+  const cohortOptions: { value: string; label: string }[] = [
+    { value: 'high_risk', label: 'All High Risk' },
+    { value: 'ghost', label: 'Ghost risk (3+ missed)' },
+    { value: 'no_contact_14', label: 'No contact in 14+ days' },
+    { value: 'course_ending', label: 'Course ending in 30 days' },
+    { value: 'course', label: 'Specific course code…' },
+    { value: 'all_active', label: 'All active students' }
+  ];
+  const kindOptions: { value: string; label: string }[] = [
+    { value: 'check_in', label: 'Generic check-in' },
+    { value: 'ghost', label: 'Ghost outreach' },
+    { value: 'high_risk', label: 'High-risk plan' },
+    { value: 'course_ending', label: 'Course ending soon' },
+    { value: 'no_contact_14', label: 'No contact 14+ days' },
+    { value: 'win', label: 'Recognize a win' }
+  ];
+
+  function studentName(id: string | null) {
+    if (!id) return 'Unknown';
+    const s = students.find((st) => st.id === id);
+    return s ? s.display_name : 'Unknown';
+  }
+  function studentEmail(id: string | null) {
+    if (!id) return '';
+    return students.find((st) => st.id === id)?.email || '';
+  }
+  function studentMeta(id: string | null) {
+    const s = students.find((st) => st.id === id);
+    if (!s) return '';
+    return `${s.student_id ? `ID ${s.student_id} · ` : ''}${s.course || 'No course'} · ${s.status}`;
+  }
+
+  const filtered = useMemo(() => {
+    return drafts.filter((d) => {
+      if (filter === 'pending' && d.status !== 'pending') return false;
+      if (filter === 'sent' && d.status !== 'sent') return false;
+      if (search) {
+        const name = studentName(d.student_id).toLowerCase();
+        const s = search.toLowerCase();
+        if (!name.includes(s) && !(d.subject || '').toLowerCase().includes(s) && !(d.cohort_label || '').toLowerCase().includes(s)) return false;
+      }
+      return true;
+    });
+  }, [drafts, filter, search, students]);
+
+  function runGenerate() {
+    const actualCohort = cohort === 'course' ? `course:${courseCode.trim()}` : cohort;
+    const label = cohort === 'course' ? `Course ${courseCode.toUpperCase()}` : (cohortOptions.find((c) => c.value === cohort)?.label || cohort);
+    generateCohortDrafts(actualCohort, label, kind);
+  }
+
+  function startEdit(d: EmailDraft) {
+    setEditingId(d.id);
+    setEditBuffer({ subject: d.subject, body: d.body });
+  }
+  function saveEdit(id: string) {
+    updateDraft(id, { subject: editBuffer.subject, body: editBuffer.body, edited: true });
+    setEditingId(null);
+  }
+
+  async function copyToClipboard(text: string) {
+    await navigator.clipboard?.writeText(text);
+  }
+
+  return <>
+    <Header title="Outreach Drafts" sub="Generate cohort-based email drafts, review and edit, then copy into Outlook to send. Marking a draft sent auto-logs a touchpoint." />
+    <section className="panel">
+      <h2>Generate cohort drafts</h2>
+      <div className="form-grid">
+        <label className="date-field"><span>Cohort</span>
+          <select value={cohort} onChange={(e) => setCohort(e.target.value)}>
+            {cohortOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+        <label className="date-field"><span>Email template</span>
+          <select value={kind} onChange={(e) => setKind(e.target.value)}>
+            {kindOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+        {cohort === 'course' && <input placeholder="Course code, e.g. D316" value={courseCode} onChange={(e) => setCourseCode(e.target.value)} />}
+      </div>
+      <div className="form-actions">
+        <button className="btn primary" onClick={runGenerate}><Sparkles size={15} /> Generate drafts</button>
+      </div>
+    </section>
+
+    <section className="panel">
+      <div className="panel-head">
+        <h2>Draft inbox ({filtered.length})</h2>
+        <div className="actions">
+          <select value={filter} onChange={(e) => setFilter(e.target.value as 'pending' | 'sent' | 'all')}>
+            <option value="pending">Pending</option>
+            <option value="sent">Sent</option>
+            <option value="all">All</option>
+          </select>
+          <input placeholder="Search name, subject, cohort" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+      </div>
+      {filtered.length === 0 && <div className="brief-item">No drafts match. Generate a cohort batch above or draft directly from a student profile.</div>}
+      {filtered.map((d) => {
+        const isEditing = editingId === d.id;
+        const email = studentEmail(d.student_id);
+        return <div className="touchpoint-card" key={d.id}>
+          <div className="panel-head">
+            <div>
+              <strong>{studentName(d.student_id)}</strong>
+              <p>{studentMeta(d.student_id)} · {d.cohort_label || 'single'} · {d.template_kind}{d.edited ? ' · edited' : ''}{d.status === 'sent' ? ` · sent ${d.sent_at ? new Date(d.sent_at).toLocaleString([], { month: 'short', day: 'numeric' }) : ''}` : ''}</p>
+            </div>
+            <Mail size={17} />
+          </div>
+          {email ? <p style={{ fontSize: 13, color: 'var(--muted, #888)' }}>To: {email}</p> : <p style={{ fontSize: 13, color: '#c44' }}>No email on file — add one on the student profile before sending.</p>}
+          {isEditing ? <>
+            <input value={editBuffer.subject} onChange={(e) => setEditBuffer({ ...editBuffer, subject: e.target.value })} />
+            <textarea value={editBuffer.body} onChange={(e) => setEditBuffer({ ...editBuffer, body: e.target.value })} rows={10} />
+            <div className="form-actions">
+              <button className="btn primary" onClick={() => saveEdit(d.id)}><Save size={15} /> Save edits</button>
+              <button className="btn ghost" onClick={() => setEditingId(null)}>Cancel</button>
+            </div>
+          </> : <>
+            <p><strong>Subject:</strong> {d.subject}</p>
+            <details open><summary>Email body</summary><pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 14 }}>{d.body}</pre></details>
+            <div className="form-actions">
+              <button className="btn primary" onClick={() => copyToClipboard(`Subject: ${d.subject}\n\n${d.body}`)}><Copy size={15} /> Copy subject + body</button>
+              <button className="btn ghost" onClick={() => copyToClipboard(d.body)}><Copy size={15} /> Copy body only</button>
+              {d.status === 'pending' && <button className="btn ghost" onClick={() => startEdit(d)}><Edit3 size={15} /> Edit</button>}
+              {d.status === 'pending' && <button className="btn primary" onClick={() => markDraftSent(d.id)}><Send size={15} /> Mark sent</button>}
+              <button className="btn warning" onClick={() => { if (confirm('Delete this draft?')) deleteDraft(d.id); }}><Trash2 size={15} /> Delete</button>
+            </div>
+          </>}
+        </div>;
+      })}
+    </section>
+  </>;
 }
 
 function Placeholder({ title, sub }: { title: string; sub: string }) {
