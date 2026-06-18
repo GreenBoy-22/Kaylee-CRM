@@ -257,6 +257,115 @@ const vehicles = [
   { name: '2013 Nissan Leaf', miles: 82500, type: 'EV', urgent: ['12V auxiliary battery likely due', 'HV battery health check'], ok: ['Registration tracked'] }
 ];
 
+const COMPACT_ROW_CSS = `
+.ct-panel { padding-bottom: 6px; }
+.ct-list { display: flex; flex-direction: column; }
+
+.ct-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border, rgba(0,0,0,0.07));
+}
+.ct-row:last-child { border-bottom: none; }
+
+.ct-checkbox {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 1.5px solid var(--muted, #9aa0a6);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  color: transparent;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.ct-checkbox:disabled { cursor: default; }
+.ct-checkbox:hover:not(:disabled) { border-color: var(--accent, #4F46E5); }
+.ct-checkbox.checked { background: var(--accent, #4F46E5); border-color: var(--accent, #4F46E5); color: #fff; }
+.ct-checkbox.dot-urgent { border-color: #e5484d; }
+.ct-checkbox.dot-warning { border-color: #f5a524; }
+.ct-checkbox.dot-normal { border-color: var(--accent, #4F46E5); }
+.ct-checkbox.dot-good { border-color: #9aa0a6; }
+
+.ct-body { flex: 1; min-width: 0; }
+
+.ct-title {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text, #1a1a1a);
+  word-break: break-word;
+}
+.ct-title-done { text-decoration: line-through; color: var(--muted, #9aa0a6); }
+
+.ct-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 3px;
+  row-gap: 2px;
+}
+
+.ct-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--muted, #9aa0a6);
+  white-space: nowrap;
+}
+.ct-meta-item svg { flex-shrink: 0; }
+.ct-meta-overdue { color: #e5484d; font-weight: 600; }
+.ct-meta-due { color: #2f9e44; }
+.ct-meta-muted { color: var(--muted, #9aa0a6); }
+.ct-meta-tag { color: var(--muted, #9aa0a6); }
+
+.ct-reason {
+  margin-top: 4px;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--accent, #4F46E5);
+  opacity: 0.85;
+}
+
+.ct-day-group { border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); padding: 4px 0; }
+.ct-day-group:last-child { border-bottom: none; }
+.ct-day-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 4px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+}
+.ct-day-summary::-webkit-details-marker { display: none; }
+.ct-day-summary strong { font-size: 13px; letter-spacing: 0.01em; }
+.ct-day-count {
+  font-size: 12px;
+  color: var(--muted, #9aa0a6);
+  background: var(--surface-2, rgba(0,0,0,0.04));
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.ct-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 6px;
+  font-size: 13px;
+  color: var(--muted, #9aa0a6);
+}
+`;
+
 const briefing = [
   'Today focuses on approval, quick wins, and expiring inventory.',
   'Adam should stay at 2-3 tasks max; no Sunday tasks should be generated.',
@@ -1083,13 +1192,64 @@ Kaylee`;
   async function completeChore(id: string) {
     if (!canEdit('chores')) return setMessage('Chores are view-only for Adam right now.');
     const now = new Date().toISOString();
+    const target = choreTasks.find((c) => c.id === id);
+
+    // Optimistic local update so the UI responds immediately.
     setChoreTasks((current) => current.map((c) => c.id === id ? { ...c, is_completed: true, status: 'completed', last_completed_at: now } : c));
     if (!supabase) return;
+
     const { error } = await supabase.from('chore_tasks').update({
       is_completed: true, status: 'completed', last_completed_at: now
     }).eq('id', id);
-    if (error) setMessage(`Chore update failed: ${error.message}`);
-    else setMessage('Chore marked done.');
+    if (error) return setMessage(`Chore update failed: ${error.message}`);
+
+    // Tell Todoist this occurrence is done. For recurring chores this is
+    // what advances the due date to the next occurrence — without this
+    // call, Todoist never hears about it and the SAME stale due date
+    // comes back on every future sync.
+    if (target?.todoist_task_id) {
+      try {
+        const { data, error: fnError } = await supabase.functions.invoke('todoist-complete-task', {
+          body: { todoist_task_id: target.todoist_task_id }
+        });
+        if (fnError) throw new Error(fnError.message);
+        if (data?.success === false) throw new Error(data?.error || 'Complete failed');
+
+        if (data?.fully_completed) {
+          // One-off task: Todoist has no next occurrence. Leave it marked
+          // completed locally; the next sync will soft-delete it once it
+          // drops off Todoist's active list.
+          setMessage('Chore completed in Todoist.');
+        } else if (data?.next_due_date) {
+          // Recurring task rolled forward — reflect the new due date and
+          // reopen it locally so it's not stuck showing "done" forever.
+          const nextDue = data.next_due_date as string;
+          const nextRecurrence = data.next_recurrence as string | null;
+          setChoreTasks((current) => current.map((c) => c.id === id ? {
+            ...c,
+            is_completed: false,
+            status: 'sent',
+            due_date: nextDue,
+            recurrence: nextRecurrence ?? c.recurrence
+          } : c));
+          await supabase.from('chore_tasks').update({
+            is_completed: false,
+            status: 'sent',
+            due_date: nextDue,
+            recurrence: nextRecurrence ?? target.recurrence,
+            updated_at: new Date().toISOString()
+          }).eq('id', id);
+          setMessage(`Chore done — next occurrence ${new Date(nextDue).toLocaleDateString()}.`);
+        } else {
+          setMessage('Chore marked done. Todoist confirmed but did not return a next due date.');
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setMessage(`Marked done locally, but Todoist sync failed: ${msg}. It may show overdue again until you sync.`);
+      }
+    } else {
+      setMessage('Chore marked done.');
+    }
   }
 
   async function uncompleteChore(id: string) {
@@ -1220,6 +1380,7 @@ Kaylee`;
 
   return (
     <div className="app-shell">
+      <style>{COMPACT_ROW_CSS}</style>
       <header className="topbar">
         <div className="logo"><span className="logo-mark">KH</span><span>Kaylee's Hub</span></div>
         <div className="toggle-wrap">
@@ -1635,13 +1796,13 @@ function choreToRowProps(chore: ChoreTask, showReason: boolean) {
 function Today({ tasks, choreTasks, completeTask, completeChore, editable, compact = false }: { tasks: TaskItem[]; choreTasks: ChoreTask[]; completeTask: (id: string) => void; completeChore: (id: string) => void; editable: boolean; compact?: boolean }) {
   const list = compact ? tasks.slice(0, 3) : tasks;
   const tackleList = useMemo(() => computeTackleToday(choreTasks), [choreTasks]);
-  const shown = compact ? tackleList.slice(0, 3) : tackleList.slice(0, 8);
+  const shown = compact ? tackleList.slice(0, 3) : tackleList.slice(0, 5);
 
   return <>
     <section className="panel ct-panel">
       <div className="panel-head">
         <h2>{compact ? "Today's Tackle List" : "Today's Task Outlook Center"}</h2>
-        {!compact && <span className="readonly-pill"><Zap size={14} /> {tackleList.length} picks</span>}
+        {!compact && <span className="readonly-pill"><Zap size={14} /> {Math.min(tackleList.length, 5)} picks{tackleList.length > 5 ? ` of ${tackleList.length}` : ''}</span>}
       </div>
       {shown.length === 0 && <div className="brief-item">No chores queued for today. Run <strong>Sync from Todoist</strong> on the Chores tab to pull the latest, or add a new task in Todoist.</div>}
       <div className="ct-list">
@@ -2433,7 +2594,8 @@ function Chores({
     <section className="panel ct-panel">
       <div className="panel-head">
         <h2><Zap size={18} style={{ verticalAlign: 'text-bottom' }} /> Tackle Today</h2>
-        <span className="readonly-pill">{tackleList.length} picks for {dayOfWeekName(new Date())}</span>
+        <span className="readonly-pill">{Math.min(tackleList.length, 5)} picks for {dayOfWeekName(new Date())}</span>
+        {tackleList.length > 5 && <span className="readonly-pill" style={{ marginLeft: 8 }}>{tackleList.length - 5} more this week</span>}
       </div>
       {tackleList.length === 0 && <div className="brief-item">
         {choreTasks.length === 0
@@ -2441,7 +2603,7 @@ function Chores({
           : 'No chores due today — enjoy a quiet one, or grab one from the week below.'}
       </div>}
       <div className="ct-list">
-        {tackleList.slice(0, 8).map((chore) => {
+        {tackleList.slice(0, 5).map((chore) => {
           const props = choreToRowProps(chore, true);
           return <CompactTaskRow
             key={chore.id}
