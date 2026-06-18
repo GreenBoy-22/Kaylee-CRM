@@ -1,0 +1,181 @@
+/* ============================================================
+   COMPACT TASK ROW (Todoist-density)
+   Add this block to your existing App.css / index.css.
+   Uses the same CSS variables already referenced in App.tsx:
+   --muted, --accent — with safe fallbacks if not yet defined.
+   ============================================================ */
+
+.ct-panel {
+  /* tighten panel padding slightly so dense rows don't feel boxed-in */
+  padding-bottom: 6px;
+}
+
+.ct-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Row ---- */
+.ct-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--border, rgba(0,0,0,0.06));
+  min-height: 0;
+}
+
+.ct-row:last-child {
+  border-bottom: none;
+}
+
+/* ---- Checkbox ---- */
+.ct-checkbox {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 1.5px solid var(--muted, #9aa0a6);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  color: transparent;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.ct-checkbox:disabled {
+  cursor: default;
+}
+
+.ct-checkbox:hover:not(:disabled) {
+  border-color: var(--accent, #4F46E5);
+}
+
+.ct-checkbox.checked {
+  background: var(--accent, #4F46E5);
+  border-color: var(--accent, #4F46E5);
+  color: #fff;
+}
+
+/* Priority dot ring colors when uncompleted */
+.ct-checkbox.dot-urgent { border-color: #e5484d; }
+.ct-checkbox.dot-warning { border-color: #f5a524; }
+.ct-checkbox.dot-normal { border-color: var(--accent, #4F46E5); }
+.ct-checkbox.dot-good { border-color: #9aa0a6; }
+
+/* ---- Body / title / meta ---- */
+.ct-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.ct-title {
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--text, #1a1a1a);
+  word-break: break-word;
+}
+
+.ct-title-done {
+  text-decoration: line-through;
+  color: var(--muted, #9aa0a6);
+}
+
+.ct-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.ct-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11.5px;
+  line-height: 1.2;
+  color: var(--muted, #9aa0a6);
+  white-space: nowrap;
+}
+
+.ct-meta-item svg {
+  flex-shrink: 0;
+}
+
+.ct-meta-overdue {
+  color: #e5484d;
+  font-weight: 600;
+}
+
+.ct-meta-due {
+  color: #2f9e44;
+}
+
+.ct-meta-muted {
+  color: var(--muted, #9aa0a6);
+}
+
+.ct-meta-tag {
+  color: var(--muted, #9aa0a6);
+}
+
+/* ---- Reason line (Tackle Today only) ---- */
+.ct-reason {
+  margin-top: 3px;
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--accent, #4F46E5);
+  opacity: 0.85;
+}
+
+/* ---- Day group (This Week) ---- */
+.ct-day-group {
+  border-bottom: 1px solid var(--border, rgba(0,0,0,0.06));
+  padding: 4px 0;
+}
+
+.ct-day-group:last-child {
+  border-bottom: none;
+}
+
+.ct-day-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 4px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+}
+
+.ct-day-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ct-day-summary strong {
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+
+.ct-day-count {
+  font-size: 11.5px;
+  color: var(--muted, #9aa0a6);
+  background: var(--surface-2, rgba(0,0,0,0.04));
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+/* Section heading variant, if used standalone */
+.ct-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 6px;
+  font-size: 13px;
+  color: var(--muted, #9aa0a6);
+}

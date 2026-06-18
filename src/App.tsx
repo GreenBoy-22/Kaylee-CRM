@@ -4,7 +4,7 @@ import {
   Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, ChevronRight, ChevronDown, ExternalLink
+  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 
@@ -255,13 +255,6 @@ const adamPlan = [
 const vehicles = [
   { name: '2016 Toyota Corolla', miles: 134000, type: 'Gas', urgent: ['Spark plugs overdue', 'Transmission fluid unknown'], ok: ['Brakes completed 2025', 'Tire rotation at 133,900 mi'] },
   { name: '2013 Nissan Leaf', miles: 82500, type: 'EV', urgent: ['12V auxiliary battery likely due', 'HV battery health check'], ok: ['Registration tracked'] }
-];
-
-const homeSuggestions = [
-  { title: 'Replace HVAC filter', urgency: 'urgent', reason: 'Georgia pollen + renter-safe maintenance.', effort: '10 min' },
-  { title: 'Check under sinks for leaks', urgency: 'soon', reason: 'Tenant-only prevention before humidity damage.', effort: '15 min' },
-  { title: 'Pest entry point walkthrough', urgency: 'seasonal', reason: 'Canton summer pest pressure.', effort: '20 min' },
-  { title: 'Clean dryer lint path', urgency: 'routine', reason: 'Low-cost fire prevention.', effort: '15 min' }
 ];
 
 const briefing = [
@@ -516,10 +509,10 @@ Kaylee`;
 
   function ferpaWarnings(text: string) {
     const warnings: string[] = [];
-    if (/\d{6,}/.test(text)) warnings.push('Possible student ID or long identifying number');
+    if (/\d{6,}/.test(text)) warnings.push('Possible student ID or long identifying number');
     if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text)) warnings.push('Possible email address');
-    if (/\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/.test(text)) warnings.push('Possible phone number');
-    if (/\d{3}-\d{2}-\d{4}/.test(text)) warnings.push('Possible SSN-like number');
+    if (/\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/.test(text)) warnings.push('Possible phone number');
+    if (/\d{3}-\d{2}-\d{4}/.test(text)) warnings.push('Possible SSN-like number');
     return warnings;
   }
 
@@ -1542,46 +1535,142 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, 
   </>;
 }
 
+/* ============================================================
+   COMPACT TASK ROW — Todoist-density row used across Today,
+   Chores, and Adam's Tasks. Circle checkbox, title, then a thin
+   metadata line (time/recurrence/project/section) underneath.
+   ============================================================ */
+
+function CompactTaskRow({
+  title, completed, onToggle, editable, timeLabel, overdue,
+  recurrence, projectLabel, sectionLabel, priorityDot, reason
+}: {
+  title: string;
+  completed: boolean;
+  onToggle: () => void;
+  editable: boolean;
+  timeLabel?: string | null;
+  overdue?: boolean;
+  recurrence?: string | null;
+  projectLabel?: string | null;
+  sectionLabel?: string | null;
+  priorityDot?: 'urgent' | 'warning' | 'normal' | 'good' | null;
+  reason?: string | null;
+}) {
+  const metaParts: { icon: React.ReactNode; text: string; tone?: 'overdue' | 'due' | 'muted' }[] = [];
+  if (timeLabel) metaParts.push({ icon: <Clock size={11} />, text: timeLabel, tone: overdue ? 'overdue' : 'due' });
+  if (recurrence) metaParts.push({ icon: <Repeat size={11} />, text: recurrence, tone: 'muted' });
+
+  return (
+    <div className="ct-row">
+      <button
+        type="button"
+        className={`ct-checkbox ${completed ? 'checked' : ''} ${priorityDot && !completed ? `dot-${priorityDot}` : ''}`}
+        onClick={editable ? onToggle : undefined}
+        disabled={!editable}
+        aria-label={completed ? 'Mark not done' : 'Mark done'}
+      >
+        {completed && <CheckCircle2 size={13} strokeWidth={2.5} />}
+      </button>
+      <div className="ct-body">
+        <div className={`ct-title ${completed ? 'ct-title-done' : ''}`}>{title}</div>
+        {(metaParts.length > 0 || projectLabel || sectionLabel) && (
+          <div className="ct-meta">
+            {metaParts.map((m, i) => (
+              <span className={`ct-meta-item ct-meta-${m.tone || 'muted'}`} key={i}>{m.icon}{m.text}</span>
+            ))}
+            {(projectLabel || sectionLabel) && (
+              <span className="ct-meta-item ct-meta-tag">
+                <Hash size={11} />
+                {projectLabel}{sectionLabel ? ` / ${sectionLabel}` : ''}
+              </span>
+            )}
+          </div>
+        )}
+        {reason && <div className="ct-reason">{reason}</div>}
+      </div>
+    </div>
+  );
+}
+
+function choreToRowProps(chore: ChoreTask, showReason: boolean) {
+  const due = chore.due_date ? new Date(chore.due_date) : null;
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  const overdue = due ? due < now && !sameYmd(due, new Date()) : false;
+  const priorityDot: 'urgent' | 'warning' | 'normal' | 'good' =
+    chore.priority === 4 ? 'urgent' : chore.priority === 3 ? 'warning' : chore.priority === 2 ? 'normal' : 'good';
+
+  let timeLabel: string | null = null;
+  if (due) {
+    const hasTime = chore.due_date && chore.due_date.includes('T');
+    if (overdue) timeLabel = `Overdue · ${due.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
+    else if (hasTime) timeLabel = due.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    else timeLabel = due.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  }
+
+  let reason: string | null = null;
+  if (showReason) {
+    const parts: string[] = [];
+    if (overdue && due) parts.push(`Overdue since ${due.toLocaleDateString()}`);
+    else if (due && sameYmd(due, new Date())) parts.push('Due today');
+    else if (chore.day_of_week === dayOfWeekName(new Date())) parts.push(`Scheduled for ${chore.day_of_week}`);
+    else if (chore.day_of_week === 'Daily') parts.push('Daily recurring');
+    if (chore.priority >= 3) parts.push('Higher priority');
+    reason = parts.length ? `Why today: ${parts.join(' · ')}` : null;
+  }
+
+  return {
+    title: chore.name,
+    completed: chore.is_completed,
+    timeLabel,
+    overdue,
+    recurrence: chore.recurrence,
+    projectLabel: chore.source_project,
+    sectionLabel: chore.todoist_section || chore.room,
+    priorityDot,
+    reason
+  };
+}
+
 function Today({ tasks, choreTasks, completeTask, completeChore, editable, compact = false }: { tasks: TaskItem[]; choreTasks: ChoreTask[]; completeTask: (id: string) => void; completeChore: (id: string) => void; editable: boolean; compact?: boolean }) {
   const list = compact ? tasks.slice(0, 3) : tasks;
   const tackleList = useMemo(() => computeTackleToday(choreTasks), [choreTasks]);
   const shown = compact ? tackleList.slice(0, 3) : tackleList.slice(0, 8);
 
   return <>
-    <section className="panel">
+    <section className="panel ct-panel">
       <div className="panel-head">
         <h2>{compact ? "Today's Tackle List" : "Today's Task Outlook Center"}</h2>
         {!compact && <span className="readonly-pill"><Zap size={14} /> {tackleList.length} picks</span>}
       </div>
       {shown.length === 0 && <div className="brief-item">No chores queued for today. Run <strong>Sync from Todoist</strong> on the Chores tab to pull the latest, or add a new task in Todoist.</div>}
-      {shown.map((chore) => {
-        const due = chore.due_date ? new Date(chore.due_date) : null;
-        const overdue = due ? due.getTime() < Date.now() && !sameYmd(due, new Date()) : false;
-        const priorityLabel = ['', 'P4', 'P3', 'P2', 'P1'][chore.priority] || 'P4';
-        const priorityClass = chore.priority === 4 ? 'urgent' : chore.priority === 3 ? 'warning' : chore.priority === 2 ? 'normal' : 'good';
-        return <div className={`task-card ${overdue ? 'urgent' : priorityClass}`} key={chore.id}>
-          {editable
-            ? <button className="check" onClick={() => completeChore(chore.id)} title="Mark done" />
-            : <span className="check disabled" />}
-          <div>
-            <strong>{chore.name}</strong>
-            <p>
-              {chore.room || chore.todoist_section || 'Anywhere'} · {chore.effort_level || 'medium'}
-              {chore.recurrence ? ` · ${chore.recurrence}` : ''}
-              {overdue && due ? ` · Overdue (was ${due.toLocaleDateString()})` : ''}
-              {!overdue && due ? ` · Due ${due.toLocaleDateString()}` : ''}
-              {' · '}{priorityLabel}
-            </p>
-          </div>
-        </div>;
-      })}
+      <div className="ct-list">
+        {shown.map((chore) => {
+          const props = choreToRowProps(chore, true);
+          return <CompactTaskRow
+            key={chore.id}
+            {...props}
+            editable={editable}
+            onToggle={() => completeChore(chore.id)}
+          />;
+        })}
+      </div>
     </section>
-    {!compact && tasks.length > 0 && <section className="panel">
+    {!compact && tasks.length > 0 && <section className="panel ct-panel">
       <h2>Other Tasks</h2>
-      {list.map((task) => <div className={`task-card ${task.priority}`} key={task.id}>
-        {editable ? <button className="check" onClick={() => completeTask(task.id)} /> : <span className="check disabled" />}
-        <div><strong>{task.title}</strong><p>{task.owner} · {task.minutes} min · {task.source} · {task.status}</p></div>
-      </div>)}
+      <div className="ct-list">
+        {list.map((task) => <CompactTaskRow
+          key={task.id}
+          title={task.title}
+          completed={task.status === 'completed'}
+          onToggle={() => completeTask(task.id)}
+          editable={editable}
+          priorityDot={task.priority}
+          projectLabel={task.source}
+          reason={null}
+          timeLabel={task.minutes ? `${task.minutes} min` : null}
+        />)}
+      </div>
     </section>}
   </>;
 }
@@ -1655,7 +1744,7 @@ function Inventory({ inventory, createItem, updateQuantity, editable }: { invent
 }
 
 function Adam({ editable }: { editable: boolean }) {
-  return <><Header title="Adam’s Tasks" sub="ADHD-safe, Kaylee-approved task planning.">{editable ? <button className="btn primary">Create task plan</button> : <span className="readonly-pill"><Eye size={14} /> View only</span>}</Header><Stats items={[["Pending approval", '3'], ['Max/day', '2–3'], ['Heavy day', 'Saturday'], ['Sunday', 'Rest']]} /><div className="day-grid">{adamPlan.map((day) => <div className="day-card" key={day.day}><h3>{day.day}</h3>{day.tasks.map((task) => <p key={task}>{task}</p>)}<small>{day.rationale}</small></div>)}</div></>;
+  return <><Header title="Adam’s Tasks" sub="ADHD-safe, Kaylee-approved task planning.">{editable ? <button className="btn primary">Create task plan</button> : <span className="readonly-pill"><Eye size={14} /> View only</span>}</Header><Stats items={[["Pending approval", '3'], ['Max/day', '2–3'], ['Heavy day', 'Saturday'], ['Sunday', 'Rest']]} /><div className="day-grid">{adamPlan.map((day) => <div className="day-card" key={day.day}><h3>{day.day}</h3><div className="ct-list">{day.tasks.map((task) => <CompactTaskRow key={task} title={task} completed={false} onToggle={() => undefined} editable={false} reason={null} />)}</div><small>{day.rationale}</small></div>)}</div></>;
 }
 
 function Vehicles() {
@@ -2341,7 +2430,7 @@ function Chores({
     </section>}
 
     {/* ============ TACKLE TODAY HERO ============ */}
-    <section className="panel">
+    <section className="panel ct-panel">
       <div className="panel-head">
         <h2><Zap size={18} style={{ verticalAlign: 'text-bottom' }} /> Tackle Today</h2>
         <span className="readonly-pill">{tackleList.length} picks for {dayOfWeekName(new Date())}</span>
@@ -2351,14 +2440,17 @@ function Chores({
           ? 'No chores synced yet. Click Sync from Todoist to pull your House & Daily Life + Gardening tasks.'
           : 'No chores due today — enjoy a quiet one, or grab one from the week below.'}
       </div>}
-      {tackleList.slice(0, 8).map((chore) => <ChoreRow
-        key={chore.id}
-        chore={chore}
-        editable={editable}
-        complete={completeChore}
-        uncomplete={uncompleteChore}
-        showReason
-      />)}
+      <div className="ct-list">
+        {tackleList.slice(0, 8).map((chore) => {
+          const props = choreToRowProps(chore, true);
+          return <CompactTaskRow
+            key={chore.id}
+            {...props}
+            editable={editable}
+            onToggle={() => chore.is_completed ? uncompleteChore(chore.id) : completeChore(chore.id)}
+          />;
+        })}
+      </div>
     </section>
 
     {/* ============ THIS MONTH'S SUGGESTIONS ============ */}
@@ -2384,7 +2476,7 @@ function Chores({
     </section>}
 
     {/* ============ THIS WEEK BY DAY ============ */}
-    <section className="panel">
+    <section className="panel ct-panel">
       <div className="panel-head">
         <h2>This Week</h2>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
@@ -2395,80 +2487,28 @@ function Chores({
       {dayBuckets.length === 0 && <div className="brief-item">Nothing scheduled across the week. Sync Todoist or add tasks there.</div>}
       {dayBuckets.map((bucket) => {
         const isExpanded = expandedDay === bucket.label || dayBuckets.length <= 3;
-        return <details key={bucket.label} open={isExpanded} onToggle={(e) => {
+        return <details key={bucket.label} className="ct-day-group" open={isExpanded} onToggle={(e) => {
           if ((e.target as HTMLDetailsElement).open) setExpandedDay(bucket.label);
         }}>
-          <summary style={{ cursor: 'pointer', padding: '8px 0', userSelect: 'none' }}>
+          <summary className="ct-day-summary">
             <strong>{bucket.label}</strong>
-            <span style={{ marginLeft: 8, color: 'var(--muted, #888)', fontSize: 13 }}>
-              {bucket.chores.length} {bucket.chores.length === 1 ? 'chore' : 'chores'}
-            </span>
+            <span className="ct-day-count">{bucket.chores.length}</span>
           </summary>
-          {bucket.chores.map((chore) => <ChoreRow
-            key={chore.id}
-            chore={chore}
-            editable={editable}
-            complete={completeChore}
-            uncomplete={uncompleteChore}
-          />)}
+          <div className="ct-list">
+            {bucket.chores.map((chore) => {
+              const props = choreToRowProps(chore, false);
+              return <CompactTaskRow
+                key={chore.id}
+                {...props}
+                editable={editable}
+                onToggle={() => chore.is_completed ? uncompleteChore(chore.id) : completeChore(chore.id)}
+              />;
+            })}
+          </div>
         </details>;
       })}
     </section>
   </>;
-}
-
-function ChoreRow({ chore, editable, complete, uncomplete, showReason = false }: {
-  chore: ChoreTask;
-  editable: boolean;
-  complete: (id: string) => void;
-  uncomplete: (id: string) => void;
-  showReason?: boolean;
-}) {
-  const due = chore.due_date ? new Date(chore.due_date) : null;
-  const now = new Date(); now.setHours(0,0,0,0);
-  const overdue = due ? due < now : false;
-  const priorityLabel = ['', 'P4', 'P3', 'P2', 'P1'][chore.priority] || 'P4';
-  const cardClass = chore.is_completed
-    ? 'good'
-    : overdue ? 'urgent'
-    : chore.priority === 4 ? 'urgent'
-    : chore.priority === 3 ? 'warning'
-    : 'normal';
-
-  const reasonParts: string[] = [];
-  if (showReason) {
-    if (overdue && due) reasonParts.push(`Overdue since ${due.toLocaleDateString()}`);
-    else if (due && sameYmd(due, new Date())) reasonParts.push('Due today');
-    else if (chore.day_of_week === dayOfWeekName(new Date())) reasonParts.push(`Scheduled for ${chore.day_of_week}`);
-    else if (chore.day_of_week === 'Daily') reasonParts.push('Daily recurring');
-    if (chore.priority >= 3) reasonParts.push('Higher priority');
-  }
-
-  return <div className={`task-card ${cardClass}`}>
-    {editable
-      ? <button
-          className="check"
-          onClick={() => chore.is_completed ? uncomplete(chore.id) : complete(chore.id)}
-          title={chore.is_completed ? 'Mark not done' : 'Mark done'}
-        >
-          {chore.is_completed ? <CheckCircle2 size={16} /> : null}
-        </button>
-      : <span className="check disabled" />}
-    <div>
-      <strong style={{ textDecoration: chore.is_completed ? 'line-through' : 'none' }}>{chore.name}</strong>
-      <p>
-        {chore.room || chore.todoist_section || chore.source_project || 'Anywhere'}
-        {' · '}{chore.effort_level || 'medium'}
-        {chore.recurrence ? ` · ${chore.recurrence}` : ''}
-        {' · '}{priorityLabel}
-        {chore.last_completed_at ? ` · Last done ${new Date(chore.last_completed_at).toLocaleDateString()}` : ''}
-      </p>
-      {chore.description && <p style={{ color: 'var(--muted, #888)', fontSize: 12, marginTop: 4 }}>{chore.description}</p>}
-      {showReason && reasonParts.length > 0 && <small style={{ color: 'var(--accent, #4F46E5)' }}>
-        Why today: {reasonParts.join(' · ')}
-      </small>}
-    </div>
-  </div>;
 }
 
 function CompactSuggestionCard({ suggestion, editable, onAdd, onDone, onSnooze, onDismiss }: {
