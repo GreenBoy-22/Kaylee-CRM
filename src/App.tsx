@@ -3,7 +3,8 @@ import type { Session } from '@supabase/supabase-js';
 import {
   Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Plus, Copy, RefreshCw, Settings, LogOut,
-  Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2
+  Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
+  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, ChevronRight, ChevronDown, ExternalLink
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 
@@ -114,6 +115,62 @@ type TaskItem = {
   priority: Priority;
   status: string;
   source: string;
+};
+
+type ChoreTask = {
+  id: string;
+  name: string;
+  description: string | null;
+  day_of_week: string;
+  room: string | null;
+  recurrence: string | null;
+  effort_level: 'light' | 'medium' | 'heavy' | string;
+  estimated_minutes: number | null;
+  priority: number;
+  due_date: string | null;
+  todoist_task_id: string | null;
+  todoist_section: string | null;
+  source_project: string | null;
+  is_completed: boolean;
+  status: string;
+  deleted_in_todoist: boolean;
+  last_completed_at: string | null;
+  last_synced_at: string | null;
+  labels: string[] | null;
+  notes: string | null;
+};
+
+type ChoreSuggestion = {
+  id: string;
+  title: string;
+  description: string;
+  why_it_matters: string;
+  category: 'homeowner' | 'vehicle' | 'tool' | 'dog' | 'garden' | 'preserving' | 'seasonal' | 'safety' | string;
+  effort_level: 'light' | 'medium' | 'heavy' | string;
+  estimated_minutes: number;
+  frequency: string;
+  month_triggers: number[] | null;
+  origin: 'seed' | 'manual' | 'ai' | string;
+  status: 'pending' | 'snoozed' | 'dismissed' | 'added' | 'done' | string;
+  snoozed_until: string | null;
+  last_done_at: string | null;
+  next_due_at: string | null;
+  added_to_todoist_at: string | null;
+  todoist_task_id: string | null;
+  required_tools: string[] | null;
+  tags: string[] | null;
+};
+
+type TodoistSyncState = {
+  id: number;
+  last_sync_at: string | null;
+  last_sync_status: 'never' | 'success' | 'error' | 'running' | string;
+  last_sync_error: string | null;
+  last_sync_added: number;
+  last_sync_updated: number;
+  last_sync_removed: number;
+  source_project_ids: string[];
+  source_project_names: string[];
 };
 
 type NavEntry = readonly [Page, string, React.ElementType];
@@ -239,6 +296,10 @@ function App() {
   const [touchpoints, setTouchpoints] = useState<Touchpoint[]>(seedTouchpoints);
   const [tasks, setTasks] = useState<TaskItem[]>(seedTasks);
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
+  const [choreTasks, setChoreTasks] = useState<ChoreTask[]>([]);
+  const [choreSuggestions, setChoreSuggestions] = useState<ChoreSuggestion[]>([]);
+  const [syncState, setSyncState] = useState<TodoistSyncState | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [permissions, setPermissions] = useState<ModulePermission[]>(defaultAdamPermissions);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('Ready.');
@@ -307,13 +368,19 @@ function App() {
     if (!supabase) return;
     setLoading(true);
     try {
-      const [invResult, studentResult, touchpointResult, taskResult, permissionResult, draftResult] = await Promise.all([
+      const [
+        invResult, studentResult, touchpointResult, taskResult,
+        permissionResult, draftResult, choreResult, suggestionResult, syncStateResult
+      ] = await Promise.all([
         supabase.from('inventory_items').select('*').order('created_at', { ascending: false }),
         supabase.from('students').select('*').order('created_at', { ascending: false }),
         supabase.from('student_touchpoints').select('*').order('touchpoint_date', { ascending: false }),
         supabase.from('tasks').select('*').order('created_at', { ascending: false }),
         supabase.from('module_permissions').select('*').eq('role', 'limited').order('module_name', { ascending: true }),
-        supabase.from('email_drafts').select('*').order('created_at', { ascending: false })
+        supabase.from('email_drafts').select('*').order('created_at', { ascending: false }),
+        supabase.from('chore_tasks').select('*').eq('deleted_in_todoist', false).order('priority', { ascending: false }),
+        supabase.from('chore_suggestions').select('*').order('category', { ascending: true }),
+        supabase.from('todoist_sync_state').select('*').eq('id', 1).maybeSingle()
       ]);
 
       if (!invResult.error && invResult.data) setInventory(invResult.data as InventoryItem[]);
@@ -321,6 +388,9 @@ function App() {
       if (!touchpointResult.error && touchpointResult.data) setTouchpoints(touchpointResult.data as Touchpoint[]);
       if (!taskResult.error && taskResult.data) setTasks(taskResult.data as TaskItem[]);
       if (!draftResult.error && draftResult.data) setDrafts(draftResult.data as EmailDraft[]);
+      if (!choreResult.error && choreResult.data) setChoreTasks(choreResult.data as ChoreTask[]);
+      if (!suggestionResult.error && suggestionResult.data) setChoreSuggestions(suggestionResult.data as ChoreSuggestion[]);
+      if (!syncStateResult.error && syncStateResult.data) setSyncState(syncStateResult.data as TodoistSyncState);
       if (!permissionResult.error && permissionResult.data && permissionResult.data.length) {
         setPermissions(mergePermissions(permissionResult.data as ModulePermission[]));
       }
@@ -992,6 +1062,142 @@ Kaylee`;
     if (error) setMessage(`Task update failed: ${error.message}`);
   }
 
+  async function syncTodoistNow() {
+    if (!supabase) return setMessage('Supabase not configured.');
+    if (syncing) return;
+    setSyncing(true);
+    setMessage('Pulling tasks from Todoist…');
+    try {
+      const { data, error } = await supabase.functions.invoke('sync-todoist', { body: {} });
+      if (error) throw new Error(error.message);
+      if (data?.success === false) throw new Error(data?.error || 'Sync failed');
+      setMessage(`Todoist synced: ${data?.added ?? 0} added, ${data?.updated ?? 0} updated, ${data?.removed ?? 0} removed.`);
+      // Reload chores + sync state
+      const [choreResult, syncStateResult] = await Promise.all([
+        supabase.from('chore_tasks').select('*').eq('deleted_in_todoist', false).order('priority', { ascending: false }),
+        supabase.from('todoist_sync_state').select('*').eq('id', 1).maybeSingle()
+      ]);
+      if (!choreResult.error && choreResult.data) setChoreTasks(choreResult.data as ChoreTask[]);
+      if (!syncStateResult.error && syncStateResult.data) setSyncState(syncStateResult.data as TodoistSyncState);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setMessage(`Todoist sync failed: ${msg}`);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function completeChore(id: string) {
+    if (!canEdit('chores')) return setMessage('Chores are view-only for Adam right now.');
+    const now = new Date().toISOString();
+    setChoreTasks((current) => current.map((c) => c.id === id ? { ...c, is_completed: true, status: 'completed', last_completed_at: now } : c));
+    if (!supabase) return;
+    const { error } = await supabase.from('chore_tasks').update({
+      is_completed: true, status: 'completed', last_completed_at: now
+    }).eq('id', id);
+    if (error) setMessage(`Chore update failed: ${error.message}`);
+    else setMessage('Chore marked done.');
+  }
+
+  async function uncompleteChore(id: string) {
+    if (!canEdit('chores')) return;
+    setChoreTasks((current) => current.map((c) => c.id === id ? { ...c, is_completed: false, status: 'sent' } : c));
+    if (!supabase) return;
+    await supabase.from('chore_tasks').update({ is_completed: false, status: 'sent' }).eq('id', id);
+  }
+
+  function computeNextDue(frequency: string): string {
+    const d = new Date();
+    const f = (frequency || '').toLowerCase();
+    if (f === 'monthly') d.setMonth(d.getMonth() + 1);
+    else if (f === 'quarterly') d.setMonth(d.getMonth() + 3);
+    else if (f === 'biannual' || f === 'biannually') d.setMonth(d.getMonth() + 6);
+    else if (f === 'annual' || f === 'yearly') d.setFullYear(d.getFullYear() + 1);
+    else if (f === 'biennial') d.setFullYear(d.getFullYear() + 2);
+    else if (f.includes('5 year')) d.setFullYear(d.getFullYear() + 5);
+    else if (f.includes('3 year')) d.setFullYear(d.getFullYear() + 3);
+    else d.setMonth(d.getMonth() + 6);
+    return d.toISOString();
+  }
+
+  async function markSuggestionDone(id: string) {
+    if (!canEdit('chores')) return setMessage('Suggestions are view-only for Adam right now.');
+    const target = choreSuggestions.find((s) => s.id === id);
+    if (!target) return;
+    const now = new Date().toISOString();
+    const next_due_at = computeNextDue(target.frequency);
+    setChoreSuggestions((current) => current.map((s) => s.id === id ? { ...s, status: 'done', last_done_at: now, next_due_at } : s));
+    if (!supabase) return;
+    const { error } = await supabase.from('chore_suggestions').update({
+      status: 'done', last_done_at: now, next_due_at, updated_at: now
+    }).eq('id', id);
+    if (error) setMessage(`Suggestion update failed: ${error.message}`);
+    else setMessage(`"${target.title}" marked done. Next due ${new Date(next_due_at).toLocaleDateString()}.`);
+  }
+
+  async function snoozeSuggestion(id: string, days: number) {
+    if (!canEdit('chores')) return;
+    const snoozed = new Date();
+    snoozed.setDate(snoozed.getDate() + days);
+    const snoozedIso = snoozed.toISOString().slice(0, 10);
+    setChoreSuggestions((current) => current.map((s) => s.id === id ? { ...s, status: 'snoozed', snoozed_until: snoozedIso } : s));
+    if (!supabase) return;
+    await supabase.from('chore_suggestions').update({
+      status: 'snoozed', snoozed_until: snoozedIso, updated_at: new Date().toISOString()
+    }).eq('id', id);
+    setMessage(`Snoozed for ${days} days.`);
+  }
+
+  async function dismissSuggestion(id: string) {
+    if (!canEdit('chores')) return;
+    setChoreSuggestions((current) => current.map((s) => s.id === id ? { ...s, status: 'dismissed' } : s));
+    if (!supabase) return;
+    await supabase.from('chore_suggestions').update({
+      status: 'dismissed', updated_at: new Date().toISOString()
+    }).eq('id', id);
+    setMessage('Suggestion dismissed.');
+  }
+
+  async function restoreSuggestion(id: string) {
+    if (!canEdit('chores')) return;
+    setChoreSuggestions((current) => current.map((s) => s.id === id ? { ...s, status: 'pending', snoozed_until: null } : s));
+    if (!supabase) return;
+    await supabase.from('chore_suggestions').update({
+      status: 'pending', snoozed_until: null, updated_at: new Date().toISOString()
+    }).eq('id', id);
+  }
+
+  async function addSuggestionToTodoist(id: string) {
+    if (!canEdit('chores')) return setMessage('Adding to Todoist is admin-only.');
+    if (!supabase) return setMessage('Supabase not configured.');
+    const target = choreSuggestions.find((s) => s.id === id);
+    if (!target) return;
+    setMessage(`Adding "${target.title}" to Todoist…`);
+    try {
+      const priorityMap: Record<string, number> = { light: 1, medium: 2, heavy: 3 };
+      const { data, error } = await supabase.functions.invoke('todoist-create-task', {
+        body: {
+          title: target.title,
+          description: target.why_it_matters,
+          category: target.category,
+          priority: priorityMap[target.effort_level] ?? 2
+        }
+      });
+      if (error) throw new Error(error.message);
+      if (data?.success === false) throw new Error(data?.error || 'Create failed');
+      const now = new Date().toISOString();
+      const newTaskId = data?.todoist_task_id ?? null;
+      setChoreSuggestions((current) => current.map((s) => s.id === id ? { ...s, status: 'added', added_to_todoist_at: now, todoist_task_id: newTaskId } : s));
+      await supabase.from('chore_suggestions').update({
+        status: 'added', added_to_todoist_at: now, todoist_task_id: newTaskId, updated_at: now
+      }).eq('id', id);
+      setMessage(`Added "${target.title}" to Todoist. Run Sync to mirror it into Chores.`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setMessage(`Add to Todoist failed: ${msg}`);
+    }
+  }
+
   async function signOut() {
     await supabase?.auth.signOut();
     setSession(null);
@@ -1051,16 +1257,16 @@ Kaylee`;
         </aside>
         <main className="content">
           {!activeCanEdit && activeRole === 'limited' && page !== 'dashboard' && <ViewOnlyBanner />}
-          {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} role={activeRole} setPage={setPage} />}
-          {page === 'today' && <Today tasks={tasks.filter((task) => activeRole === 'admin' || task.mode === 'home')} completeTask={completeTask} editable={canEdit('today')} />}
+          {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} choreTasks={choreTasks} role={activeRole} setPage={setPage} />}
+          {page === 'today' && <Today tasks={tasks.filter((task) => activeRole === 'admin' || task.mode === 'home')} choreTasks={choreTasks} completeTask={completeTask} completeChore={completeChore} editable={canEdit('today') && canEdit('chores')} />}
           {page === 'briefing' && <Briefing />}
           {page === 'calendar' && <Placeholder title="Calendar" sub="Google Calendar integration will connect here after auth basics are stable." />}
           {page === 'budget' && <Placeholder title="Budget" sub={activeRole === 'limited' ? 'Kaylee controls whether this is visible/editable for Adam.' : 'Calendar-based cashflow page scaffold.'} />}
           {page === 'inventory' && <Inventory inventory={inventory} createItem={createInventoryItem} updateQuantity={updateInventoryQuantity} editable={canEdit('inventory')} />}
-          {page === 'chores' && <Placeholder title="Chores & Tasks" sub="Todoist integration will connect here." />}
+          {page === 'chores' && <Chores choreTasks={choreTasks} choreSuggestions={choreSuggestions} syncState={syncState} syncing={syncing} syncTodoistNow={syncTodoistNow} completeChore={completeChore} uncompleteChore={uncompleteChore} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('chores')} />}
           {page === 'adam' && <Adam editable={canEdit('adam')} />}
           {page === 'vehicles' && <Vehicles />}
-          {page === 'suggestions' && <Suggestions editable={canEdit('suggestions')} />}
+          {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
           {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
           {page === 'outreach' && activeRole === 'admin' && <Outreach drafts={drafts} students={students} generateCohortDrafts={generateCohortDrafts} updateDraft={updateDraft} markDraftSent={markDraftSent} deleteDraft={deleteDraft} />}
           {page === 'settings' && activeRole === 'admin' && <SettingsPage permissions={permissions} updatePermission={updatePermission} />}
@@ -1229,7 +1435,7 @@ function timelineForStudent(student: Student, touchpoints: Touchpoint[]) {
   return [...profileEvents, ...touchEvents].sort((a, b) => String(b.date).localeCompare(String(a.date)));
 }
 
-function Dashboard({ mode, inventory, students, touchpoints, tasks, role, setPage }: { mode: Mode; inventory: InventoryItem[]; students: Student[]; touchpoints: Touchpoint[]; tasks: TaskItem[]; role: Role; setPage: (page: Page) => void }) {
+function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, role, setPage }: { mode: Mode; inventory: InventoryItem[]; students: Student[]; touchpoints: Touchpoint[]; tasks: TaskItem[]; choreTasks: ChoreTask[]; role: Role; setPage: (page: Page) => void }) {
   const expiring = inventory.filter((item) => item.expires).length;
   const pending = tasks.filter((task) => task.status === 'pending_approval').length;
   const activeStudents = students.filter((student) => !student.archived);
@@ -1332,13 +1538,97 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, role, setPag
   return <>
     <Header title={role === 'limited' ? 'Adam home dashboard' : mode === 'home' ? 'Home command center' : 'Work command center'} sub={role === 'limited' ? 'Home-only view. Kaylee controls which sections are editable.' : mode === 'home' ? 'Tasks, approvals, inventory, vehicles, and tenant-safe home care.' : 'FERPA-safe student workflow, GROW notes, and daily planning.'} />
     <Stats items={mode === 'home' ? [['Open tasks', String(tasks.filter((task) => task.status !== 'completed' && task.mode === 'home').length), 'home'], ['Adam pending', String(pending), 'approval needed'], ['Inventory', String(inventory.length), `${expiring} expiring`], ['Vehicle alerts', '4', 'critical/due']] : [['Active students', String(activeStudents.length), 'FERPA-safe'], ['Need copy', String(students.filter((s) => !s.copied).length), 'Salesforce'], ['FERPA', 'On', 'clipboard only'], ['Calls today', String(callsToday.length), 'manual now']]} />
-    <div className="grid two"><Today tasks={tasks.filter((task) => mode === 'work' ? task.mode === 'work' : task.mode === 'home').slice(0, 3)} completeTask={() => undefined} editable={false} /><Briefing compact /></div>
+    <div className="grid two"><Today tasks={tasks.filter((task) => mode === 'work' ? task.mode === 'work' : task.mode === 'home').slice(0, 3)} choreTasks={mode === 'home' ? choreTasks : []} completeTask={() => undefined} completeChore={() => undefined} editable={false} compact /><Briefing compact /></div>
   </>;
 }
 
-function Today({ tasks, completeTask, editable, compact = false }: { tasks: TaskItem[]; completeTask: (id: string) => void; editable: boolean; compact?: boolean }) {
+function Today({ tasks, choreTasks, completeTask, completeChore, editable, compact = false }: { tasks: TaskItem[]; choreTasks: ChoreTask[]; completeTask: (id: string) => void; completeChore: (id: string) => void; editable: boolean; compact?: boolean }) {
   const list = compact ? tasks.slice(0, 3) : tasks;
-  return <section className="panel"><h2>Today’s Tasks</h2>{list.map((task) => <div className={`task-card ${task.priority}`} key={task.id}>{editable ? <button className="check" onClick={() => completeTask(task.id)} /> : <span className="check disabled" />}<div><strong>{task.title}</strong><p>{task.owner} · {task.minutes} min · {task.source} · {task.status}</p></div></div>)}</section>;
+  const tackleList = useMemo(() => computeTackleToday(choreTasks), [choreTasks]);
+  const shown = compact ? tackleList.slice(0, 3) : tackleList.slice(0, 8);
+
+  return <>
+    <section className="panel">
+      <div className="panel-head">
+        <h2>{compact ? "Today's Tackle List" : "Today's Task Outlook Center"}</h2>
+        {!compact && <span className="readonly-pill"><Zap size={14} /> {tackleList.length} picks</span>}
+      </div>
+      {shown.length === 0 && <div className="brief-item">No chores queued for today. Run <strong>Sync from Todoist</strong> on the Chores tab to pull the latest, or add a new task in Todoist.</div>}
+      {shown.map((chore) => {
+        const due = chore.due_date ? new Date(chore.due_date) : null;
+        const overdue = due ? due.getTime() < Date.now() && !sameYmd(due, new Date()) : false;
+        const priorityLabel = ['', 'P4', 'P3', 'P2', 'P1'][chore.priority] || 'P4';
+        const priorityClass = chore.priority === 4 ? 'urgent' : chore.priority === 3 ? 'warning' : chore.priority === 2 ? 'normal' : 'good';
+        return <div className={`task-card ${overdue ? 'urgent' : priorityClass}`} key={chore.id}>
+          {editable
+            ? <button className="check" onClick={() => completeChore(chore.id)} title="Mark done" />
+            : <span className="check disabled" />}
+          <div>
+            <strong>{chore.name}</strong>
+            <p>
+              {chore.room || chore.todoist_section || 'Anywhere'} · {chore.effort_level || 'medium'}
+              {chore.recurrence ? ` · ${chore.recurrence}` : ''}
+              {overdue && due ? ` · Overdue (was ${due.toLocaleDateString()})` : ''}
+              {!overdue && due ? ` · Due ${due.toLocaleDateString()}` : ''}
+              {' · '}{priorityLabel}
+            </p>
+          </div>
+        </div>;
+      })}
+    </section>
+    {!compact && tasks.length > 0 && <section className="panel">
+      <h2>Other Tasks</h2>
+      {list.map((task) => <div className={`task-card ${task.priority}`} key={task.id}>
+        {editable ? <button className="check" onClick={() => completeTask(task.id)} /> : <span className="check disabled" />}
+        <div><strong>{task.title}</strong><p>{task.owner} · {task.minutes} min · {task.source} · {task.status}</p></div>
+      </div>)}
+    </section>}
+  </>;
+}
+
+function sameYmd(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function dayOfWeekName(d: Date) {
+  return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getDay()];
+}
+
+function computeTackleToday(choreTasks: ChoreTask[]): ChoreTask[] {
+  const now = new Date();
+  const todayName = dayOfWeekName(now);
+  const isWeekend = now.getDay() === 0 || now.getDay() === 6;
+  const todayYmd = now.toISOString().slice(0, 10);
+
+  const candidates = choreTasks.filter((c) => !c.is_completed && c.status !== 'completed' && !c.deleted_in_todoist).map((c) => {
+    const due = c.due_date ? new Date(c.due_date) : null;
+    const dueYmd = due ? due.toISOString().slice(0, 10) : null;
+    let score = 0;
+    let matches = false;
+
+    // Overdue: highest priority
+    if (due && dueYmd && dueYmd < todayYmd) { score += 1000; matches = true; }
+    // Due today
+    if (dueYmd === todayYmd) { score += 800; matches = true; }
+    // Day of week match
+    if (c.day_of_week === todayName) { score += 500; matches = true; }
+    if (c.day_of_week === 'Daily') { score += 600; matches = true; }
+    if (c.day_of_week === 'Weekly' && (todayName === 'Sunday' || todayName === 'Monday')) { score += 300; matches = true; }
+    if (c.day_of_week === 'Monthly' && now.getDate() <= 7) { score += 250; matches = true; }
+    if ((c.day_of_week === 'Anytime') && isWeekend) { score += 100; matches = true; }
+
+    // Priority bump
+    score += (c.priority || 1) * 50;
+    // Lighter chores edge slightly higher for morning momentum
+    if (c.effort_level === 'light') score += 25;
+    if (c.effort_level === 'heavy') score -= 25;
+
+    return { chore: c, score, matches };
+  })
+  .filter((x) => x.matches)
+  .sort((a, b) => b.score - a.score);
+
+  return candidates.map((x) => x.chore);
 }
 
 function Briefing({ compact = false }: { compact?: boolean }) {
@@ -1372,8 +1662,131 @@ function Vehicles() {
   return <><Header title="Vehicles" sub="Maintenance tracking for Corolla and Leaf." /><div className="grid two">{vehicles.map((vehicle) => <section className="panel" key={vehicle.name}><h2>{vehicle.name}</h2><p>{vehicle.type} · {vehicle.miles.toLocaleString()} miles</p><h3>Urgent</h3>{vehicle.urgent.map((item) => <div className="brief-item urgent" key={item}>{item}</div>)}<h3>Okay</h3>{vehicle.ok.map((item) => <div className="brief-item good" key={item}>{item}</div>)}</section>)}</div></>;
 }
 
-function Suggestions({ editable }: { editable: boolean }) {
-  return <><Header title="Home Suggestions" sub="Tenant-only Canton/Georgia-aware home care.">{editable ? <button className="btn primary">Generate ideas</button> : <span className="readonly-pill"><Eye size={14} /> View only</span>}</Header>{homeSuggestions.map((item) => <section className={`panel suggestion ${item.urgency}`} key={item.title}><h2>{item.title}</h2><p>{item.reason}</p><small>{item.effort}</small></section>)}</>;
+function Suggestions({ choreSuggestions, markSuggestionDone, snoozeSuggestion, dismissSuggestion, restoreSuggestion, addSuggestionToTodoist, editable }: { choreSuggestions: ChoreSuggestion[]; markSuggestionDone: (id: string) => void; snoozeSuggestion: (id: string, days: number) => void; dismissSuggestion: (id: string) => void; restoreSuggestion: (id: string) => void; addSuggestionToTodoist: (id: string) => void; editable: boolean }) {
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [showDismissed, setShowDismissed] = useState(false);
+
+  const categories: { id: string; label: string; icon: React.ElementType }[] = [
+    { id: 'all', label: 'All', icon: Home },
+    { id: 'homeowner', label: 'Home', icon: Home },
+    { id: 'safety', label: 'Safety', icon: ShieldCheck },
+    { id: 'vehicle', label: 'Vehicles', icon: Car },
+    { id: 'tool', label: 'Tools', icon: Wrench },
+    { id: 'dog', label: 'Dogs', icon: Bone },
+    { id: 'garden', label: 'Garden', icon: Flower2 },
+    { id: 'preserving', label: 'Preserving', icon: Archive }
+  ];
+
+  const visible = choreSuggestions.filter((s) => {
+    if (s.status === 'dismissed' && !showDismissed) return false;
+    if (categoryFilter !== 'all' && s.category !== categoryFilter) return false;
+    return true;
+  });
+
+  const counts = {
+    pending: choreSuggestions.filter((s) => s.status === 'pending').length,
+    snoozed: choreSuggestions.filter((s) => s.status === 'snoozed').length,
+    added: choreSuggestions.filter((s) => s.status === 'added').length,
+    done: choreSuggestions.filter((s) => s.status === 'done').length
+  };
+
+  return <>
+    <Header title="Home Suggestions" sub="New-homeowner playbook: HVAC, plumbing, vehicles, tools, dogs, garden, and food preserving.">
+      {editable ? null : <span className="readonly-pill"><Eye size={14} /> View only</span>}
+    </Header>
+    <Stats items={[
+      ['Pending', String(counts.pending), 'not yet acted on'],
+      ['Snoozed', String(counts.snoozed), 'come back later'],
+      ['In Todoist', String(counts.added), 'mirrored to chores'],
+      ['Completed', String(counts.done), 'this cycle']
+    ]} />
+    <section className="panel">
+      <div className="panel-head">
+        <h2>Browse by category</h2>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          <input type="checkbox" checked={showDismissed} onChange={(e) => setShowDismissed(e.target.checked)} />
+          Show dismissed
+        </label>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {categories.map((cat) => {
+          const Icon = cat.icon;
+          const active = categoryFilter === cat.id;
+          return <button key={cat.id} className={active ? 'btn primary' : 'btn ghost'} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setCategoryFilter(cat.id)}>
+            <Icon size={14} /> {cat.label}
+          </button>;
+        })}
+      </div>
+    </section>
+    {visible.length === 0 && <section className="panel"><div className="brief-item">Nothing in this category right now.</div></section>}
+    {visible.map((s) => <SuggestionCard key={s.id}
+      suggestion={s}
+      editable={editable}
+      onAdd={() => addSuggestionToTodoist(s.id)}
+      onDone={() => markSuggestionDone(s.id)}
+      onSnooze={(days) => snoozeSuggestion(s.id, days)}
+      onDismiss={() => dismissSuggestion(s.id)}
+      onRestore={() => restoreSuggestion(s.id)}
+    />)}
+  </>;
+}
+
+function SuggestionCard({ suggestion, editable, onAdd, onDone, onSnooze, onDismiss, onRestore }: {
+  suggestion: ChoreSuggestion;
+  editable: boolean;
+  onAdd: () => void;
+  onDone: () => void;
+  onSnooze: (days: number) => void;
+  onDismiss: () => void;
+  onRestore: () => void;
+}) {
+  const monthNow = new Date().getMonth() + 1;
+  const isInSeason = !suggestion.month_triggers || suggestion.month_triggers.length === 0 || suggestion.month_triggers.includes(monthNow);
+  const urgencyClass = suggestion.status === 'snoozed' ? '' :
+    suggestion.status === 'added' ? 'good' :
+    suggestion.status === 'done' ? 'good' :
+    suggestion.status === 'dismissed' ? '' :
+    isInSeason ? 'urgent' : '';
+
+  const lastDone = suggestion.last_done_at ? new Date(suggestion.last_done_at).toLocaleDateString() : null;
+  const nextDue = suggestion.next_due_at ? new Date(suggestion.next_due_at).toLocaleDateString() : null;
+  const snoozedUntil = suggestion.snoozed_until ? new Date(suggestion.snoozed_until).toLocaleDateString() : null;
+
+  return <section className={`panel suggestion ${urgencyClass}`}>
+    <div className="panel-head">
+      <h2>{suggestion.title}</h2>
+      <span className="readonly-pill" style={{ textTransform: 'capitalize' }}>{suggestion.category} · {suggestion.frequency}</span>
+    </div>
+    <p>{suggestion.description}</p>
+    {suggestion.why_it_matters && <p style={{ color: 'var(--muted, #888)', fontStyle: 'italic' }}>{suggestion.why_it_matters}</p>}
+    <small>
+      {suggestion.estimated_minutes} min · {suggestion.effort_level} effort
+      {isInSeason ? ' · 🟢 In season now' : suggestion.month_triggers && suggestion.month_triggers.length ? ` · Best months: ${suggestion.month_triggers.join(', ')}` : ''}
+      {lastDone ? ` · Last done ${lastDone}` : ''}
+      {nextDue ? ` · Next due ${nextDue}` : ''}
+      {snoozedUntil && suggestion.status === 'snoozed' ? ` · Snoozed until ${snoozedUntil}` : ''}
+      {suggestion.status === 'added' && suggestion.added_to_todoist_at ? ` · Sent to Todoist ${new Date(suggestion.added_to_todoist_at).toLocaleDateString()}` : ''}
+    </small>
+    {editable && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+      {(suggestion.status === 'pending' || suggestion.status === 'snoozed') && <>
+        <button className="btn primary" onClick={onAdd}><Send size={14} /> Add to Todoist</button>
+        <button className="btn ghost" onClick={onDone}><CheckCircle2 size={14} /> I did this</button>
+        <button className="btn ghost" onClick={() => onSnooze(30)}><Clock size={14} /> Snooze 30d</button>
+        <button className="btn ghost" onClick={() => onSnooze(90)}><Clock size={14} /> Snooze 90d</button>
+        <button className="btn ghost" onClick={onDismiss}><Trash2 size={14} /> Dismiss</button>
+      </>}
+      {suggestion.status === 'added' && <>
+        <span className="readonly-pill" style={{ background: 'rgba(34,197,94,0.15)' }}><CheckCircle2 size={14} /> In Todoist</span>
+        <button className="btn ghost" onClick={onDone}><CheckCircle2 size={14} /> Mark cycle done</button>
+      </>}
+      {suggestion.status === 'done' && <>
+        <button className="btn ghost" onClick={onRestore}><RefreshCw size={14} /> Reset</button>
+      </>}
+      {suggestion.status === 'dismissed' && <>
+        <button className="btn ghost" onClick={onRestore}><RefreshCw size={14} /> Restore</button>
+      </>}
+    </div>}
+  </section>;
 }
 
 const touchpointTypes = [
@@ -1845,6 +2258,274 @@ function Outreach({ drafts, students, generateCohortDrafts, updateDraft, markDra
       })}
     </section>
   </>;
+}
+
+function Chores({
+  choreTasks, choreSuggestions, syncState, syncing,
+  syncTodoistNow, completeChore, uncompleteChore,
+  markSuggestionDone, snoozeSuggestion, dismissSuggestion, restoreSuggestion,
+  addSuggestionToTodoist, editable
+}: {
+  choreTasks: ChoreTask[];
+  choreSuggestions: ChoreSuggestion[];
+  syncState: TodoistSyncState | null;
+  syncing: boolean;
+  syncTodoistNow: () => void;
+  completeChore: (id: string) => void;
+  uncompleteChore: (id: string) => void;
+  markSuggestionDone: (id: string) => void;
+  snoozeSuggestion: (id: string, days: number) => void;
+  dismissSuggestion: (id: string) => void;
+  restoreSuggestion: (id: string) => void;
+  addSuggestionToTodoist: (id: string) => void;
+  editable: boolean;
+}) {
+  const [showCompleted, setShowCompleted] = useState(false);
+  const [expandedDay, setExpandedDay] = useState<string | null>(null);
+
+  const tackleList = useMemo(() => computeTackleToday(choreTasks), [choreTasks]);
+  const monthNow = new Date().getMonth() + 1;
+
+  // Suggestions to surface on the Chores tab: in-season AND pending OR overdue
+  const seasonalSuggestions = useMemo(() => {
+    const now = Date.now();
+    return choreSuggestions.filter((s) => {
+      if (s.status === 'dismissed') return false;
+      if (s.status === 'done') return false;
+      if (s.status === 'snoozed') {
+        if (!s.snoozed_until) return false;
+        if (new Date(s.snoozed_until).getTime() > now) return false;
+      }
+      if (s.status === 'added') return false; // already in Todoist, will appear in chores
+      const inSeason = !s.month_triggers || s.month_triggers.length === 0 || s.month_triggers.includes(monthNow);
+      const isOverdue = s.next_due_at ? new Date(s.next_due_at).getTime() < now : false;
+      return inSeason || isOverdue;
+    }).slice(0, 6);
+  }, [choreSuggestions, monthNow]);
+
+  const dayBuckets = useMemo(() => groupChoresByDay(choreTasks, showCompleted), [choreTasks, showCompleted]);
+
+  const stats = {
+    total: choreTasks.filter((c) => !c.is_completed).length,
+    today: tackleList.length,
+    overdue: choreTasks.filter((c) => {
+      if (c.is_completed) return false;
+      if (!c.due_date) return false;
+      const due = new Date(c.due_date);
+      const today = new Date(); today.setHours(0,0,0,0);
+      return due < today;
+    }).length,
+    completed: choreTasks.filter((c) => c.is_completed).length
+  };
+
+  return <>
+    <Header title="Chores & Tasks" sub="Synced with Todoist. The hub picks today's tackle list and surfaces what new homeowners overlook.">
+      {editable
+        ? <button className="btn primary" onClick={syncTodoistNow} disabled={syncing}>
+            <RefreshCw size={15} className={syncing ? 'spin' : ''} /> {syncing ? 'Syncing…' : 'Sync from Todoist'}
+          </button>
+        : <span className="readonly-pill"><Eye size={14} /> View only</span>}
+    </Header>
+
+    <Stats items={[
+      ['Open chores', String(stats.total), 'from Todoist'],
+      ['Tackle today', String(stats.today), 'best picks'],
+      ['Overdue', String(stats.overdue), stats.overdue ? 'needs attention' : 'all clear'],
+      ['Last sync', syncState?.last_sync_at ? new Date(syncState.last_sync_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'never', syncState?.last_sync_status || 'pending']
+    ]} />
+
+    {syncState?.last_sync_status === 'error' && syncState?.last_sync_error && <section className="panel suggestion urgent">
+      <h2>Last sync failed</h2>
+      <p>{syncState.last_sync_error}</p>
+      <small>Make sure TODOIST_API_TOKEN is set in Supabase function secrets, then click Sync again.</small>
+    </section>}
+
+    {/* ============ TACKLE TODAY HERO ============ */}
+    <section className="panel">
+      <div className="panel-head">
+        <h2><Zap size={18} style={{ verticalAlign: 'text-bottom' }} /> Tackle Today</h2>
+        <span className="readonly-pill">{tackleList.length} picks for {dayOfWeekName(new Date())}</span>
+      </div>
+      {tackleList.length === 0 && <div className="brief-item">
+        {choreTasks.length === 0
+          ? 'No chores synced yet. Click Sync from Todoist to pull your House & Daily Life + Gardening tasks.'
+          : 'No chores due today — enjoy a quiet one, or grab one from the week below.'}
+      </div>}
+      {tackleList.slice(0, 8).map((chore) => <ChoreRow
+        key={chore.id}
+        chore={chore}
+        editable={editable}
+        complete={completeChore}
+        uncomplete={uncompleteChore}
+        showReason
+      />)}
+    </section>
+
+    {/* ============ THIS MONTH'S SUGGESTIONS ============ */}
+    {seasonalSuggestions.length > 0 && <section className="panel">
+      <div className="panel-head">
+        <h2>Suggestions for this month</h2>
+        <span className="readonly-pill">{new Date().toLocaleString([], { month: 'long' })} · {seasonalSuggestions.length} ideas</span>
+      </div>
+      <p style={{ color: 'var(--muted, #888)', fontSize: 13, marginTop: -8 }}>
+        Things new homeowners overlook. Each one can be added to Todoist with one click, or marked done if you already handled it.
+      </p>
+      <div className="grid two" style={{ gap: 12 }}>
+        {seasonalSuggestions.map((s) => <CompactSuggestionCard
+          key={s.id}
+          suggestion={s}
+          editable={editable}
+          onAdd={() => addSuggestionToTodoist(s.id)}
+          onDone={() => markSuggestionDone(s.id)}
+          onSnooze={(days) => snoozeSuggestion(s.id, days)}
+          onDismiss={() => dismissSuggestion(s.id)}
+        />)}
+      </div>
+    </section>}
+
+    {/* ============ THIS WEEK BY DAY ============ */}
+    <section className="panel">
+      <div className="panel-head">
+        <h2>This Week</h2>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          <input type="checkbox" checked={showCompleted} onChange={(e) => setShowCompleted(e.target.checked)} />
+          Show completed
+        </label>
+      </div>
+      {dayBuckets.length === 0 && <div className="brief-item">Nothing scheduled across the week. Sync Todoist or add tasks there.</div>}
+      {dayBuckets.map((bucket) => {
+        const isExpanded = expandedDay === bucket.label || dayBuckets.length <= 3;
+        return <details key={bucket.label} open={isExpanded} onToggle={(e) => {
+          if ((e.target as HTMLDetailsElement).open) setExpandedDay(bucket.label);
+        }}>
+          <summary style={{ cursor: 'pointer', padding: '8px 0', userSelect: 'none' }}>
+            <strong>{bucket.label}</strong>
+            <span style={{ marginLeft: 8, color: 'var(--muted, #888)', fontSize: 13 }}>
+              {bucket.chores.length} {bucket.chores.length === 1 ? 'chore' : 'chores'}
+            </span>
+          </summary>
+          {bucket.chores.map((chore) => <ChoreRow
+            key={chore.id}
+            chore={chore}
+            editable={editable}
+            complete={completeChore}
+            uncomplete={uncompleteChore}
+          />)}
+        </details>;
+      })}
+    </section>
+  </>;
+}
+
+function ChoreRow({ chore, editable, complete, uncomplete, showReason = false }: {
+  chore: ChoreTask;
+  editable: boolean;
+  complete: (id: string) => void;
+  uncomplete: (id: string) => void;
+  showReason?: boolean;
+}) {
+  const due = chore.due_date ? new Date(chore.due_date) : null;
+  const now = new Date(); now.setHours(0,0,0,0);
+  const overdue = due ? due < now : false;
+  const priorityLabel = ['', 'P4', 'P3', 'P2', 'P1'][chore.priority] || 'P4';
+  const cardClass = chore.is_completed
+    ? 'good'
+    : overdue ? 'urgent'
+    : chore.priority === 4 ? 'urgent'
+    : chore.priority === 3 ? 'warning'
+    : 'normal';
+
+  const reasonParts: string[] = [];
+  if (showReason) {
+    if (overdue && due) reasonParts.push(`Overdue since ${due.toLocaleDateString()}`);
+    else if (due && sameYmd(due, new Date())) reasonParts.push('Due today');
+    else if (chore.day_of_week === dayOfWeekName(new Date())) reasonParts.push(`Scheduled for ${chore.day_of_week}`);
+    else if (chore.day_of_week === 'Daily') reasonParts.push('Daily recurring');
+    if (chore.priority >= 3) reasonParts.push('Higher priority');
+  }
+
+  return <div className={`task-card ${cardClass}`}>
+    {editable
+      ? <button
+          className="check"
+          onClick={() => chore.is_completed ? uncomplete(chore.id) : complete(chore.id)}
+          title={chore.is_completed ? 'Mark not done' : 'Mark done'}
+        >
+          {chore.is_completed ? <CheckCircle2 size={16} /> : null}
+        </button>
+      : <span className="check disabled" />}
+    <div>
+      <strong style={{ textDecoration: chore.is_completed ? 'line-through' : 'none' }}>{chore.name}</strong>
+      <p>
+        {chore.room || chore.todoist_section || chore.source_project || 'Anywhere'}
+        {' · '}{chore.effort_level || 'medium'}
+        {chore.recurrence ? ` · ${chore.recurrence}` : ''}
+        {' · '}{priorityLabel}
+        {chore.last_completed_at ? ` · Last done ${new Date(chore.last_completed_at).toLocaleDateString()}` : ''}
+      </p>
+      {chore.description && <p style={{ color: 'var(--muted, #888)', fontSize: 12, marginTop: 4 }}>{chore.description}</p>}
+      {showReason && reasonParts.length > 0 && <small style={{ color: 'var(--accent, #4F46E5)' }}>
+        Why today: {reasonParts.join(' · ')}
+      </small>}
+    </div>
+  </div>;
+}
+
+function CompactSuggestionCard({ suggestion, editable, onAdd, onDone, onSnooze, onDismiss }: {
+  suggestion: ChoreSuggestion;
+  editable: boolean;
+  onAdd: () => void;
+  onDone: () => void;
+  onSnooze: (days: number) => void;
+  onDismiss: () => void;
+}) {
+  const iconMap: Record<string, React.ElementType> = {
+    homeowner: Home, vehicle: Car, tool: Wrench, dog: Bone,
+    garden: Flower2, preserving: Archive, safety: ShieldCheck, seasonal: Sun
+  };
+  const Icon = iconMap[suggestion.category] || Home;
+  return <div className="brief-item" style={{ padding: 12 }}>
+    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      <Icon size={20} style={{ marginTop: 2, flexShrink: 0 }} />
+      <div style={{ flex: 1 }}>
+        <strong>{suggestion.title}</strong>
+        <p style={{ fontSize: 13, margin: '4px 0' }}>{suggestion.why_it_matters || suggestion.description}</p>
+        <small>{suggestion.estimated_minutes} min · {suggestion.effort_level} · {suggestion.frequency}</small>
+        {editable && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+          <button className="btn primary tiny" onClick={onAdd}><Send size={12} /> Add to Todoist</button>
+          <button className="btn ghost tiny" onClick={onDone}><CheckCircle2 size={12} /> Did it</button>
+          <button className="btn ghost tiny" onClick={() => onSnooze(30)}><Clock size={12} /> 30d</button>
+          <button className="btn ghost tiny" onClick={onDismiss}><Trash2 size={12} /> Skip</button>
+        </div>}
+      </div>
+    </div>
+  </div>;
+}
+
+function groupChoresByDay(choreTasks: ChoreTask[], showCompleted: boolean): { label: string; chores: ChoreTask[] }[] {
+  const order = ['Daily', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'Weekly', 'Monthly', 'Spring', 'Summer', 'Fall', 'Winter', 'Jules', 'Anytime'];
+  const grouped: Record<string, ChoreTask[]> = {};
+  for (const chore of choreTasks) {
+    if (!showCompleted && chore.is_completed) continue;
+    const key = chore.day_of_week || 'Anytime';
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(chore);
+  }
+  const result: { label: string; chores: ChoreTask[] }[] = [];
+  for (const day of order) {
+    if (grouped[day]?.length) {
+      result.push({
+        label: day,
+        chores: grouped[day].sort((a, b) => (b.priority || 1) - (a.priority || 1))
+      });
+      delete grouped[day];
+    }
+  }
+  // Any leftover keys
+  for (const key of Object.keys(grouped)) {
+    if (grouped[key].length) result.push({ label: key, chores: grouped[key] });
+  }
+  return result;
 }
 
 function Placeholder({ title, sub }: { title: string; sub: string }) {
