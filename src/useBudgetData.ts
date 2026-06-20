@@ -30,6 +30,87 @@ export interface RecurringRule {
   active: boolean;
 }
 
+export interface GeneratedPayday {
+  id: string; // synthetic: `payday::${dateKey}::${person}`
+  person: 'Kaylee' | 'Adam';
+  date: string; // YYYY-MM-DD
+  amount: number;
+  isWifiStipend: boolean;
+}
+
+// Known anchor: Adam was paid Friday June 19, 2026. Pay alternates weekly
+// between Adam and Kaylee every Friday from there (confirmed against the
+// household's actual paycheck history).
+const PAYDAY_ANCHOR = new Date(2026, 5, 19); // June 19, 2026 - Adam
+const PAYDAY_ANCHOR_PERSON: 'Kaylee' | 'Adam' = 'Adam';
+
+const ADAM_BASE_PAY = 1316;
+const KAYLEE_BASE_PAY = 1642;
+const KAYLEE_WIFI_STIPEND = 50; // 1692 - 1642, applied to her 2nd payday each month
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+function dKey(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/**
+ * Generates every Friday payday in [rangeStart, rangeEnd], alternating
+ * Kaylee/Adam from the known anchor date. Kaylee's 2nd payday in a given
+ * calendar month gets the wifi stipend added.
+ */
+export function generatePaydays(rangeStart: Date, rangeEnd: Date): GeneratedPayday[] {
+  const start = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate());
+  const end = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate());
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const msPerWeek = 7 * msPerDay;
+
+  // Find the latest Friday-aligned date at or before `start` by computing
+  // the exact day difference from the anchor and flooring to whole weeks
+  // (floor, not round/trunc, so it works correctly for negative offsets too).
+  const dayDiff = Math.round((start.getTime() - PAYDAY_ANCHOR.getTime()) / msPerDay);
+  const weeksOffset = Math.floor(dayDiff / 7);
+  let cursor = new Date(PAYDAY_ANCHOR.getTime() + weeksOffset * msPerWeek);
+  let cursorIsAdam =
+    Math.abs(weeksOffset) % 2 === 0
+      ? PAYDAY_ANCHOR_PERSON === 'Adam'
+      : PAYDAY_ANCHOR_PERSON === 'Kaylee';
+
+  const paydays: GeneratedPayday[] = [];
+  const kayleeCountByMonth: Record<string, number> = {};
+
+  while (cursor.getTime() <= end.getTime()) {
+    if (cursor.getTime() >= start.getTime()) {
+      const person: 'Kaylee' | 'Adam' = cursorIsAdam ? 'Adam' : 'Kaylee';
+      const dateStr = dKey(cursor);
+      let amount = person === 'Adam' ? ADAM_BASE_PAY : KAYLEE_BASE_PAY;
+      let isWifiStipend = false;
+
+      if (person === 'Kaylee') {
+        const monthKey = `${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}`;
+        kayleeCountByMonth[monthKey] = (kayleeCountByMonth[monthKey] ?? 0) + 1;
+        if (kayleeCountByMonth[monthKey] === 2) {
+          amount += KAYLEE_WIFI_STIPEND;
+          isWifiStipend = true;
+        }
+      }
+
+      paydays.push({
+        id: `payday::${dateStr}::${person}`,
+        person,
+        date: dateStr,
+        amount,
+        isWifiStipend,
+      });
+    }
+    cursor = new Date(cursor.getTime() + msPerWeek);
+    cursorIsAdam = !cursorIsAdam;
+  }
+
+  return paydays;
+}
+
 export interface PayPeriod {
   id: string;
   person: 'Kaylee' | 'Adam';
@@ -257,12 +338,51 @@ export function useBudgetData() {
     [loadAll]
   );
 
+  const updateActualTransaction = useCallback(
+    async (id: string, patch: Partial<Omit<ActualTransaction, 'id' | 'status'>>) => {
+      if (!supabase) return;
+      const { error } = await supabase.from('budget_transactions').update(patch).eq('id', id);
+      if (error) {
+        console.error('Failed to update transaction:', error);
+        throw error;
+      }
+      await loadAll();
+    },
+    [loadAll]
+  );
+
+  const deleteRule = useCallback(
+    async (id: string) => {
+      if (!supabase) return;
+      const { error } = await supabase.from('budget_recurring_rules').delete().eq('id', id);
+      if (error) {
+        console.error('Failed to delete rule:', error);
+        throw error;
+      }
+      await loadAll();
+    },
+    [loadAll]
+  );
+
   const updateRule = useCallback(
     async (id: string, patch: Partial<RecurringRule>) => {
       if (!supabase) return;
       const { error } = await supabase.from('budget_recurring_rules').update(patch).eq('id', id);
       if (error) {
         console.error('Failed to update rule:', error);
+        throw error;
+      }
+      await loadAll();
+    },
+    [loadAll]
+  );
+
+  const addRule = useCallback(
+    async (rule: Omit<RecurringRule, 'id'>) => {
+      if (!supabase) return;
+      const { error } = await supabase.from('budget_recurring_rules').insert(rule);
+      if (error) {
+        console.error('Failed to add rule:', error);
         throw error;
       }
       await loadAll();
@@ -279,7 +399,10 @@ export function useBudgetData() {
     refresh: loadAll,
     addPayPeriod,
     addActualTransaction,
+    updateActualTransaction,
     deleteActualTransaction,
+    addRule,
     updateRule,
+    deleteRule,
   };
 }

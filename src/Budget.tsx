@@ -5,16 +5,18 @@
 // two-account model.
 
 import { useMemo, useState } from 'react';
-import { Plus, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, X } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, X, Pencil, Trash2, Repeat } from 'lucide-react';
 import {
   useBudgetData,
   expandRecurringRules,
+  generatePaydays,
   summarizeTotals,
   type BudgetAccount,
   type BudgetKind,
   type BudgetCategory,
   type PlannedItem,
   type ActualTransaction,
+  type GeneratedPayday,
 } from './useBudgetData';
 
 type ViewMode = 'period' | 'month';
@@ -49,13 +51,18 @@ function endOfMonth(d: Date): Date {
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export default function Budget() {
-  const { loading, rules, payPeriods, actuals, isAdmin, addActualTransaction, addPayPeriod } = useBudgetData();
+  const {
+    loading, rules, payPeriods, actuals, isAdmin,
+    addActualTransaction, updateActualTransaction, deleteActualTransaction,
+    addPayPeriod, addRule,
+  } = useBudgetData();
   const [view, setView] = useState<ViewMode>('month');
   const [monthAnchor, setMonthAnchor] = useState(new Date());
   const [periodIndex, setPeriodIndex] = useState(0); // 0 = most recent period
   const [accountFilter, setAccountFilter] = useState<'all' | BudgetAccount>('all');
   const [showAddForm, setShowAddForm] = useState(false);
   const [showPayForm, setShowPayForm] = useState(false);
+  const [editingActual, setEditingActual] = useState<ActualTransaction | null>(null);
 
   const sortedPeriods = useMemo(
     () => [...payPeriods].sort((a, b) => a.pay_date.localeCompare(b.pay_date)),
@@ -93,10 +100,21 @@ export default function Budget() {
     return { rangeStart: today, rangeEnd: today, rangeLabel: 'No pay periods logged yet' };
   }, [view, monthAnchor, currentWindow]);
 
-  const planned = useMemo(
-    () => expandRecurringRules(rules, rangeStart, rangeEnd),
-    [rules, rangeStart, rangeEnd]
-  );
+  const planned = useMemo(() => {
+    const billsAndOneOffs = expandRecurringRules(rules, rangeStart, rangeEnd);
+    const paydays = generatePaydays(rangeStart, rangeEnd);
+    const paydayItems: PlannedItem[] = paydays.map((p: GeneratedPayday) => ({
+      id: p.id,
+      ruleId: 'generated-payday',
+      name: p.isWifiStipend ? `${p.person} Pay Day (with wifi stipend)` : `${p.person} Pay Day`,
+      amount: p.amount,
+      kind: 'income',
+      account: 'main',
+      category: 'income',
+      date: p.date,
+    }));
+    return [...billsAndOneOffs, ...paydayItems].sort((a, b) => a.date.localeCompare(b.date));
+  }, [rules, rangeStart, rangeEnd]);
 
   const actualsInRange = useMemo(() => {
     const startKey = toKey(rangeStart);
@@ -116,10 +134,10 @@ export default function Budget() {
   const totals = summarizeTotals(filteredPlanned, filteredActuals);
 
   const combinedRows = useMemo(() => {
-    type Row = { date: string; name: string; amount: number; kind: BudgetKind; account: BudgetAccount; category: BudgetCategory; status: 'planned' | 'actual'; id: string };
+    type Row = { date: string; name: string; amount: number; kind: BudgetKind; account: BudgetAccount; category: BudgetCategory; status: 'planned' | 'actual'; id: string; actual?: ActualTransaction };
     const rows: Row[] = [
       ...filteredPlanned.map((p: PlannedItem) => ({ date: p.date, name: p.name, amount: p.amount, kind: p.kind, account: p.account, category: p.category, status: 'planned' as const, id: p.id })),
-      ...filteredActuals.map((a: ActualTransaction) => ({ date: a.transaction_date, name: a.name, amount: a.amount, kind: a.kind, account: a.account, category: a.category, status: 'actual' as const, id: a.id })),
+      ...filteredActuals.map((a: ActualTransaction) => ({ date: a.transaction_date, name: a.name, amount: a.amount, kind: a.kind, account: a.account, category: a.category, status: 'actual' as const, id: a.id, actual: a })),
     ];
     return rows.sort((a, b) => a.date.localeCompare(b.date));
   }, [filteredPlanned, filteredActuals]);
@@ -138,7 +156,7 @@ export default function Budget() {
         {isAdmin && (
           <div className="actions">
             <button className="btn ghost" onClick={() => setShowPayForm(true)}>+ Log payday</button>
-            <button className="btn primary" onClick={() => setShowAddForm(true)}><Plus size={15} /> Log transaction</button>
+            <button className="btn primary" onClick={() => setShowAddForm(true)}><Plus size={15} /> Add expense</button>
           </div>
         )}
       </div>
@@ -216,6 +234,7 @@ export default function Budget() {
                 <th>Account</th>
                 <th>Status</th>
                 <th style={{ textAlign: 'right' }}>Amount</th>
+                {isAdmin && <th></th>}
               </tr>
             </thead>
             <tbody>
@@ -233,6 +252,26 @@ export default function Budget() {
                   <td style={{ textAlign: 'right', color: row.kind === 'income' ? 'var(--green)' : 'var(--text)' }}>
                     {row.kind === 'income' ? '+' : '-'}{fmtMoney(row.amount)}
                   </td>
+                  {isAdmin && (
+                    <td>
+                      {row.status === 'actual' && row.actual && (
+                        <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                          <button className="qty-button" onClick={() => setEditingActual(row.actual!)} aria-label="Edit">
+                            <Pencil size={12} />
+                          </button>
+                          <button
+                            className="qty-button"
+                            onClick={() => {
+                              if (confirm(`Delete "${row.name}"?`)) deleteActualTransaction(row.id);
+                            }}
+                            aria-label="Delete"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -241,11 +280,26 @@ export default function Budget() {
       </div>
 
       {showAddForm && (
-        <AddTransactionModal
+        <AddExpenseModal
           onClose={() => setShowAddForm(false)}
-          onSubmit={async (input) => {
+          onSubmitActual={async (input) => {
             await addActualTransaction(input);
             setShowAddForm(false);
+          }}
+          onSubmitRecurring={async (input) => {
+            await addRule(input);
+            setShowAddForm(false);
+          }}
+        />
+      )}
+
+      {editingActual && (
+        <EditActualModal
+          transaction={editingActual}
+          onClose={() => setEditingActual(null)}
+          onSave={async (patch) => {
+            await updateActualTransaction(editingActual.id, patch);
+            setEditingActual(null);
           }}
         />
       )}
@@ -263,12 +317,13 @@ export default function Budget() {
   );
 }
 
-function AddTransactionModal({
+function AddExpenseModal({
   onClose,
-  onSubmit,
+  onSubmitActual,
+  onSubmitRecurring,
 }: {
   onClose: () => void;
-  onSubmit: (input: {
+  onSubmitActual: (input: {
     name: string;
     amount: number;
     kind: BudgetKind;
@@ -278,28 +333,161 @@ function AddTransactionModal({
     pay_period_id: string | null;
     notes: string | null;
   }) => Promise<void>;
+  onSubmitRecurring: (input: {
+    name: string;
+    amount: number;
+    kind: BudgetKind;
+    account: BudgetAccount;
+    category: BudgetCategory;
+    recurrence: 'monthly_day' | 'annual' | 'manual';
+    day_of_month: number | null;
+    month_of_year: number | null;
+    months: number[] | null;
+    notes: string | null;
+    active: boolean;
+  }) => Promise<void>;
 }) {
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [kind, setKind] = useState<BudgetKind>('expense');
   const [account, setAccount] = useState<BudgetAccount>('bills');
   const [category, setCategory] = useState<BudgetCategory>('other');
+  const [isRecurring, setIsRecurring] = useState(false);
   const [date, setDate] = useState(() => toKey(new Date()));
+  const [dayOfMonth, setDayOfMonth] = useState('1');
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
     if (!name.trim() || !amount) return;
     setSubmitting(true);
     try {
-      await onSubmit({
+      if (isRecurring) {
+        await onSubmitRecurring({
+          name: name.trim(),
+          amount: Math.abs(parseFloat(amount)),
+          kind,
+          account,
+          category,
+          recurrence: 'monthly_day',
+          day_of_month: Math.min(31, Math.max(1, parseInt(dayOfMonth, 10) || 1)),
+          month_of_year: null,
+          months: null,
+          notes: null,
+          active: true,
+        });
+      } else {
+        await onSubmitActual({
+          name: name.trim(),
+          amount: Math.abs(parseFloat(amount)),
+          kind,
+          account,
+          category,
+          transaction_date: date,
+          pay_period_id: null,
+          notes: null,
+        });
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+      <div className="panel" style={{ width: 420, margin: 0 }}>
+        <div className="panel-head">
+          <h2>Add expense</h2>
+          <button className="qty-button" onClick={onClose}><X size={14} /></button>
+        </div>
+        <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
+          <input placeholder="What was it?" value={name} onChange={(e) => setName(e.target.value)} />
+          <div className="form-grid">
+            <input placeholder="Amount" type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            <select value={kind} onChange={(e) => setKind(e.target.value as BudgetKind)}>
+              <option value="expense">Expense</option>
+              <option value="income">Income</option>
+            </select>
+          </div>
+          <div className="form-grid">
+            <select value={account} onChange={(e) => setAccount(e.target.value as BudgetAccount)}>
+              <option value="bills">Bills Account</option>
+              <option value="main">Main Account</option>
+            </select>
+            <select value={category} onChange={(e) => setCategory(e.target.value as BudgetCategory)}>
+              {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+            <input type="checkbox" checked={isRecurring} onChange={(e) => setIsRecurring(e.target.checked)} />
+            <Repeat size={13} /> This repeats every month
+          </label>
+
+          {isRecurring ? (
+            <div>
+              <label style={{ fontSize: 12, color: 'var(--muted)' }}>Day of month it's due</label>
+              <input
+                type="number"
+                min={1}
+                max={31}
+                value={dayOfMonth}
+                onChange={(e) => setDayOfMonth(e.target.value)}
+                style={{ width: '100%' }}
+              />
+            </div>
+          ) : (
+            <div>
+              <label style={{ fontSize: 12, color: 'var(--muted)' }}>Date</label>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ width: '100%' }} />
+            </div>
+          )}
+
+          {isRecurring && (
+            <p style={{ color: 'var(--muted)', fontSize: 12, margin: 0 }}>
+              This creates a recurring rule (like Rent or Netflix) that auto-fills every month going forward. For yearly items like birthdays, add them as a one-time date for now.
+            </p>
+          )}
+        </div>
+        <div className="form-actions">
+          <button className="btn primary" onClick={handleSubmit} disabled={submitting || !name.trim() || !amount}>
+            {submitting ? 'Saving...' : isRecurring ? 'Save recurring expense' : 'Save expense'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditActualModal({
+  transaction,
+  onClose,
+  onSave,
+}: {
+  transaction: ActualTransaction;
+  onClose: () => void;
+  onSave: (patch: Partial<Omit<ActualTransaction, 'id' | 'status'>>) => Promise<void>;
+}) {
+  const [name, setName] = useState(transaction.name);
+  const [amount, setAmount] = useState(String(transaction.amount));
+  const [kind, setKind] = useState<BudgetKind>(transaction.kind);
+  const [account, setAccount] = useState<BudgetAccount>(transaction.account);
+  const [category, setCategory] = useState<BudgetCategory>(transaction.category);
+  const [date, setDate] = useState(transaction.transaction_date);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSave = async () => {
+    if (!name.trim() || !amount) return;
+    setSubmitting(true);
+    try {
+      await onSave({
         name: name.trim(),
         amount: Math.abs(parseFloat(amount)),
         kind,
         account,
         category,
         transaction_date: date,
-        pay_period_id: null,
-        notes: null,
       });
     } finally {
       setSubmitting(false);
@@ -310,7 +498,7 @@ function AddTransactionModal({
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
       <div className="panel" style={{ width: 420, margin: 0 }}>
         <div className="panel-head">
-          <h2>Log a transaction</h2>
+          <h2>Edit transaction</h2>
           <button className="qty-button" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
@@ -336,8 +524,8 @@ function AddTransactionModal({
           </select>
         </div>
         <div className="form-actions">
-          <button className="btn primary" onClick={handleSubmit} disabled={submitting || !name.trim() || !amount}>
-            {submitting ? 'Saving...' : 'Save transaction'}
+          <button className="btn primary" onClick={handleSave} disabled={submitting || !name.trim() || !amount}>
+            {submitting ? 'Saving...' : 'Save changes'}
           </button>
         </div>
       </div>
