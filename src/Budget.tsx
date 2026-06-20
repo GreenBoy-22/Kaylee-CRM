@@ -18,6 +18,7 @@ import {
   type ActualTransaction,
   type GeneratedPayday,
   type RecurringRule,
+  type CommissionMonth,
 } from './useBudgetData';
 
 type ViewMode = 'period' | 'month';
@@ -53,10 +54,11 @@ const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
 
 export default function Budget() {
   const {
-    loading, rules, payPeriods, actuals, isAdmin,
+    loading, rules, payPeriods, actuals, commissionMonths, isAdmin,
     addActualTransaction, updateActualTransaction, deleteActualTransaction,
-    addPayPeriod, addRule, updateRule,
+    addPayPeriod, addRule, updateRule, upsertCommissionMonth,
   } = useBudgetData();
+  const [page, setPage] = useState<'overview' | 'commission'>('overview');
   const [view, setView] = useState<ViewMode>('month');
   const [monthAnchor, setMonthAnchor] = useState(new Date());
   const [periodIndex, setPeriodIndex] = useState(0); // 0 = most recent period
@@ -66,23 +68,38 @@ export default function Budget() {
   const [editingActual, setEditingActual] = useState<ActualTransaction | null>(null);
   const [editingPlanned, setEditingPlanned] = useState<PlannedItem | null>(null);
 
-  const sortedPeriods = useMemo(
-    () => [...payPeriods].sort((a, b) => a.pay_date.localeCompare(b.pay_date)),
-    [payPeriods]
-  );
-
-  const periodWindows = useMemo(() => {
-    const windows: { start: Date; end: Date; payday: typeof sortedPeriods[number] }[] = [];
-    for (let i = 0; i < sortedPeriods.length; i++) {
-      const start = new Date(sortedPeriods[i].pay_date + 'T00:00:00');
-      const next = sortedPeriods[i + 1];
-      const end = next
-        ? new Date(new Date(next.pay_date + 'T00:00:00').getTime() - 86400000)
-        : new Date(start.getTime() + 13 * 86400000);
-      windows.push({ start, end, payday: sortedPeriods[i] });
+  // Build a "YYYY-MM" -> after-tax commission $ lookup for the payday generator.
+  const commissionByMonth = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const c of commissionMonths) {
+      const key = c.month_date.slice(0, 7); // "YYYY-MM-01" -> "YYYY-MM"
+      map[key] = c.after_tax_amount;
     }
-    return windows.reverse();
-  }, [sortedPeriods]);
+    return map;
+  }, [commissionMonths]);
+
+  // Pay-period windows now come from the auto-generated Friday paydays
+  // (income is calculated, not manually logged anymore), not from the
+  // manual budget_pay_periods log - that table is now just for one-off
+  // corrections, and is usually empty.
+  const periodWindows = useMemo(() => {
+    const today = new Date();
+    // Wide enough to navigate ~6 months back and ~2 months forward.
+    const rangeStart = new Date(today.getFullYear(), today.getMonth() - 6, 1);
+    const rangeEnd = new Date(today.getFullYear(), today.getMonth() + 2, 0);
+    const paydays = generatePaydays(rangeStart, rangeEnd, commissionByMonth);
+
+    const windows: { start: Date; end: Date; payday: GeneratedPayday }[] = [];
+    for (let i = 0; i < paydays.length; i++) {
+      const start = new Date(paydays[i].date + 'T00:00:00');
+      const next = paydays[i + 1];
+      const end = next
+        ? new Date(new Date(next.date + 'T00:00:00').getTime() - 86400000)
+        : new Date(start.getTime() + 6 * 86400000); // Fri -> next Thu, 7 days
+      windows.push({ start, end, payday: paydays[i] });
+    }
+    return windows.reverse(); // newest first, so periodIndex=0 is most recent
+  }, [commissionByMonth]);
 
   const currentWindow = periodWindows[periodIndex];
 
@@ -117,19 +134,24 @@ export default function Budget() {
 
   const planned = useMemo(() => {
     const billsAndOneOffs = expandRecurringRules(rules, rangeStart, rangeEnd, overriddenOccurrenceIds);
-    const paydays = generatePaydays(rangeStart, rangeEnd);
-    const paydayItems: PlannedItem[] = paydays.map((p: GeneratedPayday) => ({
-      id: p.id,
-      ruleId: 'generated-payday',
-      name: p.isWifiStipend ? `${p.person} Pay Day (with wifi stipend)` : `${p.person} Pay Day`,
-      amount: p.amount,
-      kind: 'income',
-      account: 'main',
-      category: 'income',
-      date: p.date,
-    }));
+    const paydays = generatePaydays(rangeStart, rangeEnd, commissionByMonth);
+    const paydayItems: PlannedItem[] = paydays.map((p: GeneratedPayday) => {
+      let label = `${p.person} Pay Day`;
+      if (p.isWifiStipend) label += ' (with wifi stipend)';
+      if (p.commissionAmount > 0) label += ` (with commission)`;
+      return {
+        id: p.id,
+        ruleId: 'generated-payday',
+        name: label,
+        amount: p.amount,
+        kind: 'income',
+        account: 'main',
+        category: 'income',
+        date: p.date,
+      };
+    });
     return [...billsAndOneOffs, ...paydayItems].sort((a, b) => a.date.localeCompare(b.date));
-  }, [rules, rangeStart, rangeEnd, overriddenOccurrenceIds]);
+  }, [rules, rangeStart, rangeEnd, overriddenOccurrenceIds, commissionByMonth]);
 
   const actualsInRange = useMemo(() => {
     const startKey = toKey(rangeStart);
@@ -168,7 +190,7 @@ export default function Budget() {
           <h1>Budget</h1>
           <p>Planned vs actual, split across the Bills Account and Main Account.</p>
         </div>
-        {isAdmin && (
+        {isAdmin && page === 'overview' && (
           <div className="actions">
             <button className="btn ghost" onClick={() => setShowPayForm(true)}>+ Log payday</button>
             <button className="btn primary" onClick={() => setShowAddForm(true)}><Plus size={15} /> Add expense</button>
@@ -176,6 +198,14 @@ export default function Budget() {
         )}
       </div>
 
+      <div className="toggle-wrap" style={{ marginBottom: 16 }}>
+        <button className={page === 'overview' ? 'active' : ''} onClick={() => setPage('overview')}>Overview</button>
+        <button className={page === 'commission' ? 'active' : ''} onClick={() => setPage('commission')}>Adam's Commission</button>
+      </div>
+
+      {page === 'commission' ? (
+        <CommissionPanel commissionMonths={commissionMonths} isAdmin={isAdmin} onSave={upsertCommissionMonth} />
+      ) : (
       <div className="panel">
         <div className="panel-head">
           <div className="toggle-wrap">
@@ -298,6 +328,7 @@ export default function Budget() {
           </table>
         </div>
       </div>
+      )}
 
       {showAddForm && (
         <AddExpenseModal
@@ -796,6 +827,147 @@ function EditPlannedModal({
             {submitting ? 'Saving...' : 'Save for this date only'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+function CommissionPanel({
+  commissionMonths,
+  isAdmin,
+  onSave,
+}: {
+  commissionMonths: CommissionMonth[];
+  isAdmin: boolean;
+  onSave: (input: { month_date: string; monthly_revenue: number; commission_rate?: number; tax_rate?: number; notes?: string | null }) => Promise<void>;
+}) {
+  const currentMonthKey = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
+  }, []);
+
+  const existingForCurrentMonth = commissionMonths.find((c) => c.month_date === currentMonthKey);
+
+  const [editingMonth, setEditingMonth] = useState<string>(currentMonthKey);
+  const [revenue, setRevenue] = useState(existingForCurrentMonth ? String(existingForCurrentMonth.monthly_revenue) : '');
+  const [rate, setRate] = useState(existingForCurrentMonth ? String(existingForCurrentMonth.commission_rate * 100) : '2');
+  const [taxRate, setTaxRate] = useState(existingForCurrentMonth ? String(existingForCurrentMonth.tax_rate * 100) : '28.5');
+  const [submitting, setSubmitting] = useState(false);
+
+  const revenueNum = parseFloat(revenue) || 0;
+  const rateNum = (parseFloat(rate) || 0) / 100;
+  const taxRateNum = (parseFloat(taxRate) || 0) / 100;
+  const commissionRaw = revenueNum * rateNum;
+  const commissionAfterTax = commissionRaw * (1 - taxRateNum);
+
+  const monthLabel = (dateStr: string) => {
+    const d = new Date(dateStr + 'T00:00:00');
+    return `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+  };
+
+  const handleSave = async () => {
+    if (!revenue) return;
+    setSubmitting(true);
+    try {
+      await onSave({
+        month_date: editingMonth,
+        monthly_revenue: revenueNum,
+        commission_rate: rateNum,
+        tax_rate: taxRateNum,
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h2>Adam's Commission</h2>
+      </div>
+      <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: -8 }}>
+        Once a month (Adam's 2nd payday), commission gets added on top of his base pay. Enter the month's revenue and it calculates automatically: revenue &times; rate, then reduced by the commission tax rate.
+      </p>
+
+      {isAdmin && (
+        <div className="form-grid" style={{ marginTop: 16 }}>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Month</label>
+            <input
+              type="month"
+              value={editingMonth.slice(0, 7)}
+              onChange={(e) => setEditingMonth(`${e.target.value}-01`)}
+              style={{ width: '100%' }}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>How much they brought in</label>
+            <input
+              type="number"
+              step="0.01"
+              placeholder="e.g. 83000"
+              value={revenue}
+              onChange={(e) => setRevenue(e.target.value)}
+              style={{ width: '100%' }}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Commission %</label>
+            <input type="number" step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} style={{ width: '100%' }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Tax rate on commission %</label>
+            <input type="number" step="0.01" value={taxRate} onChange={(e) => setTaxRate(e.target.value)} style={{ width: '100%' }} />
+          </div>
+        </div>
+      )}
+
+      <div className="stats-row" style={{ marginTop: 16 }}>
+        <div className="stat-card">
+          <div className="stat-label">Commission (before tax)</div>
+          <div className="stat-val">{fmtMoney(commissionRaw)}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">After-tax commission</div>
+          <div className="stat-val" style={{ color: 'var(--green)' }}>{fmtMoney(commissionAfterTax)}</div>
+        </div>
+      </div>
+
+      {isAdmin && (
+        <div className="form-actions" style={{ marginTop: 12 }}>
+          <button className="btn primary" onClick={handleSave} disabled={submitting || !revenue}>
+            {submitting ? 'Saving...' : `Save for ${monthLabel(editingMonth)}`}
+          </button>
+        </div>
+      )}
+
+      <div className="table-card" style={{ marginTop: 20 }}>
+        <table>
+          <thead>
+            <tr>
+              <th>Month</th>
+              <th style={{ textAlign: 'right' }}>Revenue</th>
+              <th style={{ textAlign: 'right' }}>Rate</th>
+              <th style={{ textAlign: 'right' }}>Commission</th>
+              <th style={{ textAlign: 'right' }}>After tax</th>
+            </tr>
+          </thead>
+          <tbody>
+            {commissionMonths.length === 0 && (
+              <tr><td colSpan={5} style={{ color: 'var(--muted)' }}>No commission months logged yet.</td></tr>
+            )}
+            {commissionMonths.map((c) => (
+              <tr key={c.id}>
+                <td>{monthLabel(c.month_date)}</td>
+                <td style={{ textAlign: 'right' }}>{fmtMoney(c.monthly_revenue)}</td>
+                <td style={{ textAlign: 'right' }}>{(c.commission_rate * 100).toFixed(2)}%</td>
+                <td style={{ textAlign: 'right' }}>{fmtMoney(c.commission_amount)}</td>
+                <td style={{ textAlign: 'right', color: 'var(--green)' }}>{fmtMoney(c.after_tax_amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
