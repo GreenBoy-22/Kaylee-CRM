@@ -10,7 +10,7 @@ import { supabase, hasSupabase } from './lib/supabase';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'adam' | 'vehicles' | 'suggestions' | 'students' | 'outreach' | 'settings';
+type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'suggestions' | 'students' | 'outreach' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -21,7 +21,16 @@ type Profile = {
   role: Role;
 };
 
+type HouseholdUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  todoist_id: string | null;
+};
+
 type AccessLevel = 'hidden' | 'view' | 'edit';
+
 
 type ModulePermission = {
   id?: string;
@@ -138,6 +147,11 @@ type ChoreTask = {
   last_synced_at: string | null;
   labels: string[] | null;
   notes: string | null;
+  assigned_to: string | null;
+  todoist_assignee_id: string | null;
+  escalation_note: string | null;
+  escalated_at: string | null;
+  escalated_to: string | null;
 };
 
 type ChoreSuggestion = {
@@ -186,7 +200,6 @@ const homeNav: readonly NavEntry[] = [
   ['budget', 'Budget', WalletCards],
   ['inventory', 'Inventory', Inbox],
   ['chores', 'Chores & Tasks', ListTodo],
-  ['adam', 'Adam’s Tasks', ShieldCheck],
   ['vehicles', 'Vehicles', Car],
   ['suggestions', 'Home Suggestions', Home]
 ];
@@ -207,7 +220,6 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'calendar', module_name: 'calendar', label: 'Calendar', default_access: 'edit' },
   { page: 'inventory', module_name: 'inventory', label: 'Inventory', default_access: 'edit' },
   { page: 'chores', module_name: 'chores', label: 'Chores & Tasks', default_access: 'edit' },
-  { page: 'adam', module_name: 'adam_tasks', label: 'Adam’s Tasks', default_access: 'edit' },
   { page: 'vehicles', module_name: 'vehicles', label: 'Vehicles', default_access: 'view' },
   { page: 'suggestions', module_name: 'home_suggestions', label: 'Home Suggestions', default_access: 'edit' },
   { page: 'budget', module_name: 'budget', label: 'Budget', default_access: 'view' },
@@ -240,16 +252,6 @@ const seedTasks: TaskItem[] = [
   { id: 't1', title: 'Check fridge items expiring this week', owner: 'Kaylee', mode: 'home', minutes: 8, priority: 'warning', status: 'open', source: 'Inventory' },
   { id: 't2', title: 'Draft 3 student follow-ups from GROW notes', owner: 'Kaylee', mode: 'work', minutes: 20, priority: 'normal', status: 'open', source: 'Students' },
   { id: 't3', title: "Approve Adam's Friday task plan", owner: 'Kaylee', mode: 'home', minutes: 5, priority: 'urgent', status: 'pending_approval', source: 'Adam' }
-];
-
-const adamPlan = [
-  { day: 'Mon', tasks: ['Take trash out', 'Clear nightstand'], rationale: 'Quick wins first; no tedious stacking.' },
-  { day: 'Tue', tasks: ['Unload dishwasher', 'Water porch plants'], rationale: 'Two light tasks only.' },
-  { day: 'Wed', tasks: ['Vacuum living room'], rationale: 'Room-level subtask, not whole-house vacuuming.' },
-  { day: 'Thu', tasks: ['Put laundry in hamper', 'Wipe bathroom counter'], rationale: 'Short, contained, visible finish.' },
-  { day: 'Fri', tasks: ['Reset car trash'], rationale: 'One tiny task before weekend.' },
-  { day: 'Sat', tasks: ['Yard work block'], rationale: 'Saturday heavy day; only task.' },
-  { day: 'Sun', tasks: ['Rest day'], rationale: 'Sunday is always rest.' }
 ];
 
 const vehicles = [
@@ -391,6 +393,49 @@ const COMPACT_ROW_CSS = `
   font-size: 13px;
   color: var(--muted, #9aa0a6);
 }
+
+.view-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--surface-2, rgba(0,0,0,0.04));
+  border-radius: 10px;
+  padding: 4px;
+  margin: 4px 0 16px;
+  width: fit-content;
+}
+.view-toggle button {
+  border: none;
+  background: transparent;
+  padding: 7px 14px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted, #9aa0a6);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+.view-toggle button:hover {
+  color: var(--text, #1a1a1a);
+}
+.view-toggle button.active {
+  background: var(--surface, #fff);
+  color: var(--text, #1a1a1a);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+}
+
+.ct-row-with-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ct-row-with-action .ct-row {
+  flex: 1;
+}
+.ct-take-button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 `;
 
 const briefing = [
@@ -428,6 +473,7 @@ function App() {
   const [choreTasks, setChoreTasks] = useState<ChoreTask[]>([]);
   const [choreSuggestions, setChoreSuggestions] = useState<ChoreSuggestion[]>([]);
   const [syncState, setSyncState] = useState<TodoistSyncState | null>(null);
+  const [householdUsers, setHouseholdUsers] = useState<HouseholdUser[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [permissions, setPermissions] = useState<ModulePermission[]>(defaultAdamPermissions);
   const [loading, setLoading] = useState(false);
@@ -499,7 +545,7 @@ function App() {
     try {
       const [
         invResult, studentResult, touchpointResult, taskResult,
-        permissionResult, draftResult, choreResult, suggestionResult, syncStateResult
+        permissionResult, draftResult, choreResult, suggestionResult, syncStateResult, userResult
       ] = await Promise.all([
         supabase.from('inventory_items').select('*').order('created_at', { ascending: false }),
         supabase.from('students').select('*').order('created_at', { ascending: false }),
@@ -509,7 +555,8 @@ function App() {
         supabase.from('email_drafts').select('*').order('created_at', { ascending: false }),
         supabase.from('chore_tasks').select('*').eq('deleted_in_todoist', false).order('priority', { ascending: false }),
         supabase.from('chore_suggestions').select('*').order('category', { ascending: true }),
-        supabase.from('todoist_sync_state').select('*').eq('id', 1).maybeSingle()
+        supabase.from('todoist_sync_state').select('*').eq('id', 1).maybeSingle(),
+        supabase.from('users').select('*')
       ]);
 
       if (!invResult.error && invResult.data) setInventory(invResult.data as InventoryItem[]);
@@ -520,6 +567,7 @@ function App() {
       if (!choreResult.error && choreResult.data) setChoreTasks(choreResult.data as ChoreTask[]);
       if (!suggestionResult.error && suggestionResult.data) setChoreSuggestions(suggestionResult.data as ChoreSuggestion[]);
       if (!syncStateResult.error && syncStateResult.data) setSyncState(syncStateResult.data as TodoistSyncState);
+      if (!userResult.error && userResult.data) setHouseholdUsers(userResult.data as HouseholdUser[]);
       if (!permissionResult.error && permissionResult.data && permissionResult.data.length) {
         setPermissions(mergePermissions(permissionResult.data as ModulePermission[]));
       }
@@ -1347,7 +1395,7 @@ Kaylee`;
     }).eq('id', id);
   }
 
-  async function addSuggestionToTodoist(id: string) {
+  async function addSuggestionToTodoist(id: string, assigneeTodoistId?: string | null) {
     if (!canEdit('chores')) return setMessage('Adding to Todoist is admin-only.');
     if (!supabase) return setMessage('Supabase not configured.');
     const target = choreSuggestions.find((s) => s.id === id);
@@ -1367,14 +1415,76 @@ Kaylee`;
       if (data?.success === false) throw new Error(data?.error || 'Create failed');
       const now = new Date().toISOString();
       const newTaskId = data?.todoist_task_id ?? null;
+
+      // If approving specifically for someone (Adam), assign it to them in
+      // Todoist right away rather than leaving it unassigned.
+      if (assigneeTodoistId && newTaskId) {
+        try {
+          await supabase.functions.invoke('todoist-assign-task', {
+            body: { todoist_task_id: newTaskId, responsible_uid: assigneeTodoistId }
+          });
+        } catch (assignErr) {
+          console.error('Assignment after create failed', assignErr);
+        }
+      }
+
       setChoreSuggestions((current) => current.map((s) => s.id === id ? { ...s, status: 'added', added_to_todoist_at: now, todoist_task_id: newTaskId } : s));
       await supabase.from('chore_suggestions').update({
         status: 'added', added_to_todoist_at: now, todoist_task_id: newTaskId, updated_at: now
       }).eq('id', id);
-      setMessage(`Added "${target.title}" to Todoist. Run Sync to mirror it into Chores.`);
+      setMessage(assigneeTodoistId
+        ? `Sent "${target.title}" to Todoist and assigned it. Sync will mirror it into Chores within 15 minutes (or click Sync now).`
+        : `Added "${target.title}" to Todoist. Run Sync to mirror it into Chores.`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setMessage(`Add to Todoist failed: ${msg}`);
+    }
+  }
+
+  /** "Send to Adam" from the Review & Approve panel: creates the task in
+   * Todoist (if not already there) and assigns it to Adam. */
+  async function approveSuggestionForAdam(id: string) {
+    const adam = householdUsers.find((u) => u.name.toLowerCase() === 'adam');
+    if (!adam?.todoist_id) return setMessage("Adam's Todoist ID isn't set up yet — check Settings.");
+    await addSuggestionToTodoist(id, adam.todoist_id);
+  }
+
+  /** "I'll do this instead" from the Review & Approve panel: creates the
+   * task in Todoist (if not already there) and assigns it to Kaylee. */
+  async function approveSuggestionForSelf(id: string) {
+    const kaylee = householdUsers.find((u) => u.name.toLowerCase() === 'kaylee');
+    await addSuggestionToTodoist(id, kaylee?.todoist_id ?? null);
+  }
+
+  /** Reassigns an existing chore (already in Todoist) to a different
+   * household member — used for "I'll take this one" on Adam's list, and
+   * for manually pulling back an escalated task. */
+  async function reassignChore(choreId: string, toUserName: 'Kaylee' | 'Adam') {
+    if (!canEdit('chores')) return setMessage('Reassigning chores is admin-only.');
+    if (!supabase) return setMessage('Supabase not configured.');
+    const chore = choreTasks.find((c) => c.id === choreId);
+    if (!chore?.todoist_task_id) return setMessage('This chore has no linked Todoist task to reassign.');
+    const target = householdUsers.find((u) => u.name === toUserName);
+    if (!target?.todoist_id) return setMessage(`${toUserName}'s Todoist ID isn't set up yet — check Settings.`);
+
+    setMessage(`Reassigning "${chore.name}" to ${toUserName}…`);
+    try {
+      const { data, error } = await supabase.functions.invoke('todoist-assign-task', {
+        body: { todoist_task_id: chore.todoist_task_id, responsible_uid: target.todoist_id }
+      });
+      if (error) throw new Error(error.message);
+      if (data?.success === false) throw new Error(data?.error || 'Reassign failed');
+
+      setChoreTasks((current) => current.map((c) => c.id === choreId ? {
+        ...c, assigned_to: target.id, todoist_assignee_id: target.todoist_id, escalation_note: null
+      } : c));
+      await supabase.from('chore_tasks').update({
+        assigned_to: target.id, todoist_assignee_id: target.todoist_id, escalation_note: null, updated_at: new Date().toISOString()
+      }).eq('id', choreId);
+      setMessage(`"${chore.name}" is now assigned to ${toUserName}.`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setMessage(`Reassign failed: ${msg}`);
     }
   }
 
@@ -1438,14 +1548,13 @@ Kaylee`;
         </aside>
         <main className="content">
           {!activeCanEdit && activeRole === 'limited' && page !== 'dashboard' && <ViewOnlyBanner />}
-          {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} choreTasks={choreTasks} role={activeRole} setPage={setPage} />}
-          {page === 'today' && <Today tasks={tasks.filter((task) => activeRole === 'admin' || task.mode === 'home')} choreTasks={choreTasks} completeTask={completeTask} completeChore={completeChore} editable={canEdit('today') && canEdit('chores')} />}
+          {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} choreTasks={choreTasks} householdUsers={householdUsers} role={activeRole} setPage={setPage} />}
+          {page === 'today' && <Today tasks={tasks.filter((task) => activeRole === 'admin' || task.mode === 'home')} choreTasks={choreTasks} householdUsers={householdUsers} completeTask={completeTask} completeChore={completeChore} editable={canEdit('today') && canEdit('chores')} />}
           {page === 'briefing' && <Briefing />}
           {page === 'calendar' && <Placeholder title="Calendar" sub="Google Calendar integration will connect here after auth basics are stable." />}
           {page === 'budget' && <Placeholder title="Budget" sub={activeRole === 'limited' ? 'Kaylee controls whether this is visible/editable for Adam.' : 'Calendar-based cashflow page scaffold.'} />}
           {page === 'inventory' && <Inventory inventory={inventory} createItem={createInventoryItem} updateQuantity={updateInventoryQuantity} editable={canEdit('inventory')} />}
-          {page === 'chores' && <Chores choreTasks={choreTasks} choreSuggestions={choreSuggestions} syncState={syncState} syncing={syncing} syncTodoistNow={syncTodoistNow} completeChore={completeChore} uncompleteChore={uncompleteChore} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('chores')} />}
-          {page === 'adam' && <Adam editable={canEdit('adam')} />}
+          {page === 'chores' && <Chores choreTasks={choreTasks} choreSuggestions={choreSuggestions} syncState={syncState} syncing={syncing} householdUsers={householdUsers} currentUserName={activeName} syncTodoistNow={syncTodoistNow} completeChore={completeChore} uncompleteChore={uncompleteChore} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} approveSuggestionForAdam={approveSuggestionForAdam} approveSuggestionForSelf={approveSuggestionForSelf} reassignChore={reassignChore} editable={canEdit('chores')} />}
           {page === 'vehicles' && <Vehicles />}
           {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
           {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
@@ -1616,7 +1725,7 @@ function timelineForStudent(student: Student, touchpoints: Touchpoint[]) {
   return [...profileEvents, ...touchEvents].sort((a, b) => String(b.date).localeCompare(String(a.date)));
 }
 
-function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, role, setPage }: { mode: Mode; inventory: InventoryItem[]; students: Student[]; touchpoints: Touchpoint[]; tasks: TaskItem[]; choreTasks: ChoreTask[]; role: Role; setPage: (page: Page) => void }) {
+function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, householdUsers, role, setPage }: { mode: Mode; inventory: InventoryItem[]; students: Student[]; touchpoints: Touchpoint[]; tasks: TaskItem[]; choreTasks: ChoreTask[]; householdUsers: HouseholdUser[]; role: Role; setPage: (page: Page) => void }) {
   const expiring = inventory.filter((item) => item.expires).length;
   const pending = tasks.filter((task) => task.status === 'pending_approval').length;
   const activeStudents = students.filter((student) => !student.archived);
@@ -1719,7 +1828,7 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, 
   return <>
     <Header title={role === 'limited' ? 'Adam home dashboard' : mode === 'home' ? 'Home command center' : 'Work command center'} sub={role === 'limited' ? 'Home-only view. Kaylee controls which sections are editable.' : mode === 'home' ? 'Tasks, approvals, inventory, vehicles, and tenant-safe home care.' : 'FERPA-safe student workflow, GROW notes, and daily planning.'} />
     <Stats items={mode === 'home' ? [['Open tasks', String(tasks.filter((task) => task.status !== 'completed' && task.mode === 'home').length), 'home'], ['Adam pending', String(pending), 'approval needed'], ['Inventory', String(inventory.length), `${expiring} expiring`], ['Vehicle alerts', '4', 'critical/due']] : [['Active students', String(activeStudents.length), 'FERPA-safe'], ['Need copy', String(students.filter((s) => !s.copied).length), 'Salesforce'], ['FERPA', 'On', 'clipboard only'], ['Calls today', String(callsToday.length), 'manual now']]} />
-    <div className="grid two"><Today tasks={tasks.filter((task) => mode === 'work' ? task.mode === 'work' : task.mode === 'home').slice(0, 3)} choreTasks={mode === 'home' ? choreTasks : []} completeTask={() => undefined} completeChore={() => undefined} editable={false} compact /><Briefing compact /></div>
+    <div className="grid two"><Today tasks={tasks.filter((task) => mode === 'work' ? task.mode === 'work' : task.mode === 'home').slice(0, 3)} choreTasks={mode === 'home' ? choreTasks : []} householdUsers={householdUsers} completeTask={() => undefined} completeChore={() => undefined} editable={false} compact /><Briefing compact /></div>
   </>;
 }
 
@@ -1829,9 +1938,16 @@ function choreToRowProps(chore: ChoreTask, showReason: boolean) {
   };
 }
 
-function Today({ tasks, choreTasks, completeTask, completeChore, editable, compact = false }: { tasks: TaskItem[]; choreTasks: ChoreTask[]; completeTask: (id: string) => void; completeChore: (id: string) => void; editable: boolean; compact?: boolean }) {
+function Today({ tasks, choreTasks, householdUsers, completeTask, completeChore, editable, compact = false }: { tasks: TaskItem[]; choreTasks: ChoreTask[]; householdUsers: HouseholdUser[]; completeTask: (id: string) => void; completeChore: (id: string) => void; editable: boolean; compact?: boolean }) {
   const list = compact ? tasks.slice(0, 3) : tasks;
-  const tackleList = useMemo(() => computeTackleToday(choreTasks), [choreTasks]);
+  const kaylee = householdUsers.find((u) => u.name.toLowerCase() === 'kaylee') ?? null;
+  // Today's Tasks is Kaylee's personal daily view — Adam has his own tab
+  // under Chores & Tasks. Unassigned chores default to her until delegated.
+  const myChoreTasks = useMemo(() => {
+    if (!kaylee) return choreTasks;
+    return choreTasks.filter((c) => c.assigned_to === kaylee.id || !c.assigned_to);
+  }, [choreTasks, kaylee]);
+  const tackleList = useMemo(() => computeTackleToday(myChoreTasks), [myChoreTasks]);
   const shown = compact ? tackleList.slice(0, 3) : tackleList;
 
   return <>
@@ -1938,10 +2054,6 @@ function Inventory({ inventory, createItem, updateQuantity, editable }: { invent
     {editable && action !== 'none' && <section className={`panel action-panel ${action}`}><div className="panel-head"><h2>{action === 'manual' ? 'Manual Entry' : action === 'scanAdd' ? 'Scan to Add' : 'Scan to Use / Remove'}</h2><button className="btn ghost" onClick={() => setAction('none')}>Close</button></div>{action === 'manual' ? <div><div className="form-grid"><input placeholder="Item name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /><input placeholder="Brand" value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} /><input placeholder="Location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /><input placeholder="Category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /><input placeholder="Quantity" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /><input placeholder="Estimated value" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} /></div><div className="form-actions"><button className="btn primary" onClick={submit}><Save size={15} /> Save Item</button></div></div> : <div className="scan-row"><input placeholder="Scan or type barcode" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} /><button className={action === 'scanUse' ? 'btn warning' : 'btn primary'}>{action === 'scanUse' ? 'Use item' : 'Look up barcode'}</button></div>}</section>}
     <div className="table-card"><table><thead><tr><th>Item</th><th>Location</th><th>Category</th><th>Qty</th><th>Expires</th><th>Value</th></tr></thead><tbody>{inventory.map((item) => <tr key={item.id}><td><strong>{item.name}</strong><small>{item.brand || '—'}</small></td><td>{item.location}</td><td>{item.category}</td><td>{item.quantity} {editable && <button className="qty-button" onClick={() => updateQuantity(item.id, item.quantity - 1)}><Minus size={12} /></button>}</td><td>{item.expires || '—'}</td><td>${Number(item.value || 0).toFixed(2)}</td></tr>)}</tbody></table></div>
   </>;
-}
-
-function Adam({ editable }: { editable: boolean }) {
-  return <><Header title="Adam’s Tasks" sub="ADHD-safe, Kaylee-approved task planning.">{editable ? <button className="btn primary">Create task plan</button> : <span className="readonly-pill"><Eye size={14} /> View only</span>}</Header><Stats items={[["Pending approval", '3'], ['Max/day', '2–3'], ['Heavy day', 'Saturday'], ['Sunday', 'Rest']]} /><div className="day-grid">{adamPlan.map((day) => <div className="day-card" key={day.day}><h3>{day.day}</h3><div className="ct-list">{day.tasks.map((task) => <CompactTaskRow key={task} title={task} completed={false} onToggle={() => undefined} editable={false} reason={null} />)}</div><small>{day.rationale}</small></div>)}</div></>;
 }
 
 function Vehicles() {
@@ -2546,16 +2658,21 @@ function Outreach({ drafts, students, generateCohortDrafts, updateDraft, markDra
   </>;
 }
 
+type ChoresViewMode = 'mine' | 'adam' | 'approval';
+
 function Chores({
-  choreTasks, choreSuggestions, syncState, syncing,
+  choreTasks, choreSuggestions, syncState, syncing, householdUsers, currentUserName,
   syncTodoistNow, completeChore, uncompleteChore,
   markSuggestionDone, snoozeSuggestion, dismissSuggestion, restoreSuggestion,
-  addSuggestionToTodoist, editable
+  addSuggestionToTodoist, approveSuggestionForAdam, approveSuggestionForSelf, reassignChore,
+  editable
 }: {
   choreTasks: ChoreTask[];
   choreSuggestions: ChoreSuggestion[];
   syncState: TodoistSyncState | null;
   syncing: boolean;
+  householdUsers: HouseholdUser[];
+  currentUserName: string;
   syncTodoistNow: () => void;
   completeChore: (id: string) => void;
   uncompleteChore: (id: string) => void;
@@ -2563,35 +2680,69 @@ function Chores({
   snoozeSuggestion: (id: string, days: number) => void;
   dismissSuggestion: (id: string) => void;
   restoreSuggestion: (id: string) => void;
-  addSuggestionToTodoist: (id: string) => void;
+  addSuggestionToTodoist: (id: string, assigneeTodoistId?: string | null) => void;
+  approveSuggestionForAdam: (id: string) => void;
+  approveSuggestionForSelf: (id: string) => void;
+  reassignChore: (choreId: string, toUserName: 'Kaylee' | 'Adam') => void;
   editable: boolean;
 }) {
   const [showCompleted, setShowCompleted] = useState(false);
   const [openKeys, setOpenKeys] = useState<Set<string> | null>(null); // null = not yet initialized
+  const [view, setView] = useState<ChoresViewMode>('mine');
 
   const monthNow = new Date().getMonth() + 1;
 
-  // Suggestions to surface on the Chores tab: in-season AND pending OR overdue
-  const seasonalSuggestions = useMemo(() => {
+  const kaylee = householdUsers.find((u) => u.name.toLowerCase() === 'kaylee') ?? null;
+  const adam = householdUsers.find((u) => u.name.toLowerCase() === 'adam') ?? null;
+
+  // Split chores by who they're assigned to. Anything with no assignment
+  // at all defaults into Kaylee's view, since unassigned Todoist tasks are
+  // hers by default until she delegates them.
+  const myChores = useMemo(() => {
+    if (!kaylee) return choreTasks.filter((c) => !c.assigned_to);
+    return choreTasks.filter((c) => c.assigned_to === kaylee.id || !c.assigned_to);
+  }, [choreTasks, kaylee]);
+
+  const adamChores = useMemo(() => {
+    if (!adam) return [];
+    return choreTasks.filter((c) => c.assigned_to === adam.id);
+  }, [choreTasks, adam]);
+
+  // Recently-escalated chores: were Adam's, auto-moved to Kaylee for being
+  // 3+ days overdue. Surfaced as a callout at the top of "My Tasks".
+  const escalatedToMe = useMemo(() => {
+    return choreTasks.filter((c) => c.escalation_note && kaylee && c.assigned_to === kaylee.id);
+  }, [choreTasks, kaylee]);
+
+  // Suggestions worth reviewing: in-season AND pending (or overdue), same
+  // logic as before, just now feeding the "Needs Approval" tab instead of
+  // a fixed "this month" panel.
+  const reviewSuggestions = useMemo(() => {
     const now = Date.now();
     return choreSuggestions.filter((s) => {
       if (s.status === 'dismissed') return false;
       if (s.status === 'done') return false;
+      if (s.status === 'added') return false;
       if (s.status === 'snoozed') {
         if (!s.snoozed_until) return false;
         if (new Date(s.snoozed_until).getTime() > now) return false;
       }
-      if (s.status === 'added') return false; // already in Todoist, will appear in chores
       const inSeason = !s.month_triggers || s.month_triggers.length === 0 || s.month_triggers.includes(monthNow);
       const isOverdue = s.next_due_at ? new Date(s.next_due_at).getTime() < now : false;
       return inSeason || isOverdue;
-    }).slice(0, 6);
+    });
   }, [choreSuggestions, monthNow]);
 
-  const dateBuckets = useMemo(() => groupChoresByDate(choreTasks, showCompleted), [choreTasks, showCompleted]);
+  const activeList = view === 'mine' ? myChores : view === 'adam' ? adamChores : [];
+  const dateBuckets = useMemo(() => groupChoresByDate(activeList, showCompleted), [activeList, showCompleted]);
 
-  // Auto-expand Today + any overdue buckets the first time buckets compute;
-  // after that, respect whatever the person has toggled by hand.
+  // Auto-expand Today + any overdue buckets the first time buckets compute
+  // for the CURRENT view; resets when switching views so each tab starts
+  // with a sensible default instead of carrying over the other tab's state.
+  useEffect(() => {
+    setOpenKeys(null);
+  }, [view]);
+
   useEffect(() => {
     if (openKeys !== null) return;
     const initial = new Set<string>();
@@ -2624,7 +2775,7 @@ function Chores({
 
     <div className="last-sync-line">
       <RefreshCw size={12} />
-      Last sync: {lastSyncLabel}
+      Last sync: {lastSyncLabel} · auto-syncs every 15 min
       {syncState?.last_sync_status && syncState.last_sync_status !== 'success' && syncState.last_sync_status !== 'never' && (
         <span className={`last-sync-status ${syncState.last_sync_status}`}>· {syncState.last_sync_status}</span>
       )}
@@ -2636,21 +2787,48 @@ function Chores({
       <small>Make sure TODOIST_API_TOKEN is set in Supabase function secrets, then click Sync again.</small>
     </section>}
 
-    {/* ============ THIS MONTH'S SUGGESTIONS ============ */}
-    {seasonalSuggestions.length > 0 && <section className="panel">
+    {/* ============ 3-WAY TOGGLE ============ */}
+    <div className="view-toggle">
+      <button className={view === 'mine' ? 'active' : ''} onClick={() => setView('mine')}>
+        My Tasks{myChores.length > 0 ? ` (${myChores.filter((c) => !c.is_completed).length})` : ''}
+      </button>
+      <button className={view === 'adam' ? 'active' : ''} onClick={() => setView('adam')}>
+        Adam's Tasks{adamChores.length > 0 ? ` (${adamChores.filter((c) => !c.is_completed).length})` : ''}
+      </button>
+      <button className={view === 'approval' ? 'active' : ''} onClick={() => setView('approval')}>
+        Needs Approval{reviewSuggestions.length > 0 ? ` (${reviewSuggestions.length})` : ''}
+      </button>
+    </div>
+
+    {/* ============ ESCALATION CALLOUT (My Tasks only) ============ */}
+    {view === 'mine' && escalatedToMe.length > 0 && <section className="panel suggestion urgent">
       <div className="panel-head">
-        <h2>Suggestions for this month</h2>
-        <span className="readonly-pill">{new Date().toLocaleString([], { month: 'long' })} · {seasonalSuggestions.length} ideas</span>
+        <h2><AlertTriangle size={16} style={{ verticalAlign: 'text-bottom' }} /> Moved from Adam</h2>
+        <span className="readonly-pill">{escalatedToMe.length} task{escalatedToMe.length === 1 ? '' : 's'}</span>
+      </div>
+      {escalatedToMe.map((c) => (
+        <div className="brief-item" key={c.id}><strong>{c.name}</strong> — {c.escalation_note}</div>
+      ))}
+    </section>}
+
+    {/* ============ NEEDS APPROVAL TAB ============ */}
+    {view === 'approval' && <section className="panel">
+      <div className="panel-head">
+        <h2>Review &amp; Approve</h2>
+        <span className="readonly-pill">{reviewSuggestions.length} suggestion{reviewSuggestions.length === 1 ? '' : 's'}</span>
       </div>
       <p style={{ color: 'var(--muted, #888)', fontSize: 13, marginTop: -8 }}>
-        Things new homeowners overlook. Each one can be added to Todoist with one click, or marked done if you already handled it.
+        Things the Hub thinks are worth doing soon. Send a task to Adam, or take it yourself if it's a better fit for you.
       </p>
+      {reviewSuggestions.length === 0 && <div className="brief-item">Nothing waiting on review right now.</div>}
       <div className="grid two" style={{ gap: 12 }}>
-        {seasonalSuggestions.map((s) => <CompactSuggestionCard
+        {reviewSuggestions.map((s) => <ApprovalSuggestionCard
           key={s.id}
           suggestion={s}
           editable={editable}
-          onAdd={() => addSuggestionToTodoist(s.id)}
+          adamAvailable={Boolean(adam?.todoist_id)}
+          onSendToAdam={() => approveSuggestionForAdam(s.id)}
+          onTakeForSelf={() => approveSuggestionForSelf(s.id)}
           onDone={() => markSuggestionDone(s.id)}
           onSnooze={(days) => snoozeSuggestion(s.id, days)}
           onDismiss={() => dismissSuggestion(s.id)}
@@ -2658,16 +2836,20 @@ function Chores({
       </div>
     </section>}
 
-    {/* ============ DATE-GROUPED LIST (Todoist Upcoming style) ============ */}
-    <section className="panel ct-panel">
+    {/* ============ DATE-GROUPED LIST (My Tasks / Adam's Tasks) ============ */}
+    {view !== 'approval' && <section className="panel ct-panel">
       <div className="panel-head">
-        <h2>Chores</h2>
+        <h2>{view === 'mine' ? 'My Tasks' : "Adam's Tasks"}</h2>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
           <input type="checkbox" checked={showCompleted} onChange={(e) => setShowCompleted(e.target.checked)} />
           Show completed
         </label>
       </div>
-      {dateBuckets.length === 0 && <div className="brief-item">Nothing scheduled. Sync Todoist or add tasks there.</div>}
+      {dateBuckets.length === 0 && <div className="brief-item">
+        {view === 'adam'
+          ? "Nothing assigned to Adam right now. Approve a suggestion for him from Needs Approval, or assign a task to him in Todoist."
+          : 'Nothing scheduled. Sync Todoist or add tasks there.'}
+      </div>}
       {dateBuckets.map((bucket) => {
         const isOpen = openKeys?.has(bucket.key) ?? (bucket.isToday || bucket.isOverdue);
         return <details key={bucket.key} className={`ct-day-group ${bucket.isToday ? 'ct-day-today' : ''} ${bucket.isOverdue ? 'ct-day-overdue' : ''}`} open={isOpen} onToggle={(e) => {
@@ -2681,24 +2863,36 @@ function Chores({
           <div className="ct-list">
             {bucket.chores.map((chore) => {
               const props = choreToRowProps(chore, bucket.isToday);
-              return <CompactTaskRow
-                key={chore.id}
-                {...props}
-                editable={editable}
-                onToggle={() => chore.is_completed ? uncompleteChore(chore.id) : completeChore(chore.id)}
-              />;
+              return <div className="ct-row-with-action" key={chore.id}>
+                <CompactTaskRow
+                  {...props}
+                  editable={editable}
+                  onToggle={() => chore.is_completed ? uncompleteChore(chore.id) : completeChore(chore.id)}
+                />
+                {editable && view === 'adam' && !chore.is_completed && (
+                  <button
+                    className="btn ghost tiny ct-take-button"
+                    onClick={() => reassignChore(chore.id, 'Kaylee')}
+                    title="Take this task yourself instead of Adam"
+                  >
+                    I'll do this
+                  </button>
+                )}
+              </div>;
             })}
           </div>
         </details>;
       })}
-    </section>
+    </section>}
   </>;
 }
 
-function CompactSuggestionCard({ suggestion, editable, onAdd, onDone, onSnooze, onDismiss }: {
+function ApprovalSuggestionCard({ suggestion, editable, adamAvailable, onSendToAdam, onTakeForSelf, onDone, onSnooze, onDismiss }: {
   suggestion: ChoreSuggestion;
   editable: boolean;
-  onAdd: () => void;
+  adamAvailable: boolean;
+  onSendToAdam: () => void;
+  onTakeForSelf: () => void;
   onDone: () => void;
   onSnooze: (days: number) => void;
   onDismiss: () => void;
@@ -2716,8 +2910,11 @@ function CompactSuggestionCard({ suggestion, editable, onAdd, onDone, onSnooze, 
         <p style={{ fontSize: 13, margin: '4px 0' }}>{suggestion.why_it_matters || suggestion.description}</p>
         <small>{suggestion.estimated_minutes} min · {suggestion.effort_level} · {suggestion.frequency}</small>
         {editable && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-          <button className="btn primary tiny" onClick={onAdd}><Send size={12} /> Add to Todoist</button>
-          <button className="btn ghost tiny" onClick={onDone}><CheckCircle2 size={12} /> Did it</button>
+          <button className="btn primary tiny" onClick={onSendToAdam} disabled={!adamAvailable} title={adamAvailable ? 'Send to Adam in Todoist' : "Adam's Todoist ID isn't set up yet"}>
+            <Send size={12} /> Send to Adam
+          </button>
+          <button className="btn ghost tiny" onClick={onTakeForSelf}><CheckCircle2 size={12} /> I'll do this instead</button>
+          <button className="btn ghost tiny" onClick={onDone}><CheckCircle2 size={12} /> Already done</button>
           <button className="btn ghost tiny" onClick={() => onSnooze(30)}><Clock size={12} /> 30d</button>
           <button className="btn ghost tiny" onClick={onDismiss}><Trash2 size={12} /> Skip</button>
         </div>}
