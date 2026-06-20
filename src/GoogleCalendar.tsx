@@ -194,7 +194,7 @@ export default function GoogleCalendar() {
                   className={[
                     'gcal-day-cell',
                     !inMonth ? 'outside-month' : '',
-                    summary && summary.busyHours > 0 ? `busy-${summary.busyLevel}` : '',
+                    `busy-${summary ? summary.busyLevel : 'low'}`,
                     isToday ? 'is-today' : '',
                     isSelected ? 'selected' : '',
                   ].join(' ').trim()}
@@ -233,7 +233,7 @@ export default function GoogleCalendar() {
                 key={key}
                 className={[
                   'gcal-week-day',
-                  summary && summary.busyHours > 0 ? `busy-${summary.busyLevel}` : '',
+                  `busy-${summary ? summary.busyLevel : 'low'}`,
                   isToday ? 'is-today' : '',
                   isSelected ? 'selected' : '',
                 ].join(' ').trim()}
