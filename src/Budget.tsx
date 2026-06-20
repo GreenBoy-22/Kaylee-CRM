@@ -275,8 +275,8 @@ function AddTransactionModal({
     account: BudgetAccount;
     category: BudgetCategory;
     transaction_date: string;
-    pay_period_id?: string | null;
-    notes?: string | null;
+    pay_period_id: string | null;
+    notes: string | null;
   }) => Promise<void>;
 }) {
   const [name, setName] = useState('');
@@ -298,6 +298,8 @@ function AddTransactionModal({
         account,
         category,
         transaction_date: date,
+        pay_period_id: null,
+        notes: null,
       });
     } finally {
       setSubmitting(false);
@@ -352,9 +354,9 @@ function AddPayPeriodModal({
     person: 'Kaylee' | 'Adam';
     pay_date: string;
     gross_amount: number;
-    commission_amount?: number;
+    commission_amount: number;
     net_amount: number;
-    notes?: string | null;
+    notes: string | null;
   }) => Promise<void>;
 }) {
   const [person, setPerson] = useState<'Kaylee' | 'Adam'>('Kaylee');
@@ -377,6 +379,7 @@ function AddPayPeriodModal({
         gross_amount: grossNum,
         commission_amount: commissionNum,
         net_amount: netNum,
+        notes: null,
       });
     } finally {
       setSubmitting(false);
