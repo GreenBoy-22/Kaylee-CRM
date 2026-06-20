@@ -36,6 +36,7 @@ export interface GeneratedPayday {
   date: string; // YYYY-MM-DD
   amount: number;
   isWifiStipend: boolean;
+  commissionAmount: number; // 0 if none applied
 }
 
 // Known anchor: Adam was paid Friday June 19, 2026. Pay alternates weekly
@@ -60,7 +61,18 @@ function dKey(d: Date): string {
  * Kaylee/Adam from the known anchor date. Kaylee's 2nd payday in a given
  * calendar month gets the wifi stipend added.
  */
-export function generatePaydays(rangeStart: Date, rangeEnd: Date): GeneratedPayday[] {
+/**
+ * Generates every Friday payday in [rangeStart, rangeEnd], alternating
+ * Kaylee/Adam from the known anchor date. Kaylee's 2nd payday in a given
+ * calendar month gets the wifi stipend added. Adam's 2nd payday in a given
+ * calendar month gets that month's after-tax commission added, if a
+ * commissionByMonth entry exists for it (keyed "YYYY-MM" -> after-tax $).
+ */
+export function generatePaydays(
+  rangeStart: Date,
+  rangeEnd: Date,
+  commissionByMonth?: Record<string, number>
+): GeneratedPayday[] {
   const start = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate());
   const end = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate());
   const msPerDay = 24 * 60 * 60 * 1000;
@@ -79,6 +91,7 @@ export function generatePaydays(rangeStart: Date, rangeEnd: Date): GeneratedPayd
 
   const paydays: GeneratedPayday[] = [];
   const kayleeCountByMonth: Record<string, number> = {};
+  const adamCountByMonth: Record<string, number> = {};
 
   while (cursor.getTime() <= end.getTime()) {
     if (cursor.getTime() >= start.getTime()) {
@@ -86,6 +99,7 @@ export function generatePaydays(rangeStart: Date, rangeEnd: Date): GeneratedPayd
       const dateStr = dKey(cursor);
       let amount = person === 'Adam' ? ADAM_BASE_PAY : KAYLEE_BASE_PAY;
       let isWifiStipend = false;
+      let commissionAmount = 0;
 
       if (person === 'Kaylee') {
         const monthKey = `${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}`;
@@ -96,12 +110,22 @@ export function generatePaydays(rangeStart: Date, rangeEnd: Date): GeneratedPayd
         }
       }
 
+      if (person === 'Adam') {
+        const monthKey = `${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}`;
+        adamCountByMonth[monthKey] = (adamCountByMonth[monthKey] ?? 0) + 1;
+        if (adamCountByMonth[monthKey] === 2 && commissionByMonth?.[monthKey]) {
+          commissionAmount = commissionByMonth[monthKey];
+          amount += commissionAmount;
+        }
+      }
+
       paydays.push({
         id: `payday::${dateStr}::${person}`,
         person,
         date: dateStr,
         amount,
         isWifiStipend,
+        commissionAmount,
       });
     }
     cursor = new Date(cursor.getTime() + msPerWeek);
@@ -109,6 +133,17 @@ export function generatePaydays(rangeStart: Date, rangeEnd: Date): GeneratedPayd
   }
 
   return paydays;
+}
+
+export interface CommissionMonth {
+  id: string;
+  month_date: string; // YYYY-MM-01
+  monthly_revenue: number;
+  commission_rate: number;
+  tax_rate: number;
+  commission_amount: number; // computed by Postgres
+  after_tax_amount: number; // computed by Postgres
+  notes: string | null;
 }
 
 export interface PayPeriod {
@@ -264,6 +299,7 @@ export function useBudgetData() {
   const [rules, setRules] = useState<RecurringRule[]>([]);
   const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
   const [actuals, setActuals] = useState<ActualTransaction[]>([]);
+  const [commissionMonths, setCommissionMonths] = useState<CommissionMonth[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
 
   const loadAll = useCallback(async () => {
@@ -276,15 +312,17 @@ export function useBudgetData() {
       const { data: sessionData } = await supabase.auth.getSession();
       const userId = sessionData.session?.user?.id;
 
-      const [rulesRes, periodsRes, actualsRes, userRes] = await Promise.all([
+      const [rulesRes, periodsRes, actualsRes, commissionRes, userRes] = await Promise.all([
         supabase.from('budget_recurring_rules').select('*').order('name'),
         supabase.from('budget_pay_periods').select('*').order('pay_date', { ascending: false }),
         supabase.from('budget_transactions').select('*').eq('status', 'actual').order('transaction_date', { ascending: false }),
+        supabase.from('budget_commission_months').select('*').order('month_date', { ascending: false }),
         userId ? supabase.from('users').select('role').eq('id', userId).maybeSingle() : Promise.resolve({ data: null as any }),
       ]);
       if (rulesRes.data) setRules(rulesRes.data as RecurringRule[]);
       if (periodsRes.data) setPayPeriods(periodsRes.data as PayPeriod[]);
       if (actualsRes.data) setActuals(actualsRes.data as ActualTransaction[]);
+      if (commissionRes.data) setCommissionMonths(commissionRes.data as CommissionMonth[]);
       setIsAdmin((userRes.data as any)?.role === 'admin');
     } catch (err) {
       console.error('Failed to load budget data:', err);
@@ -394,11 +432,40 @@ export function useBudgetData() {
     [loadAll]
   );
 
+  const upsertCommissionMonth = useCallback(
+    async (input: { month_date: string; monthly_revenue: number; commission_rate?: number; tax_rate?: number; notes?: string | null }) => {
+      if (!supabase) return;
+      const { error } = await supabase
+        .from('budget_commission_months')
+        .upsert(input, { onConflict: 'month_date' });
+      if (error) {
+        console.error('Failed to save commission month:', error);
+        throw error;
+      }
+      await loadAll();
+    },
+    [loadAll]
+  );
+
+  const deleteCommissionMonth = useCallback(
+    async (id: string) => {
+      if (!supabase) return;
+      const { error } = await supabase.from('budget_commission_months').delete().eq('id', id);
+      if (error) {
+        console.error('Failed to delete commission month:', error);
+        throw error;
+      }
+      await loadAll();
+    },
+    [loadAll]
+  );
+
   return {
     loading,
     rules,
     payPeriods,
     actuals,
+    commissionMonths,
     isAdmin,
     refresh: loadAll,
     addPayPeriod,
@@ -408,5 +475,7 @@ export function useBudgetData() {
     addRule,
     updateRule,
     deleteRule,
+    upsertCommissionMonth,
+    deleteCommissionMonth,
   };
 }
