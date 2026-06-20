@@ -356,6 +356,33 @@ const COMPACT_ROW_CSS = `
   border-radius: 999px;
   padding: 1px 8px;
 }
+.ct-day-today > summary strong {
+  color: var(--accent, #4F46E5);
+}
+.ct-day-today {
+  border-left: 2px solid var(--accent, #4F46E5);
+  padding-left: 6px;
+}
+.ct-day-overdue > summary strong {
+  color: #e5484d;
+}
+.ct-day-overdue {
+  border-left: 2px solid #e5484d;
+  padding-left: 6px;
+}
+.last-sync-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted, #9aa0a6);
+  margin: 4px 0 14px;
+}
+.last-sync-status {
+  text-transform: capitalize;
+}
+.last-sync-status.error { color: #e5484d; }
+.last-sync-status.running { color: #f5a524; }
 .ct-section-head {
   display: flex;
   align-items: center;
@@ -1756,8 +1783,16 @@ function CompactTaskRow({
 
 function choreToRowProps(chore: ChoreTask, showReason: boolean) {
   const due = chore.due_date ? new Date(chore.due_date) : null;
-  const now = new Date(); now.setHours(0, 0, 0, 0);
-  const overdue = due ? due < now && !sameYmd(due, new Date()) : false;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  // Overdue means the due date falls on a day strictly before today — NOT
+  // just "not completed yet today". A daily chore due today at 9pm should
+  // read as "Today", not "Overdue", until the day actually passes.
+  const dueIsBeforeToday = due ? (() => {
+    const dueDay = new Date(due); dueDay.setHours(0, 0, 0, 0);
+    return dueDay.getTime() < today.getTime();
+  })() : false;
+  const overdue = dueIsBeforeToday && !chore.is_completed;
+  const dueToday = due ? sameYmd(due, new Date()) : false;
   const priorityDot: 'urgent' | 'warning' | 'normal' | 'good' =
     chore.priority === 4 ? 'urgent' : chore.priority === 3 ? 'warning' : chore.priority === 2 ? 'normal' : 'good';
 
@@ -1765,15 +1800,16 @@ function choreToRowProps(chore: ChoreTask, showReason: boolean) {
   if (due) {
     const hasTime = chore.due_date && chore.due_date.includes('T');
     if (overdue) timeLabel = `Overdue · ${due.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
-    else if (hasTime) timeLabel = due.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    else if (dueToday && hasTime) timeLabel = due.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    else if (dueToday) timeLabel = 'Today';
     else timeLabel = due.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
   let reason: string | null = null;
   if (showReason) {
     const parts: string[] = [];
-    if (overdue && due) parts.push(`Overdue since ${due.toLocaleDateString()}`);
-    else if (due && sameYmd(due, new Date())) parts.push('Due today');
+    if (overdue && due) parts.push(`Wasn't done ${due.toLocaleDateString()}`);
+    else if (dueToday) parts.push('Due today');
     else if (chore.day_of_week === dayOfWeekName(new Date())) parts.push(`Scheduled for ${chore.day_of_week}`);
     else if (chore.day_of_week === 'Daily') parts.push('Daily recurring');
     if (chore.priority >= 3) parts.push('Higher priority');
@@ -1796,13 +1832,13 @@ function choreToRowProps(chore: ChoreTask, showReason: boolean) {
 function Today({ tasks, choreTasks, completeTask, completeChore, editable, compact = false }: { tasks: TaskItem[]; choreTasks: ChoreTask[]; completeTask: (id: string) => void; completeChore: (id: string) => void; editable: boolean; compact?: boolean }) {
   const list = compact ? tasks.slice(0, 3) : tasks;
   const tackleList = useMemo(() => computeTackleToday(choreTasks), [choreTasks]);
-  const shown = compact ? tackleList.slice(0, 3) : tackleList.slice(0, 5);
+  const shown = compact ? tackleList.slice(0, 3) : tackleList;
 
   return <>
     <section className="panel ct-panel">
       <div className="panel-head">
         <h2>{compact ? "Today's Tackle List" : "Today's Task Outlook Center"}</h2>
-        {!compact && <span className="readonly-pill"><Zap size={14} /> {Math.min(tackleList.length, 5)} picks{tackleList.length > 5 ? ` of ${tackleList.length}` : ''}</span>}
+        {!compact && <span className="readonly-pill"><Zap size={14} /> {tackleList.length} for today</span>}
       </div>
       {shown.length === 0 && <div className="brief-item">No chores queued for today. Run <strong>Sync from Todoist</strong> on the Chores tab to pull the latest, or add a new task in Todoist.</div>}
       <div className="ct-list">
@@ -2531,9 +2567,8 @@ function Chores({
   editable: boolean;
 }) {
   const [showCompleted, setShowCompleted] = useState(false);
-  const [expandedDay, setExpandedDay] = useState<string | null>(null);
+  const [openKeys, setOpenKeys] = useState<Set<string> | null>(null); // null = not yet initialized
 
-  const tackleList = useMemo(() => computeTackleToday(choreTasks), [choreTasks]);
   const monthNow = new Date().getMonth() + 1;
 
   // Suggestions to surface on the Chores tab: in-season AND pending OR overdue
@@ -2553,23 +2588,33 @@ function Chores({
     }).slice(0, 6);
   }, [choreSuggestions, monthNow]);
 
-  const dayBuckets = useMemo(() => groupChoresByDay(choreTasks, showCompleted), [choreTasks, showCompleted]);
+  const dateBuckets = useMemo(() => groupChoresByDate(choreTasks, showCompleted), [choreTasks, showCompleted]);
 
-  const stats = {
-    total: choreTasks.filter((c) => !c.is_completed).length,
-    today: tackleList.length,
-    overdue: choreTasks.filter((c) => {
-      if (c.is_completed) return false;
-      if (!c.due_date) return false;
-      const due = new Date(c.due_date);
-      const today = new Date(); today.setHours(0,0,0,0);
-      return due < today;
-    }).length,
-    completed: choreTasks.filter((c) => c.is_completed).length
-  };
+  // Auto-expand Today + any overdue buckets the first time buckets compute;
+  // after that, respect whatever the person has toggled by hand.
+  useEffect(() => {
+    if (openKeys !== null) return;
+    const initial = new Set<string>();
+    for (const bucket of dateBuckets) {
+      if (bucket.isToday || bucket.isOverdue) initial.add(bucket.key);
+    }
+    setOpenKeys(initial);
+  }, [dateBuckets, openKeys]);
+
+  function toggleKey(key: string) {
+    setOpenKeys((current) => {
+      const next = new Set(current ?? []);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  const lastSyncLabel = syncState?.last_sync_at
+    ? new Date(syncState.last_sync_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : 'never';
 
   return <>
-    <Header title="Chores & Tasks" sub="Synced with Todoist. The hub picks today's tackle list and surfaces what new homeowners overlook.">
+    <Header title="Chores & Tasks" sub="Synced with Todoist.">
       {editable
         ? <button className="btn primary" onClick={syncTodoistNow} disabled={syncing}>
             <RefreshCw size={15} className={syncing ? 'spin' : ''} /> {syncing ? 'Syncing…' : 'Sync from Todoist'}
@@ -2577,43 +2622,19 @@ function Chores({
         : <span className="readonly-pill"><Eye size={14} /> View only</span>}
     </Header>
 
-    <Stats items={[
-      ['Open chores', String(stats.total), 'from Todoist'],
-      ['Tackle today', String(stats.today), 'best picks'],
-      ['Overdue', String(stats.overdue), stats.overdue ? 'needs attention' : 'all clear'],
-      ['Last sync', syncState?.last_sync_at ? new Date(syncState.last_sync_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'never', syncState?.last_sync_status || 'pending']
-    ]} />
+    <div className="last-sync-line">
+      <RefreshCw size={12} />
+      Last sync: {lastSyncLabel}
+      {syncState?.last_sync_status && syncState.last_sync_status !== 'success' && syncState.last_sync_status !== 'never' && (
+        <span className={`last-sync-status ${syncState.last_sync_status}`}>· {syncState.last_sync_status}</span>
+      )}
+    </div>
 
     {syncState?.last_sync_status === 'error' && syncState?.last_sync_error && <section className="panel suggestion urgent">
       <h2>Last sync failed</h2>
       <p>{syncState.last_sync_error}</p>
       <small>Make sure TODOIST_API_TOKEN is set in Supabase function secrets, then click Sync again.</small>
     </section>}
-
-    {/* ============ TACKLE TODAY HERO ============ */}
-    <section className="panel ct-panel">
-      <div className="panel-head">
-        <h2><Zap size={18} style={{ verticalAlign: 'text-bottom' }} /> Tackle Today</h2>
-        <span className="readonly-pill">{Math.min(tackleList.length, 5)} picks for {dayOfWeekName(new Date())}</span>
-        {tackleList.length > 5 && <span className="readonly-pill" style={{ marginLeft: 8 }}>{tackleList.length - 5} more this week</span>}
-      </div>
-      {tackleList.length === 0 && <div className="brief-item">
-        {choreTasks.length === 0
-          ? 'No chores synced yet. Click Sync from Todoist to pull your House & Daily Life + Gardening tasks.'
-          : 'No chores due today — enjoy a quiet one, or grab one from the week below.'}
-      </div>}
-      <div className="ct-list">
-        {tackleList.slice(0, 5).map((chore) => {
-          const props = choreToRowProps(chore, true);
-          return <CompactTaskRow
-            key={chore.id}
-            {...props}
-            editable={editable}
-            onToggle={() => chore.is_completed ? uncompleteChore(chore.id) : completeChore(chore.id)}
-          />;
-        })}
-      </div>
-    </section>
 
     {/* ============ THIS MONTH'S SUGGESTIONS ============ */}
     {seasonalSuggestions.length > 0 && <section className="panel">
@@ -2637,20 +2658,21 @@ function Chores({
       </div>
     </section>}
 
-    {/* ============ THIS WEEK BY DAY ============ */}
+    {/* ============ DATE-GROUPED LIST (Todoist Upcoming style) ============ */}
     <section className="panel ct-panel">
       <div className="panel-head">
-        <h2>This Week</h2>
+        <h2>Chores</h2>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
           <input type="checkbox" checked={showCompleted} onChange={(e) => setShowCompleted(e.target.checked)} />
           Show completed
         </label>
       </div>
-      {dayBuckets.length === 0 && <div className="brief-item">Nothing scheduled across the week. Sync Todoist or add tasks there.</div>}
-      {dayBuckets.map((bucket) => {
-        const isExpanded = expandedDay === bucket.label || dayBuckets.length <= 3;
-        return <details key={bucket.label} className="ct-day-group" open={isExpanded} onToggle={(e) => {
-          if ((e.target as HTMLDetailsElement).open) setExpandedDay(bucket.label);
+      {dateBuckets.length === 0 && <div className="brief-item">Nothing scheduled. Sync Todoist or add tasks there.</div>}
+      {dateBuckets.map((bucket) => {
+        const isOpen = openKeys?.has(bucket.key) ?? (bucket.isToday || bucket.isOverdue);
+        return <details key={bucket.key} className={`ct-day-group ${bucket.isToday ? 'ct-day-today' : ''} ${bucket.isOverdue ? 'ct-day-overdue' : ''}`} open={isOpen} onToggle={(e) => {
+          const nowOpen = (e.target as HTMLDetailsElement).open;
+          if (nowOpen !== isOpen) toggleKey(bucket.key);
         }}>
           <summary className="ct-day-summary">
             <strong>{bucket.label}</strong>
@@ -2658,7 +2680,7 @@ function Chores({
           </summary>
           <div className="ct-list">
             {bucket.chores.map((chore) => {
-              const props = choreToRowProps(chore, false);
+              const props = choreToRowProps(chore, bucket.isToday);
               return <CompactTaskRow
                 key={chore.id}
                 {...props}
@@ -2704,30 +2726,98 @@ function CompactSuggestionCard({ suggestion, editable, onAdd, onDone, onSnooze, 
   </div>;
 }
 
-function groupChoresByDay(choreTasks: ChoreTask[], showCompleted: boolean): { label: string; chores: ChoreTask[] }[] {
-  const order = ['Daily', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'Weekly', 'Monthly', 'Spring', 'Summer', 'Fall', 'Winter', 'Jules', 'Anytime'];
-  const grouped: Record<string, ChoreTask[]> = {};
+function startOfDay(d: Date): Date {
+  const copy = new Date(d);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+function addDays(d: Date, days: number): Date {
+  const copy = new Date(d);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+function dateGroupLabel(d: Date, today: Date): string {
+  const diffDays = Math.round((startOfDay(d).getTime() - today.getTime()) / 86400000);
+  if (diffDays < 0) return diffDays === -1 ? 'Yesterday' : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} · Overdue`;
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Tomorrow';
+  if (diffDays < 7) return d.toLocaleDateString([], { weekday: 'long' });
+  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+const WEEKDAY_INDEX: Record<string, number> = {
+  Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6
+};
+
+/**
+ * Estimates a calendar date for chores that don't carry an explicit
+ * due_date but do carry a day_of_week section (e.g. a "Monday" section
+ * task with no due date set in Todoist). Picks the next upcoming occurrence
+ * of that weekday, or today if day_of_week is "Daily".
+ */
+function estimateDateFromDayOfWeek(dayOfWeek: string, today: Date): Date | null {
+  if (dayOfWeek === 'Daily') return today;
+  if (dayOfWeek === 'Weekend') {
+    const dow = today.getDay();
+    const toSat = (6 - dow + 7) % 7;
+    return addDays(today, toSat);
+  }
+  const idx = WEEKDAY_INDEX[dayOfWeek];
+  if (idx === undefined) return null;
+  const dow = today.getDay();
+  const diff = (idx - dow + 7) % 7;
+  return addDays(today, diff);
+}
+
+/**
+ * Groups chores by actual calendar date — Today, Tomorrow, named weekdays,
+ * then a far-future bucket — the way Todoist's Upcoming view works, rather
+ * than by static Todoist section name. Chores with no real due date but a
+ * day_of_week section get slotted into their next likely occurrence so they
+ * still show up somewhere sensible. Anything with neither lands in "No date".
+ */
+function groupChoresByDate(choreTasks: ChoreTask[], showCompleted: boolean): { key: string; label: string; chores: ChoreTask[]; isToday: boolean; isOverdue: boolean }[] {
+  const today = startOfDay(new Date());
+  const buckets = new Map<string, { date: Date | null; chores: ChoreTask[] }>();
+
   for (const chore of choreTasks) {
     if (!showCompleted && chore.is_completed) continue;
-    const key = chore.day_of_week || 'Anytime';
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(chore);
-  }
-  const result: { label: string; chores: ChoreTask[] }[] = [];
-  for (const day of order) {
-    if (grouped[day]?.length) {
-      result.push({
-        label: day,
-        chores: grouped[day].sort((a, b) => (b.priority || 1) - (a.priority || 1))
-      });
-      delete grouped[day];
+
+    let bucketDate: Date | null = null;
+    if (chore.due_date) {
+      bucketDate = startOfDay(new Date(chore.due_date));
+    } else if (chore.day_of_week && chore.day_of_week !== 'Anytime' && chore.day_of_week !== 'Monthly' && chore.day_of_week !== 'Jules') {
+      bucketDate = estimateDateFromDayOfWeek(chore.day_of_week, today);
     }
+
+    const key = bucketDate ? bucketDate.toISOString().slice(0, 10) : 'no-date';
+    if (!buckets.has(key)) buckets.set(key, { date: bucketDate, chores: [] });
+    buckets.get(key)!.chores.push(chore);
   }
-  // Any leftover keys
-  for (const key of Object.keys(grouped)) {
-    if (grouped[key].length) result.push({ label: key, chores: grouped[key] });
+
+  const result: { key: string; label: string; chores: ChoreTask[]; isToday: boolean; isOverdue: boolean; sortKey: number }[] = [];
+  for (const [key, bucket] of buckets.entries()) {
+    const sorted = bucket.chores.sort((a, b) => (b.priority || 1) - (a.priority || 1));
+    if (key === 'no-date') {
+      result.push({ key, label: 'No date', chores: sorted, isToday: false, isOverdue: false, sortKey: Number.MAX_SAFE_INTEGER });
+      continue;
+    }
+    const d = bucket.date!;
+    const diffDays = Math.round((d.getTime() - today.getTime()) / 86400000);
+    result.push({
+      key,
+      label: dateGroupLabel(d, today),
+      chores: sorted,
+      isToday: diffDays === 0,
+      isOverdue: diffDays < 0,
+      sortKey: diffDays
+    });
   }
-  return result;
+
+  result.sort((a, b) => a.sortKey - b.sortKey);
+  return result.map(({ sortKey, ...rest }) => rest);
 }
 
 function Placeholder({ title, sub }: { title: string; sub: string }) {
