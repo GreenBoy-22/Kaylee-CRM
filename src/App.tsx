@@ -7,6 +7,7 @@ import {
   CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
+import GoogleCalendarPanel from './GoogleCalendarPanel';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
@@ -1551,7 +1552,7 @@ Kaylee`;
           {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} choreTasks={choreTasks} householdUsers={householdUsers} role={activeRole} setPage={setPage} />}
           {page === 'today' && <Today tasks={tasks.filter((task) => activeRole === 'admin' || task.mode === 'home')} choreTasks={choreTasks} householdUsers={householdUsers} completeTask={completeTask} completeChore={completeChore} editable={canEdit('today') && canEdit('chores')} />}
           {page === 'briefing' && <Briefing />}
-          {page === 'calendar' && <Placeholder title="Calendar" sub="Google Calendar integration will connect here after auth basics are stable." />}
+          {page === 'calendar' && <GoogleCalendarPanel />}
           {page === 'budget' && <Placeholder title="Budget" sub={activeRole === 'limited' ? 'Kaylee controls whether this is visible/editable for Adam.' : 'Calendar-based cashflow page scaffold.'} />}
           {page === 'inventory' && <Inventory inventory={inventory} createItem={createInventoryItem} updateQuantity={updateInventoryQuantity} editable={canEdit('inventory')} />}
           {page === 'chores' && <Chores choreTasks={choreTasks} choreSuggestions={choreSuggestions} syncState={syncState} syncing={syncing} householdUsers={householdUsers} currentUserName={activeName} syncTodoistNow={syncTodoistNow} completeChore={completeChore} uncompleteChore={uncompleteChore} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} approveSuggestionForAdam={approveSuggestionForAdam} approveSuggestionForSelf={approveSuggestionForSelf} reassignChore={reassignChore} editable={canEdit('chores')} />}
