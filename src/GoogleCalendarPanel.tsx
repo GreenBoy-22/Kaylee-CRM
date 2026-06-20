@@ -6,7 +6,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Calendar, ExternalLink, RefreshCw, AlertCircle } from "lucide-react";
-import { supabase } from "../lib/supabaseClient"; // adjust path to match your existing client import
+import { supabase, hasSupabase } from "./lib/supabase";
 
 interface GCalEvent {
   id: string;
@@ -65,6 +65,13 @@ export default function GoogleCalendarPanel() {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
 
+    if (!hasSupabase || !supabase) {
+      setData({ connected: false, events: [], error: "Supabase isn't configured" });
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token;
@@ -105,6 +112,7 @@ export default function GoogleCalendarPanel() {
   }, [fetchEvents]);
 
   const handleConnect = async () => {
+    if (!hasSupabase || !supabase) return;
     setConnecting(true);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
