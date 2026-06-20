@@ -17,6 +17,7 @@ import {
   type PlannedItem,
   type ActualTransaction,
   type GeneratedPayday,
+  type RecurringRule,
 } from './useBudgetData';
 
 type ViewMode = 'period' | 'month';
@@ -54,7 +55,7 @@ export default function Budget() {
   const {
     loading, rules, payPeriods, actuals, isAdmin,
     addActualTransaction, updateActualTransaction, deleteActualTransaction,
-    addPayPeriod, addRule,
+    addPayPeriod, addRule, updateRule,
   } = useBudgetData();
   const [view, setView] = useState<ViewMode>('month');
   const [monthAnchor, setMonthAnchor] = useState(new Date());
@@ -63,6 +64,7 @@ export default function Budget() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [showPayForm, setShowPayForm] = useState(false);
   const [editingActual, setEditingActual] = useState<ActualTransaction | null>(null);
+  const [editingPlanned, setEditingPlanned] = useState<PlannedItem | null>(null);
 
   const sortedPeriods = useMemo(
     () => [...payPeriods].sort((a, b) => a.pay_date.localeCompare(b.pay_date)),
@@ -100,8 +102,21 @@ export default function Budget() {
     return { rangeStart: today, rangeEnd: today, rangeLabel: 'No pay periods logged yet' };
   }, [view, monthAnchor, currentWindow]);
 
+  // Any actual transaction tied to a rule (via source_rule_id) represents a
+  // one-time override of that rule's occurrence on that date - suppress the
+  // computed planned row so it doesn't show twice.
+  const overriddenOccurrenceIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of actuals) {
+      if (a.source_rule_id) {
+        set.add(`${a.source_rule_id}::${a.transaction_date}`);
+      }
+    }
+    return set;
+  }, [actuals]);
+
   const planned = useMemo(() => {
-    const billsAndOneOffs = expandRecurringRules(rules, rangeStart, rangeEnd);
+    const billsAndOneOffs = expandRecurringRules(rules, rangeStart, rangeEnd, overriddenOccurrenceIds);
     const paydays = generatePaydays(rangeStart, rangeEnd);
     const paydayItems: PlannedItem[] = paydays.map((p: GeneratedPayday) => ({
       id: p.id,
@@ -114,7 +129,7 @@ export default function Budget() {
       date: p.date,
     }));
     return [...billsAndOneOffs, ...paydayItems].sort((a, b) => a.date.localeCompare(b.date));
-  }, [rules, rangeStart, rangeEnd]);
+  }, [rules, rangeStart, rangeEnd, overriddenOccurrenceIds]);
 
   const actualsInRange = useMemo(() => {
     const startKey = toKey(rangeStart);
@@ -134,9 +149,9 @@ export default function Budget() {
   const totals = summarizeTotals(filteredPlanned, filteredActuals);
 
   const combinedRows = useMemo(() => {
-    type Row = { date: string; name: string; amount: number; kind: BudgetKind; account: BudgetAccount; category: BudgetCategory; status: 'planned' | 'actual'; id: string; actual?: ActualTransaction };
+    type Row = { date: string; name: string; amount: number; kind: BudgetKind; account: BudgetAccount; category: BudgetCategory; status: 'planned' | 'actual'; id: string; actual?: ActualTransaction; planned?: PlannedItem };
     const rows: Row[] = [
-      ...filteredPlanned.map((p: PlannedItem) => ({ date: p.date, name: p.name, amount: p.amount, kind: p.kind, account: p.account, category: p.category, status: 'planned' as const, id: p.id })),
+      ...filteredPlanned.map((p: PlannedItem) => ({ date: p.date, name: p.name, amount: p.amount, kind: p.kind, account: p.account, category: p.category, status: 'planned' as const, id: p.id, planned: p })),
       ...filteredActuals.map((a: ActualTransaction) => ({ date: a.transaction_date, name: a.name, amount: a.amount, kind: a.kind, account: a.account, category: a.category, status: 'actual' as const, id: a.id, actual: a })),
     ];
     return rows.sort((a, b) => a.date.localeCompare(b.date));
@@ -270,6 +285,11 @@ export default function Budget() {
                           </button>
                         </div>
                       )}
+                      {row.status === 'planned' && row.planned && row.planned.ruleId !== 'generated-payday' && (
+                        <button className="qty-button" onClick={() => setEditingPlanned(row.planned!)} aria-label="Edit" style={{ marginLeft: 'auto', display: 'block' }}>
+                          <Pencil size={12} />
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>
@@ -300,6 +320,34 @@ export default function Budget() {
           onSave={async (patch) => {
             await updateActualTransaction(editingActual.id, patch);
             setEditingActual(null);
+          }}
+        />
+      )}
+
+      {editingPlanned && (
+        <EditPlannedModal
+          item={editingPlanned}
+          rule={rules.find((r) => r.id === editingPlanned.ruleId) ?? null}
+          onClose={() => setEditingPlanned(null)}
+          onSaveRule={async (patch) => {
+            await updateRule(editingPlanned.ruleId, patch);
+            setEditingPlanned(null);
+          }}
+          onSaveOverride={async (input) => {
+            // Writes an actual row tied to this rule+date, which suppresses
+            // the computed planned occurrence going forward (see
+            // overriddenOccurrenceIds above).
+            await addActualTransaction({
+              ...input,
+              transaction_date: editingPlanned.date,
+              account: editingPlanned.account,
+              kind: editingPlanned.kind,
+              category: editingPlanned.category,
+              pay_period_id: null,
+              source_rule_id: editingPlanned.ruleId,
+              notes: null,
+            });
+            setEditingPlanned(null);
           }}
         />
       )}
@@ -598,6 +646,152 @@ function AddPayPeriodModal({
         <div className="form-actions">
           <button className="btn primary" onClick={handleSubmit} disabled={submitting || !gross}>
             {submitting ? 'Saving...' : 'Save payday'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditPlannedModal({
+  item,
+  rule,
+  onClose,
+  onSaveRule,
+  onSaveOverride,
+}: {
+  item: PlannedItem;
+  rule: RecurringRule | null;
+  onClose: () => void;
+  onSaveRule: (patch: Partial<RecurringRule>) => Promise<void>;
+  onSaveOverride: (input: {
+    name: string;
+    amount: number;
+  }) => Promise<void>;
+}) {
+  const [scope, setScope] = useState<'choose' | 'rule' | 'occurrence'>('choose');
+  const [name, setName] = useState(item.name);
+  const [amount, setAmount] = useState(String(item.amount));
+  const [dayOfMonth, setDayOfMonth] = useState(String(rule?.day_of_month ?? 1));
+  const [submitting, setSubmitting] = useState(false);
+
+  const occurrenceDateLabel = new Date(item.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+  const handleSaveRule = async () => {
+    if (!name.trim() || !amount) return;
+    setSubmitting(true);
+    try {
+      const patch: Partial<RecurringRule> = {
+        name: name.trim(),
+        amount: Math.abs(parseFloat(amount)),
+      };
+      if (rule?.recurrence === 'monthly_day') {
+        patch.day_of_month = Math.min(31, Math.max(1, parseInt(dayOfMonth, 10) || 1));
+      }
+      await onSaveRule(patch);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSaveOverride = async () => {
+    if (!name.trim() || !amount) return;
+    setSubmitting(true);
+    try {
+      await onSaveOverride({ name: name.trim(), amount: Math.abs(parseFloat(amount)) });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (scope === 'choose') {
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+        <div className="panel" style={{ width: 420, margin: 0 }}>
+          <div className="panel-head">
+            <h2>Edit "{item.name}"</h2>
+            <button className="qty-button" onClick={onClose}><X size={14} /></button>
+          </div>
+          <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: -4 }}>
+            This is a recurring planned item. What do you want to change?
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+            <button
+              className="btn ghost"
+              style={{ textAlign: 'left', padding: '12px 14px' }}
+              onClick={() => setScope('rule')}
+            >
+              <strong>Change it going forward</strong>
+              <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>
+                Updates the amount (and schedule) for every future occurrence.
+              </div>
+            </button>
+            <button
+              className="btn ghost"
+              style={{ textAlign: 'left', padding: '12px 14px' }}
+              onClick={() => setScope('occurrence')}
+            >
+              <strong>Just this one ({occurrenceDateLabel})</strong>
+              <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>
+                Logs a one-time actual amount for this date only. Future months stay the same.
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (scope === 'rule') {
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+        <div className="panel" style={{ width: 420, margin: 0 }}>
+          <div className="panel-head">
+            <h2>Edit going forward</h2>
+            <button className="qty-button" onClick={onClose}><X size={14} /></button>
+          </div>
+          <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
+            <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+            <input placeholder="Amount" type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            {rule?.recurrence === 'monthly_day' && (
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--muted)' }}>Day of month it's due</label>
+                <input type="number" min={1} max={31} value={dayOfMonth} onChange={(e) => setDayOfMonth(e.target.value)} style={{ width: '100%' }} />
+              </div>
+            )}
+            {rule?.recurrence === 'annual' && (
+              <p style={{ color: 'var(--muted)', fontSize: 12, margin: 0 }}>
+                This is an annual item ({rule.category}). Changing the month/day requires editing the household data directly for now - this form updates the name and amount.
+              </p>
+            )}
+          </div>
+          <div className="form-actions">
+            <button className="btn ghost" onClick={() => setScope('choose')}>Back</button>
+            <button className="btn primary" onClick={handleSaveRule} disabled={submitting || !name.trim() || !amount}>
+              {submitting ? 'Saving...' : 'Save for all future occurrences'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+      <div className="panel" style={{ width: 420, margin: 0 }}>
+        <div className="panel-head">
+          <h2>Edit just this one</h2>
+          <button className="qty-button" onClick={onClose}><X size={14} /></button>
+        </div>
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: -4 }}>{occurrenceDateLabel} only. Future months keep the regular amount.</p>
+        <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
+          <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+          <input placeholder="Amount" type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        </div>
+        <div className="form-actions">
+          <button className="btn ghost" onClick={() => setScope('choose')}>Back</button>
+          <button className="btn primary" onClick={handleSaveOverride} disabled={submitting || !name.trim() || !amount}>
+            {submitting ? 'Saving...' : 'Save for this date only'}
           </button>
         </div>
       </div>

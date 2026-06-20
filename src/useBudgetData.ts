@@ -131,6 +131,7 @@ export interface ActualTransaction {
   transaction_date: string;
   status: 'planned' | 'actual';
   pay_period_id: string | null;
+  source_rule_id: string | null;
   notes: string | null;
 }
 
@@ -166,7 +167,8 @@ function pad(n: number): string {
 export function expandRecurringRules(
   rules: RecurringRule[],
   rangeStart: Date,
-  rangeEnd: Date
+  rangeEnd: Date,
+  excludeOccurrenceIds?: Set<string>
 ): PlannedItem[] {
   const items: PlannedItem[] = [];
   const start = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate());
@@ -183,9 +185,10 @@ export function expandRecurringRules(
         const m = cursor.getMonth(); // 0-indexed
         const day = Math.min(rule.day_of_month, daysInMonth(y, m + 1));
         const occurDate = new Date(y, m, day);
-        if (occurDate >= start && occurDate <= end) {
+        const occurId = `${rule.id}::${y}-${pad(m + 1)}-${pad(day)}`;
+        if (occurDate >= start && occurDate <= end && !excludeOccurrenceIds?.has(occurId)) {
           items.push({
-            id: `${rule.id}::${y}-${pad(m + 1)}-${pad(day)}`,
+            id: occurId,
             ruleId: rule.id,
             name: rule.name,
             amount: rule.amount,
@@ -207,9 +210,10 @@ export function expandRecurringRules(
         for (const m of monthsToUse) {
           const day = rule.day_of_month ? Math.min(rule.day_of_month, daysInMonth(y, m)) : 1;
           const occurDate = new Date(y, m - 1, day);
-          if (occurDate >= start && occurDate <= end) {
+          const occurId = `${rule.id}::${y}-${pad(m)}-${pad(day)}`;
+          if (occurDate >= start && occurDate <= end && !excludeOccurrenceIds?.has(occurId)) {
             items.push({
-              id: `${rule.id}::${y}-${pad(m)}-${pad(day)}`,
+              id: occurId,
               ruleId: rule.id,
               name: rule.name,
               amount: rule.amount,
