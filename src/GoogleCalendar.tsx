@@ -93,8 +93,8 @@ export default function GoogleCalendar() {
           const last = days[6];
           const sameMonth = first.getMonth() === last.getMonth();
           return sameMonth
-            ? `${MONTH_NAMES[first.getMonth()]} ${first.getDate()}\u2013${last.getDate()}, ${first.getFullYear()}`
-            : `${MONTH_NAMES[first.getMonth()]} ${first.getDate()} \u2013 ${MONTH_NAMES[last.getMonth()]} ${last.getDate()}, ${last.getFullYear()}`;
+            ? `${MONTH_NAMES[first.getMonth()]} ${first.getDate()}-${last.getDate()}, ${first.getFullYear()}`
+            : `${MONTH_NAMES[first.getMonth()]} ${first.getDate()} - ${MONTH_NAMES[last.getMonth()]} ${last.getDate()}, ${last.getFullYear()}`;
         })();
 
   const goPrev = () => setAnchor(view === 'month' ? addMonths(anchor, -1) : addDays(anchor, -7));
@@ -199,7 +199,13 @@ export default function GoogleCalendar() {
                   )}
                   <span className="gcal-day-num">{d.getDate()}</span>
                   {visibleChips.map((e) => (
-                    <span className="gcal-day-event-chip" key={e.id}>{e.title}</span>
+                    <span
+                      className="gcal-day-event-chip"
+                      key={e.id}
+                      style={e.calendarColor ? { background: `${e.calendarColor}22`, color: e.calendarColor } : undefined}
+                    >
+                      {e.title}
+                    </span>
                   ))}
                   {extraCount > 0 && <span className="gcal-day-event-more">+{extraCount} more</span>}
                 </button>
@@ -239,7 +245,11 @@ export default function GoogleCalendar() {
                   )}
                 </div>
                 {sortedEvents.map((e) => (
-                  <span className={`gcal-week-event-chip ${e.allDay ? 'all-day' : ''}`} key={e.id}>
+                  <span
+                    className={`gcal-week-event-chip ${e.allDay ? 'all-day' : ''}`}
+                    key={e.id}
+                    style={!e.allDay && e.calendarColor ? { background: `${e.calendarColor}22`, color: e.calendarColor } : undefined}
+                  >
                     {e.allDay ? e.title : `${formatTime(e.start)} ${e.title}`}
                   </span>
                 ))}
@@ -249,9 +259,20 @@ export default function GoogleCalendar() {
         </div>
       )}
 
+      {data.calendars && data.calendars.length > 1 && (
+        <div className="gcal-legend" style={{ marginTop: 10, marginBottom: 0 }}>
+          {data.calendars.map((cal) => (
+            <span className="gcal-legend-item" key={cal.id}>
+              <span className="gcal-legend-dot" style={{ background: cal.color ?? 'var(--purple)' }} />
+              {cal.name}
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="gcal-legend">
-        <span className="gcal-legend-item"><span className="gcal-legend-dot low" /> Light (&lt;2 hrs)</span>
-        <span className="gcal-legend-item"><span className="gcal-legend-dot medium" /> Moderate (2\u20134 hrs)</span>
+        <span className="gcal-legend-item"><span className="gcal-legend-dot low" /> Light (under 2 hrs)</span>
+        <span className="gcal-legend-item"><span className="gcal-legend-dot medium" /> Moderate (2-4 hrs)</span>
         <span className="gcal-legend-item"><span className="gcal-legend-dot high" /> Busy (4+ hrs)</span>
       </div>
 
@@ -274,12 +295,16 @@ export default function GoogleCalendar() {
             target="_blank"
             rel="noopener noreferrer"
             className={`gcal-today-item ${event.allDay ? 'all-day' : ''}`}
-            style={{ textDecoration: 'none' }}
+            style={{
+              textDecoration: 'none',
+              borderLeftColor: event.allDay ? undefined : (event.calendarColor ?? undefined),
+            }}
           >
             <div className="gcal-today-item-time">{event.allDay ? 'All day' : formatTime(event.start)}</div>
             <div className="gcal-today-item-body">
               <div className="gcal-today-item-title">{event.title}</div>
-              {event.location && <div className="gcal-today-item-loc">{event.location}</div>}
+              {event.calendarName && <div className="gcal-today-item-loc">{event.calendarName}{event.location ? ` \u00b7 ${event.location}` : ''}</div>}
+              {!event.calendarName && event.location && <div className="gcal-today-item-loc">{event.location}</div>}
             </div>
             <ExternalLink size={13} style={{ color: 'var(--muted)', flexShrink: 0, marginTop: 2 }} />
           </a>

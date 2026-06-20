@@ -21,6 +21,9 @@ export interface GCalEvent {
   allDay: boolean;
   location: string | null;
   htmlLink: string;
+  calendarId?: string;
+  calendarName?: string;
+  calendarColor?: string | null;
 }
 
 export interface GCalChore {
@@ -32,10 +35,17 @@ export interface GCalChore {
   isCompleted: boolean;
 }
 
+export interface GCalCalendarMeta {
+  id: string;
+  name: string;
+  color: string | null;
+}
+
 export interface CalendarFetchResult {
   connected: boolean;
   needsReconnect?: boolean;
   googleEmail?: string;
+  calendars?: GCalCalendarMeta[];
   events: GCalEvent[];
   chores: GCalChore[];
   error?: string | null;
