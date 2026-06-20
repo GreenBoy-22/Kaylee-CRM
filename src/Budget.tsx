@@ -5,19 +5,16 @@
 // two-account model.
 
 import { useMemo, useState } from 'react';
-import { Plus, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, X, Pencil, Trash2, Repeat } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, X } from 'lucide-react';
 import {
   useBudgetData,
   expandRecurringRules,
-  generatePaydays,
   summarizeTotals,
   type BudgetAccount,
   type BudgetKind,
   type BudgetCategory,
   type PlannedItem,
   type ActualTransaction,
-  type GeneratedPayday,
-  type RecurringRule,
 } from './useBudgetData';
 
 type ViewMode = 'period' | 'month';
@@ -52,19 +49,13 @@ function endOfMonth(d: Date): Date {
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export default function Budget() {
-  const {
-    loading, rules, payPeriods, actuals, isAdmin,
-    addActualTransaction, updateActualTransaction, deleteActualTransaction,
-    addPayPeriod, addRule, updateRule,
-  } = useBudgetData();
+  const { loading, rules, payPeriods, actuals, isAdmin, addActualTransaction, addPayPeriod } = useBudgetData();
   const [view, setView] = useState<ViewMode>('month');
   const [monthAnchor, setMonthAnchor] = useState(new Date());
   const [periodIndex, setPeriodIndex] = useState(0); // 0 = most recent period
   const [accountFilter, setAccountFilter] = useState<'all' | BudgetAccount>('all');
   const [showAddForm, setShowAddForm] = useState(false);
   const [showPayForm, setShowPayForm] = useState(false);
-  const [editingActual, setEditingActual] = useState<ActualTransaction | null>(null);
-  const [editingPlanned, setEditingPlanned] = useState<PlannedItem | null>(null);
 
   const sortedPeriods = useMemo(
     () => [...payPeriods].sort((a, b) => a.pay_date.localeCompare(b.pay_date)),
@@ -102,34 +93,10 @@ export default function Budget() {
     return { rangeStart: today, rangeEnd: today, rangeLabel: 'No pay periods logged yet' };
   }, [view, monthAnchor, currentWindow]);
 
-  // Any actual transaction tied to a rule (via source_rule_id) represents a
-  // one-time override of that rule's occurrence on that date - suppress the
-  // computed planned row so it doesn't show twice.
-  const overriddenOccurrenceIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const a of actuals) {
-      if (a.source_rule_id) {
-        set.add(`${a.source_rule_id}::${a.transaction_date}`);
-      }
-    }
-    return set;
-  }, [actuals]);
-
-  const planned = useMemo(() => {
-    const billsAndOneOffs = expandRecurringRules(rules, rangeStart, rangeEnd, overriddenOccurrenceIds);
-    const paydays = generatePaydays(rangeStart, rangeEnd);
-    const paydayItems: PlannedItem[] = paydays.map((p: GeneratedPayday) => ({
-      id: p.id,
-      ruleId: 'generated-payday',
-      name: p.isWifiStipend ? `${p.person} Pay Day (with wifi stipend)` : `${p.person} Pay Day`,
-      amount: p.amount,
-      kind: 'income',
-      account: 'main',
-      category: 'income',
-      date: p.date,
-    }));
-    return [...billsAndOneOffs, ...paydayItems].sort((a, b) => a.date.localeCompare(b.date));
-  }, [rules, rangeStart, rangeEnd, overriddenOccurrenceIds]);
+  const planned = useMemo(
+    () => expandRecurringRules(rules, rangeStart, rangeEnd),
+    [rules, rangeStart, rangeEnd]
+  );
 
   const actualsInRange = useMemo(() => {
     const startKey = toKey(rangeStart);
@@ -149,10 +116,10 @@ export default function Budget() {
   const totals = summarizeTotals(filteredPlanned, filteredActuals);
 
   const combinedRows = useMemo(() => {
-    type Row = { date: string; name: string; amount: number; kind: BudgetKind; account: BudgetAccount; category: BudgetCategory; status: 'planned' | 'actual'; id: string; actual?: ActualTransaction; planned?: PlannedItem };
+    type Row = { date: string; name: string; amount: number; kind: BudgetKind; account: BudgetAccount; category: BudgetCategory; status: 'planned' | 'actual'; id: string };
     const rows: Row[] = [
-      ...filteredPlanned.map((p: PlannedItem) => ({ date: p.date, name: p.name, amount: p.amount, kind: p.kind, account: p.account, category: p.category, status: 'planned' as const, id: p.id, planned: p })),
-      ...filteredActuals.map((a: ActualTransaction) => ({ date: a.transaction_date, name: a.name, amount: a.amount, kind: a.kind, account: a.account, category: a.category, status: 'actual' as const, id: a.id, actual: a })),
+      ...filteredPlanned.map((p: PlannedItem) => ({ date: p.date, name: p.name, amount: p.amount, kind: p.kind, account: p.account, category: p.category, status: 'planned' as const, id: p.id })),
+      ...filteredActuals.map((a: ActualTransaction) => ({ date: a.transaction_date, name: a.name, amount: a.amount, kind: a.kind, account: a.account, category: a.category, status: 'actual' as const, id: a.id })),
     ];
     return rows.sort((a, b) => a.date.localeCompare(b.date));
   }, [filteredPlanned, filteredActuals]);
@@ -171,7 +138,7 @@ export default function Budget() {
         {isAdmin && (
           <div className="actions">
             <button className="btn ghost" onClick={() => setShowPayForm(true)}>+ Log payday</button>
-            <button className="btn primary" onClick={() => setShowAddForm(true)}><Plus size={15} /> Add expense</button>
+            <button className="btn primary" onClick={() => setShowAddForm(true)}><Plus size={15} /> Log transaction</button>
           </div>
         )}
       </div>
@@ -249,7 +216,6 @@ export default function Budget() {
                 <th>Account</th>
                 <th>Status</th>
                 <th style={{ textAlign: 'right' }}>Amount</th>
-                {isAdmin && <th></th>}
               </tr>
             </thead>
             <tbody>
@@ -267,31 +233,6 @@ export default function Budget() {
                   <td style={{ textAlign: 'right', color: row.kind === 'income' ? 'var(--green)' : 'var(--text)' }}>
                     {row.kind === 'income' ? '+' : '-'}{fmtMoney(row.amount)}
                   </td>
-                  {isAdmin && (
-                    <td>
-                      {row.status === 'actual' && row.actual && (
-                        <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                          <button className="qty-button" onClick={() => setEditingActual(row.actual!)} aria-label="Edit">
-                            <Pencil size={12} />
-                          </button>
-                          <button
-                            className="qty-button"
-                            onClick={() => {
-                              if (confirm(`Delete "${row.name}"?`)) deleteActualTransaction(row.id);
-                            }}
-                            aria-label="Delete"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                      )}
-                      {row.status === 'planned' && row.planned && row.planned.ruleId !== 'generated-payday' && (
-                        <button className="qty-button" onClick={() => setEditingPlanned(row.planned!)} aria-label="Edit" style={{ marginLeft: 'auto', display: 'block' }}>
-                          <Pencil size={12} />
-                        </button>
-                      )}
-                    </td>
-                  )}
                 </tr>
               ))}
             </tbody>
@@ -300,54 +241,11 @@ export default function Budget() {
       </div>
 
       {showAddForm && (
-        <AddExpenseModal
+        <AddTransactionModal
           onClose={() => setShowAddForm(false)}
-          onSubmitActual={async (input) => {
+          onSubmit={async (input) => {
             await addActualTransaction(input);
             setShowAddForm(false);
-          }}
-          onSubmitRecurring={async (input) => {
-            await addRule(input);
-            setShowAddForm(false);
-          }}
-        />
-      )}
-
-      {editingActual && (
-        <EditActualModal
-          transaction={editingActual}
-          onClose={() => setEditingActual(null)}
-          onSave={async (patch) => {
-            await updateActualTransaction(editingActual.id, patch);
-            setEditingActual(null);
-          }}
-        />
-      )}
-
-      {editingPlanned && (
-        <EditPlannedModal
-          item={editingPlanned}
-          rule={rules.find((r) => r.id === editingPlanned.ruleId) ?? null}
-          onClose={() => setEditingPlanned(null)}
-          onSaveRule={async (patch) => {
-            await updateRule(editingPlanned.ruleId, patch);
-            setEditingPlanned(null);
-          }}
-          onSaveOverride={async (input) => {
-            // Writes an actual row tied to this rule+date, which suppresses
-            // the computed planned occurrence going forward (see
-            // overriddenOccurrenceIds above).
-            await addActualTransaction({
-              ...input,
-              transaction_date: editingPlanned.date,
-              account: editingPlanned.account,
-              kind: editingPlanned.kind,
-              category: editingPlanned.category,
-              pay_period_id: null,
-              source_rule_id: editingPlanned.ruleId,
-              notes: null,
-            });
-            setEditingPlanned(null);
           }}
         />
       )}
@@ -365,13 +263,12 @@ export default function Budget() {
   );
 }
 
-function AddExpenseModal({
+function AddTransactionModal({
   onClose,
-  onSubmitActual,
-  onSubmitRecurring,
+  onSubmit,
 }: {
   onClose: () => void;
-  onSubmitActual: (input: {
+  onSubmit: (input: {
     name: string;
     amount: number;
     kind: BudgetKind;
@@ -381,161 +278,28 @@ function AddExpenseModal({
     pay_period_id: string | null;
     notes: string | null;
   }) => Promise<void>;
-  onSubmitRecurring: (input: {
-    name: string;
-    amount: number;
-    kind: BudgetKind;
-    account: BudgetAccount;
-    category: BudgetCategory;
-    recurrence: 'monthly_day' | 'annual' | 'manual';
-    day_of_month: number | null;
-    month_of_year: number | null;
-    months: number[] | null;
-    notes: string | null;
-    active: boolean;
-  }) => Promise<void>;
 }) {
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [kind, setKind] = useState<BudgetKind>('expense');
   const [account, setAccount] = useState<BudgetAccount>('bills');
   const [category, setCategory] = useState<BudgetCategory>('other');
-  const [isRecurring, setIsRecurring] = useState(false);
   const [date, setDate] = useState(() => toKey(new Date()));
-  const [dayOfMonth, setDayOfMonth] = useState('1');
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
     if (!name.trim() || !amount) return;
     setSubmitting(true);
     try {
-      if (isRecurring) {
-        await onSubmitRecurring({
-          name: name.trim(),
-          amount: Math.abs(parseFloat(amount)),
-          kind,
-          account,
-          category,
-          recurrence: 'monthly_day',
-          day_of_month: Math.min(31, Math.max(1, parseInt(dayOfMonth, 10) || 1)),
-          month_of_year: null,
-          months: null,
-          notes: null,
-          active: true,
-        });
-      } else {
-        await onSubmitActual({
-          name: name.trim(),
-          amount: Math.abs(parseFloat(amount)),
-          kind,
-          account,
-          category,
-          transaction_date: date,
-          pay_period_id: null,
-          notes: null,
-        });
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
-      <div className="panel" style={{ width: 420, margin: 0 }}>
-        <div className="panel-head">
-          <h2>Add expense</h2>
-          <button className="qty-button" onClick={onClose}><X size={14} /></button>
-        </div>
-        <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
-          <input placeholder="What was it?" value={name} onChange={(e) => setName(e.target.value)} />
-          <div className="form-grid">
-            <input placeholder="Amount" type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
-            <select value={kind} onChange={(e) => setKind(e.target.value as BudgetKind)}>
-              <option value="expense">Expense</option>
-              <option value="income">Income</option>
-            </select>
-          </div>
-          <div className="form-grid">
-            <select value={account} onChange={(e) => setAccount(e.target.value as BudgetAccount)}>
-              <option value="bills">Bills Account</option>
-              <option value="main">Main Account</option>
-            </select>
-            <select value={category} onChange={(e) => setCategory(e.target.value as BudgetCategory)}>
-              {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-          </div>
-
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
-            <input type="checkbox" checked={isRecurring} onChange={(e) => setIsRecurring(e.target.checked)} />
-            <Repeat size={13} /> This repeats every month
-          </label>
-
-          {isRecurring ? (
-            <div>
-              <label style={{ fontSize: 12, color: 'var(--muted)' }}>Day of month it's due</label>
-              <input
-                type="number"
-                min={1}
-                max={31}
-                value={dayOfMonth}
-                onChange={(e) => setDayOfMonth(e.target.value)}
-                style={{ width: '100%' }}
-              />
-            </div>
-          ) : (
-            <div>
-              <label style={{ fontSize: 12, color: 'var(--muted)' }}>Date</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ width: '100%' }} />
-            </div>
-          )}
-
-          {isRecurring && (
-            <p style={{ color: 'var(--muted)', fontSize: 12, margin: 0 }}>
-              This creates a recurring rule (like Rent or Netflix) that auto-fills every month going forward. For yearly items like birthdays, add them as a one-time date for now.
-            </p>
-          )}
-        </div>
-        <div className="form-actions">
-          <button className="btn primary" onClick={handleSubmit} disabled={submitting || !name.trim() || !amount}>
-            {submitting ? 'Saving...' : isRecurring ? 'Save recurring expense' : 'Save expense'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function EditActualModal({
-  transaction,
-  onClose,
-  onSave,
-}: {
-  transaction: ActualTransaction;
-  onClose: () => void;
-  onSave: (patch: Partial<Omit<ActualTransaction, 'id' | 'status'>>) => Promise<void>;
-}) {
-  const [name, setName] = useState(transaction.name);
-  const [amount, setAmount] = useState(String(transaction.amount));
-  const [kind, setKind] = useState<BudgetKind>(transaction.kind);
-  const [account, setAccount] = useState<BudgetAccount>(transaction.account);
-  const [category, setCategory] = useState<BudgetCategory>(transaction.category);
-  const [date, setDate] = useState(transaction.transaction_date);
-  const [submitting, setSubmitting] = useState(false);
-
-  const handleSave = async () => {
-    if (!name.trim() || !amount) return;
-    setSubmitting(true);
-    try {
-      await onSave({
+      await onSubmit({
         name: name.trim(),
         amount: Math.abs(parseFloat(amount)),
         kind,
         account,
         category,
         transaction_date: date,
+        pay_period_id: null,
+        notes: null,
       });
     } finally {
       setSubmitting(false);
@@ -546,7 +310,7 @@ function EditActualModal({
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
       <div className="panel" style={{ width: 420, margin: 0 }}>
         <div className="panel-head">
-          <h2>Edit transaction</h2>
+          <h2>Log a transaction</h2>
           <button className="qty-button" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
@@ -572,8 +336,8 @@ function EditActualModal({
           </select>
         </div>
         <div className="form-actions">
-          <button className="btn primary" onClick={handleSave} disabled={submitting || !name.trim() || !amount}>
-            {submitting ? 'Saving...' : 'Save changes'}
+          <button className="btn primary" onClick={handleSubmit} disabled={submitting || !name.trim() || !amount}>
+            {submitting ? 'Saving...' : 'Save transaction'}
           </button>
         </div>
       </div>
@@ -646,152 +410,6 @@ function AddPayPeriodModal({
         <div className="form-actions">
           <button className="btn primary" onClick={handleSubmit} disabled={submitting || !gross}>
             {submitting ? 'Saving...' : 'Save payday'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function EditPlannedModal({
-  item,
-  rule,
-  onClose,
-  onSaveRule,
-  onSaveOverride,
-}: {
-  item: PlannedItem;
-  rule: RecurringRule | null;
-  onClose: () => void;
-  onSaveRule: (patch: Partial<RecurringRule>) => Promise<void>;
-  onSaveOverride: (input: {
-    name: string;
-    amount: number;
-  }) => Promise<void>;
-}) {
-  const [scope, setScope] = useState<'choose' | 'rule' | 'occurrence'>('choose');
-  const [name, setName] = useState(item.name);
-  const [amount, setAmount] = useState(String(item.amount));
-  const [dayOfMonth, setDayOfMonth] = useState(String(rule?.day_of_month ?? 1));
-  const [submitting, setSubmitting] = useState(false);
-
-  const occurrenceDateLabel = new Date(item.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-
-  const handleSaveRule = async () => {
-    if (!name.trim() || !amount) return;
-    setSubmitting(true);
-    try {
-      const patch: Partial<RecurringRule> = {
-        name: name.trim(),
-        amount: Math.abs(parseFloat(amount)),
-      };
-      if (rule?.recurrence === 'monthly_day') {
-        patch.day_of_month = Math.min(31, Math.max(1, parseInt(dayOfMonth, 10) || 1));
-      }
-      await onSaveRule(patch);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleSaveOverride = async () => {
-    if (!name.trim() || !amount) return;
-    setSubmitting(true);
-    try {
-      await onSaveOverride({ name: name.trim(), amount: Math.abs(parseFloat(amount)) });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  if (scope === 'choose') {
-    return (
-      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
-        <div className="panel" style={{ width: 420, margin: 0 }}>
-          <div className="panel-head">
-            <h2>Edit "{item.name}"</h2>
-            <button className="qty-button" onClick={onClose}><X size={14} /></button>
-          </div>
-          <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: -4 }}>
-            This is a recurring planned item. What do you want to change?
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
-            <button
-              className="btn ghost"
-              style={{ textAlign: 'left', padding: '12px 14px' }}
-              onClick={() => setScope('rule')}
-            >
-              <strong>Change it going forward</strong>
-              <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>
-                Updates the amount (and schedule) for every future occurrence.
-              </div>
-            </button>
-            <button
-              className="btn ghost"
-              style={{ textAlign: 'left', padding: '12px 14px' }}
-              onClick={() => setScope('occurrence')}
-            >
-              <strong>Just this one ({occurrenceDateLabel})</strong>
-              <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>
-                Logs a one-time actual amount for this date only. Future months stay the same.
-              </div>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (scope === 'rule') {
-    return (
-      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
-        <div className="panel" style={{ width: 420, margin: 0 }}>
-          <div className="panel-head">
-            <h2>Edit going forward</h2>
-            <button className="qty-button" onClick={onClose}><X size={14} /></button>
-          </div>
-          <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
-            <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-            <input placeholder="Amount" type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
-            {rule?.recurrence === 'monthly_day' && (
-              <div>
-                <label style={{ fontSize: 12, color: 'var(--muted)' }}>Day of month it's due</label>
-                <input type="number" min={1} max={31} value={dayOfMonth} onChange={(e) => setDayOfMonth(e.target.value)} style={{ width: '100%' }} />
-              </div>
-            )}
-            {rule?.recurrence === 'annual' && (
-              <p style={{ color: 'var(--muted)', fontSize: 12, margin: 0 }}>
-                This is an annual item ({rule.category}). Changing the month/day requires editing the household data directly for now - this form updates the name and amount.
-              </p>
-            )}
-          </div>
-          <div className="form-actions">
-            <button className="btn ghost" onClick={() => setScope('choose')}>Back</button>
-            <button className="btn primary" onClick={handleSaveRule} disabled={submitting || !name.trim() || !amount}>
-              {submitting ? 'Saving...' : 'Save for all future occurrences'}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
-      <div className="panel" style={{ width: 420, margin: 0 }}>
-        <div className="panel-head">
-          <h2>Edit just this one</h2>
-          <button className="qty-button" onClick={onClose}><X size={14} /></button>
-        </div>
-        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: -4 }}>{occurrenceDateLabel} only. Future months keep the regular amount.</p>
-        <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
-          <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <input placeholder="Amount" type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
-        </div>
-        <div className="form-actions">
-          <button className="btn ghost" onClick={() => setScope('choose')}>Back</button>
-          <button className="btn primary" onClick={handleSaveOverride} disabled={submitting || !name.trim() || !amount}>
-            {submitting ? 'Saving...' : 'Save for this date only'}
           </button>
         </div>
       </div>
