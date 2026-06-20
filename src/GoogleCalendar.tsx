@@ -70,7 +70,7 @@ function buildWeekGrid(anchor: Date): Date[] {
 }
 
 export default function GoogleCalendar() {
-  const { loading, refreshing, data, daySummaries, refresh, connect, dateKeyOf } =
+  const { loading, refreshing, data, daySummaries, syncedAt, refresh, connect, dateKeyOf } =
     useGoogleCalendarData({ daysForward: 60, daysBack: 35 });
 
   const [view, setView] = useState<ViewMode>('month');
@@ -151,6 +151,11 @@ export default function GoogleCalendar() {
           <button className="gcal-today-btn" onClick={goToday}>Today</button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {syncedAt && (
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+              Updated {new Date(syncedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+            </span>
+          )}
           <button className="gcal-nav-btn" onClick={refresh} aria-label="Refresh" disabled={refreshing}>
             <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
           </button>
@@ -189,20 +194,18 @@ export default function GoogleCalendar() {
                   className={[
                     'gcal-day-cell',
                     !inMonth ? 'outside-month' : '',
+                    summary && summary.busyHours > 0 ? `busy-${summary.busyLevel}` : '',
                     isToday ? 'is-today' : '',
                     isSelected ? 'selected' : '',
                   ].join(' ').trim()}
                   onClick={() => setSelectedKey(key)}
                 >
-                  {summary && summary.busyHours > 0 && (
-                    <span className={`gcal-busy-dot ${summary.busyLevel}`} />
-                  )}
                   <span className="gcal-day-num">{d.getDate()}</span>
                   {visibleChips.map((e) => (
                     <span
                       className="gcal-day-event-chip"
                       key={e.id}
-                      style={e.calendarColor ? { background: `${e.calendarColor}22`, color: e.calendarColor } : undefined}
+                      style={e.calendarColor ? { background: `${e.calendarColor}33`, color: e.calendarColor } : undefined}
                     >
                       {e.title}
                     </span>
@@ -230,6 +233,7 @@ export default function GoogleCalendar() {
                 key={key}
                 className={[
                   'gcal-week-day',
+                  summary && summary.busyHours > 0 ? `busy-${summary.busyLevel}` : '',
                   isToday ? 'is-today' : '',
                   isSelected ? 'selected' : '',
                 ].join(' ').trim()}
@@ -248,7 +252,7 @@ export default function GoogleCalendar() {
                   <span
                     className={`gcal-week-event-chip ${e.allDay ? 'all-day' : ''}`}
                     key={e.id}
-                    style={!e.allDay && e.calendarColor ? { background: `${e.calendarColor}22`, color: e.calendarColor } : undefined}
+                    style={!e.allDay && e.calendarColor ? { background: `${e.calendarColor}33`, color: e.calendarColor } : undefined}
                   >
                     {e.allDay ? e.title : `${formatTime(e.start)} ${e.title}`}
                   </span>

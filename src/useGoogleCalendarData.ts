@@ -143,13 +143,50 @@ interface UseGoogleCalendarDataOptions {
   daysBack?: number;
 }
 
+const AUTO_REFRESH_MS = 6 * 60 * 60 * 1000; // 6 hours - matches the 4x/day background sync
+
 export function useGoogleCalendarData(options: UseGoogleCalendarDataOptions = {}) {
   const { daysForward = 60, daysBack = 14 } = options;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<CalendarFetchResult | null>(null);
+  const [syncedAt, setSyncedAt] = useState<string | null>(null);
 
-  const fetchData = useCallback(
+  // Reads the background-synced snapshot from google_calendar_cache.
+  // This is fast (no live Google API call) and reflects whatever the
+  // 4x/day cron sync last fetched.
+  const fetchFromCache = useCallback(async (): Promise<boolean> => {
+    if (!hasSupabase || !supabase) return false;
+    const { data: sessionData } = await supabase.auth.getSession();
+    const userId = sessionData.session?.user?.id;
+    if (!userId) return false;
+
+    const { data: cacheRow, error } = await supabase
+      .from('google_calendar_cache')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error || !cacheRow) return false;
+
+    if (cacheRow.sync_status === 'never') return false;
+
+    setData({
+      connected: true,
+      googleEmail: cacheRow.google_email,
+      calendars: cacheRow.calendars ?? [],
+      events: cacheRow.events ?? [],
+      chores: cacheRow.chores ?? [],
+      error: cacheRow.sync_status === 'error' ? cacheRow.sync_error : null,
+    });
+    setSyncedAt(cacheRow.synced_at);
+    return true;
+  }, []);
+
+  // Live fetch via the edge function - used as a fallback when there's no
+  // cache yet (first-ever connect, before the cron has run) and as the
+  // explicit manual "refresh" action so the button always feels responsive.
+  const fetchLive = useCallback(
     async (isRefresh = false) => {
       if (isRefresh) setRefreshing(true);
       else setLoading(true);
@@ -180,6 +217,7 @@ export function useGoogleCalendarData(options: UseGoogleCalendarDataOptions = {}
         );
         const json: CalendarFetchResult = await resp.json();
         setData(json);
+        setSyncedAt(new Date().toISOString());
       } catch (err) {
         console.error('Failed to fetch Google Calendar data:', err);
         setData({ connected: false, events: [], chores: [], error: "Couldn't load calendar" });
@@ -191,17 +229,42 @@ export function useGoogleCalendarData(options: UseGoogleCalendarDataOptions = {}
     [daysForward, daysBack]
   );
 
+  // Initial load: try the cache first (fast), fall back to a live fetch if
+  // nothing's been synced yet.
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const hadCache = await fetchFromCache();
+      if (!cancelled && !hadCache) {
+        await fetchLive(false);
+      } else if (!cancelled) {
+        setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('google_calendar') === 'connected') {
-      fetchData();
+      fetchLive(false);
       window.history.replaceState({}, '', window.location.pathname);
     }
-  }, [fetchData]);
+  }, [fetchLive]);
+
+  // Auto-refresh every 6 hours while the tab is open, matching the
+  // background sync cadence (4x/day) so an open tab never drifts far
+  // from what's been cached.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchFromCache();
+    }, AUTO_REFRESH_MS);
+    return () => clearInterval(interval);
+  }, [fetchFromCache]);
 
   const connect = useCallback(async () => {
     if (!hasSupabase || !supabase) return;
@@ -228,7 +291,8 @@ export function useGoogleCalendarData(options: UseGoogleCalendarDataOptions = {}
     refreshing,
     data,
     daySummaries,
-    refresh: () => fetchData(true),
+    syncedAt,
+    refresh: () => fetchLive(true), // manual refresh button forces a live Google fetch
     connect,
     dateKeyOf: dateKey,
   };

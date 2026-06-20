@@ -247,6 +247,10 @@
   border-width: 2px;
 }
 
+.gcal-day-cell.busy-low { background: var(--green-bg); }
+.gcal-day-cell.busy-medium { background: var(--amber-bg); }
+.gcal-day-cell.busy-high { background: var(--red-bg); }
+
 .gcal-day-cell.selected {
   background: var(--purple-bg);
   border-color: var(--purple);
@@ -327,6 +331,10 @@
   border-color: var(--purple);
   border-width: 2px;
 }
+
+.gcal-week-day.busy-low { background: var(--green-bg); }
+.gcal-week-day.busy-medium { background: var(--amber-bg); }
+.gcal-week-day.busy-high { background: var(--red-bg); }
 
 .gcal-week-day.selected {
   background: var(--purple-bg);
