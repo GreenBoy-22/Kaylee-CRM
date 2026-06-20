@@ -217,9 +217,18 @@ export default function GoogleCalendarPanel() {
         )}
 
         {!loading && data?.error && (
-          <div className="mt-2 flex items-center gap-2 text-xs text-amber-600">
-            <AlertCircle className="h-3.5 w-3.5" />
-            {data.error}
+          <div className="mt-2 flex flex-col items-start gap-2">
+            <div className="flex items-center gap-2 text-xs text-amber-600">
+              <AlertCircle className="h-3.5 w-3.5" />
+              {data.error}
+            </div>
+            <button
+              onClick={handleConnect}
+              disabled={connecting}
+              className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            >
+              {connecting ? "Connecting…" : "Reconnect Google Calendar"}
+            </button>
           </div>
         )}
       </div>
