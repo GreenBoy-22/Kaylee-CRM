@@ -9,6 +9,7 @@ import {
 import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
 import GoogleCalendarToday from './GoogleCalendarToday';
+import Budget from './Budget';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
@@ -1554,7 +1555,7 @@ Kaylee`;
           {page === 'today' && <Today tasks={tasks.filter((task) => activeRole === 'admin' || task.mode === 'home')} choreTasks={choreTasks} householdUsers={householdUsers} completeTask={completeTask} completeChore={completeChore} editable={canEdit('today') && canEdit('chores')} />}
           {page === 'briefing' && <Briefing />}
           {page === 'calendar' && <GoogleCalendar />}
-          {page === 'budget' && <Placeholder title="Budget" sub={activeRole === 'limited' ? 'Kaylee controls whether this is visible/editable for Adam.' : 'Calendar-based cashflow page scaffold.'} />}
+          {page === 'budget' && <Budget />}
           {page === 'inventory' && <Inventory inventory={inventory} createItem={createInventoryItem} updateQuantity={updateInventoryQuantity} editable={canEdit('inventory')} />}
           {page === 'chores' && <Chores choreTasks={choreTasks} choreSuggestions={choreSuggestions} syncState={syncState} syncing={syncing} householdUsers={householdUsers} currentUserName={activeName} syncTodoistNow={syncTodoistNow} completeChore={completeChore} uncompleteChore={uncompleteChore} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} approveSuggestionForAdam={approveSuggestionForAdam} approveSuggestionForSelf={approveSuggestionForSelf} reassignChore={reassignChore} editable={canEdit('chores')} />}
           {page === 'vehicles' && <Vehicles />}
