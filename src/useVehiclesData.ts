@@ -11,7 +11,8 @@ import { supabase, hasSupabase } from './lib/supabase';
 export type ServiceType =
   | 'oil_change' | 'tire_rotation' | 'tire_alignment' | 'tires_replaced'
   | 'windshield_wipers' | 'air_filter' | 'registration' | 'emissions'
-  | 'inspection' | 'brakes' | 'battery' | 'other';
+  | 'inspection' | 'brakes' | 'battery' | 'other'
+  | 'cvt_fluid' | 'spark_plugs' | 'coolant' | 'brake_fluid' | 'reduction_gear_oil' | 'drive_belts';
 
 export interface Vehicle {
   id: string;
@@ -163,6 +164,12 @@ export interface ServiceInterval {
   active: boolean;
 }
 
+export interface KnownIssueDismissal {
+  id: string;
+  known_issue_id: string;
+  dismissed_by: string;
+}
+
 export interface KnownIssue {
   id: string;
   vehicle_id: string;
@@ -175,6 +182,7 @@ export interface KnownIssue {
 
 export interface MileageUpcomingItem {
   intervalId: string;
+  serviceType: ServiceType | string;
   name: string;
   intervalMiles: number;
   milesSinceService: number | null;
@@ -212,6 +220,7 @@ export function calculateMileageUpcoming(
       if (!currentMileage || !lastService?.mileage_at_service) {
         return {
           intervalId: interval.id,
+          serviceType: interval.service_type,
           name: interval.name,
           intervalMiles: interval.interval_miles,
           milesSinceService: null,
@@ -234,6 +243,7 @@ export function calculateMileageUpcoming(
 
       return {
         intervalId: interval.id,
+        serviceType: interval.service_type,
         name: interval.name,
         intervalMiles: interval.interval_miles,
         milesSinceService,
@@ -314,6 +324,8 @@ export function useVehiclesData() {
   const [parts, setParts] = useState<VehiclePart[]>([]);
   const [serviceIntervals, setServiceIntervals] = useState<ServiceInterval[]>([]);
   const [knownIssues, setKnownIssues] = useState<KnownIssue[]>([]);
+  const [dismissedIssueIds, setDismissedIssueIds] = useState<Set<string>>(new Set());
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
   const loadAll = useCallback(async () => {
@@ -325,8 +337,9 @@ export function useVehiclesData() {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const userId = sessionData.session?.user?.id;
+      setCurrentUserId(userId ?? null);
 
-      const [vehiclesRes, maintenanceRes, mileageRes, rulesRes, partsRes, intervalsRes, issuesRes, userRes] = await Promise.all([
+      const [vehiclesRes, maintenanceRes, mileageRes, rulesRes, partsRes, intervalsRes, issuesRes, dismissalsRes, userRes] = await Promise.all([
         supabase.from('vehicles').select('*').eq('active', true).order('name'),
         supabase.from('vehicle_maintenance_log').select('*').order('service_date', { ascending: false }),
         supabase.from('vehicle_mileage_log').select('*').order('reading_date', { ascending: false }),
@@ -334,6 +347,9 @@ export function useVehiclesData() {
         supabase.from('vehicle_parts').select('*').order('service_type'),
         supabase.from('vehicle_service_intervals').select('*').eq('active', true),
         supabase.from('vehicle_known_issues').select('*'),
+        userId
+          ? supabase.from('vehicle_known_issue_dismissals').select('known_issue_id').eq('dismissed_by', userId)
+          : Promise.resolve({ data: [] as { known_issue_id: string }[] }),
         userId ? supabase.from('users').select('role').eq('id', userId).maybeSingle() : Promise.resolve({ data: null as any }),
       ]);
 
@@ -344,6 +360,7 @@ export function useVehiclesData() {
       if (partsRes.data) setParts(partsRes.data as VehiclePart[]);
       if (intervalsRes.data) setServiceIntervals(intervalsRes.data as ServiceInterval[]);
       if (issuesRes.data) setKnownIssues(issuesRes.data as KnownIssue[]);
+      if (dismissalsRes.data) setDismissedIssueIds(new Set(dismissalsRes.data.map((d: any) => d.known_issue_id)));
       setIsAdmin((userRes.data as any)?.role === 'admin');
     } catch (err) {
       console.error('Failed to load vehicles data:', err);
@@ -435,6 +452,48 @@ export function useVehiclesData() {
     [mileageLog]
   );
 
+  // Dismissing a known issue is a personal preference (Adam might still want
+  // to see something Kaylee dismissed), so it's tracked per-user rather than
+  // as a flag on the issue itself.
+  const dismissKnownIssue = useCallback(
+    async (knownIssueId: string) => {
+      if (!supabase || !currentUserId) return;
+      const { error } = await supabase
+        .from('vehicle_known_issue_dismissals')
+        .insert({ known_issue_id: knownIssueId, dismissed_by: currentUserId });
+      if (error) throw error;
+      await loadAll();
+    },
+    [loadAll, currentUserId]
+  );
+
+  const undismissKnownIssue = useCallback(
+    async (knownIssueId: string) => {
+      if (!supabase || !currentUserId) return;
+      const { error } = await supabase
+        .from('vehicle_known_issue_dismissals')
+        .delete()
+        .eq('known_issue_id', knownIssueId)
+        .eq('dismissed_by', currentUserId);
+      if (error) throw error;
+      await loadAll();
+    },
+    [loadAll, currentUserId]
+  );
+
+  // Dismissing a service interval is a fact about the car (not relevant to
+  // this vehicle/situation), so unlike known issues it's not per-user -
+  // sets active=false permanently, same for the whole household.
+  const dismissServiceInterval = useCallback(
+    async (intervalId: string) => {
+      if (!supabase) return;
+      const { error } = await supabase.from('vehicle_service_intervals').update({ active: false }).eq('id', intervalId);
+      if (error) throw error;
+      await loadAll();
+    },
+    [loadAll]
+  );
+
   return {
     loading,
     vehicles,
@@ -444,6 +503,7 @@ export function useVehiclesData() {
     parts,
     serviceIntervals,
     knownIssues,
+    dismissedIssueIds,
     isAdmin,
     refresh: loadAll,
     addVehicle,
@@ -451,6 +511,9 @@ export function useVehiclesData() {
     logMaintenance,
     deleteMaintenanceEntry,
     logMileage,
+    dismissKnownIssue,
+    undismissKnownIssue,
+    dismissServiceInterval,
     estimateMilesPerYear,
   };
 }

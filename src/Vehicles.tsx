@@ -22,6 +22,8 @@ const SERVICE_LABELS: Record<ServiceType, string> = {
   tires_replaced: 'Tires replaced', windshield_wipers: 'Windshield wipers', air_filter: 'Air filter',
   registration: 'Registration', emissions: 'Emissions test', inspection: 'Inspection',
   brakes: 'Brakes', battery: 'Battery', other: 'Other',
+  cvt_fluid: 'CVT/transmission fluid', spark_plugs: 'Spark plugs', coolant: 'Coolant flush',
+  brake_fluid: 'Brake fluid', reduction_gear_oil: 'Reduction gear oil', drive_belts: 'Drive belts',
 };
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -44,8 +46,8 @@ function fmtDate(dateStr: string): string {
 
 export default function Vehicles() {
   const {
-    loading, vehicles, maintenanceLog, mileageLog, vehicleRules, parts, serviceIntervals, knownIssues, isAdmin,
-    updateVehicle, logMaintenance, deleteMaintenanceEntry, logMileage, estimateMilesPerYear,
+    loading, vehicles, maintenanceLog, mileageLog, vehicleRules, parts, serviceIntervals, knownIssues, dismissedIssueIds, isAdmin,
+    updateVehicle, logMaintenance, deleteMaintenanceEntry, logMileage, estimateMilesPerYear, dismissKnownIssue, dismissServiceInterval,
   } = useVehiclesData();
 
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
@@ -86,9 +88,11 @@ export default function Vehicles() {
   );
 
   const vehicleKnownIssues = useMemo(
-    () => knownIssues.filter((k) => k.vehicle_id === selectedVehicle?.id),
-    [knownIssues, selectedVehicle]
+    () => knownIssues.filter((k) => k.vehicle_id === selectedVehicle?.id && !dismissedIssueIds.has(k.id)),
+    [knownIssues, selectedVehicle, dismissedIssueIds]
   );
+
+  const [completingInterval, setCompletingInterval] = useState<{ serviceType: ServiceType; name: string } | null>(null);
 
   const [showLogTires, setShowLogTires] = useState(false);
 
@@ -301,6 +305,27 @@ export default function Vehicles() {
                         <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 3, fontStyle: 'italic' }}>{item.sourceNote}</div>
                       )}
                     </div>
+                    {isAdmin && (
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                        <button
+                          className="btn ghost"
+                          style={{ fontSize: 11.5, padding: '4px 8px' }}
+                          onClick={() => setCompletingInterval({ serviceType: item.serviceType as ServiceType, name: item.name })}
+                        >
+                          Complete
+                        </button>
+                        <button
+                          className="qty-button"
+                          aria-label="Dismiss"
+                          title="Not relevant to this vehicle"
+                          onClick={() => {
+                            if (confirm(`Dismiss "${item.name}"? You won't see this recommendation again.`)) dismissServiceInterval(item.intervalId);
+                          }}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -322,14 +347,27 @@ export default function Vehicles() {
                     marginBottom: 8,
                   }}
                 >
-                  <div style={{ fontWeight: 600, fontSize: 13.5 }}>{issue.title}</div>
-                  <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 3 }}>{issue.description}</div>
-                  {issue.symptoms && (
-                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}><strong>Watch for:</strong> {issue.symptoms}</div>
-                  )}
-                  {issue.source_note && (
-                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, fontStyle: 'italic' }}>Source: {issue.source_note}</div>
-                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13.5 }}>{issue.title}</div>
+                      <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 3 }}>{issue.description}</div>
+                      {issue.symptoms && (
+                        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}><strong>Watch for:</strong> {issue.symptoms}</div>
+                      )}
+                      {issue.source_note && (
+                        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, fontStyle: 'italic' }}>Source: {issue.source_note}</div>
+                      )}
+                    </div>
+                    <button
+                      className="qty-button"
+                      aria-label="Dismiss"
+                      title="Hide this for me"
+                      style={{ flexShrink: 0 }}
+                      onClick={() => dismissKnownIssue(issue.id)}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -425,14 +463,20 @@ export default function Vehicles() {
         </>
       )}
 
-      {showLogService && selectedVehicle && (
+      {(showLogService || completingInterval) && selectedVehicle && (
         <LogServiceModal
           vehicle={selectedVehicle}
           upcoming={upcoming}
-          onClose={() => setShowLogService(false)}
+          initialServiceType={completingInterval?.serviceType}
+          initialNote={completingInterval ? `Completed: ${completingInterval.name}` : undefined}
+          onClose={() => {
+            setShowLogService(false);
+            setCompletingInterval(null);
+          }}
           onSubmit={async (input) => {
             await logMaintenance(input);
             setShowLogService(false);
+            setCompletingInterval(null);
           }}
         />
       )}
@@ -478,14 +522,18 @@ function LogServiceModal({
   upcoming,
   onClose,
   onSubmit,
+  initialServiceType,
+  initialNote,
 }: {
   vehicle: Vehicle;
   upcoming: ReturnType<typeof calculateUpcoming>;
   onClose: () => void;
   onSubmit: (input: Omit<MaintenanceEntry, 'id'>) => Promise<void>;
+  initialServiceType?: ServiceType;
+  initialNote?: string;
 }) {
-  const [serviceType, setServiceType] = useState<ServiceType>('oil_change');
-  const [description, setDescription] = useState('');
+  const [serviceType, setServiceType] = useState<ServiceType>(initialServiceType ?? 'oil_change');
+  const [description, setDescription] = useState(initialNote ?? '');
   const [date, setDate] = useState(() => toKey(new Date()));
   const [mileage, setMileage] = useState(vehicle.current_mileage ? String(vehicle.current_mileage) : '');
   const [cost, setCost] = useState('');
