@@ -5,7 +5,7 @@
 // estimate, and registration/insurance renewal month tracking.
 
 import { useMemo, useState } from 'react';
-import { Wrench, Gauge, X, Trash2, AlertCircle, ExternalLink, Package } from 'lucide-react';
+import { Wrench, Gauge, X, Trash2, AlertCircle, ExternalLink, Package, Search } from 'lucide-react';
 import {
   useVehiclesData,
   calculateUpcoming,
@@ -16,6 +16,7 @@ import {
   type MaintenanceEntry,
   type VehiclePart,
 } from './useVehiclesData';
+import HistoricalScanReview from './HistoricalScanReview';
 
 const SERVICE_LABELS: Record<ServiceType, string> = {
   oil_change: 'Oil change', tire_rotation: 'Tire rotation', tire_alignment: 'Tire alignment',
@@ -54,6 +55,7 @@ export default function Vehicles() {
   const [showLogService, setShowLogService] = useState(false);
   const [showLogMileage, setShowLogMileage] = useState(false);
   const [showEditVehicle, setShowEditVehicle] = useState(false);
+  const [showScanReview, setShowScanReview] = useState(false);
 
   const selectedVehicle = vehicles.find((v) => v.id === selectedVehicleId) ?? vehicles[0] ?? null;
 
@@ -117,6 +119,9 @@ export default function Vehicles() {
         <div>
           <h1>Vehicles</h1>
           <p>Maintenance, mileage, and renewal tracking.</p>
+        </div>
+        <div className="actions">
+          <button className="btn ghost" onClick={() => setShowScanReview(true)}><Search size={15} /> Scan calendar history</button>
         </div>
       </div>
 
@@ -220,7 +225,7 @@ export default function Vehicles() {
                     <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
                       {tireStatus.milesSinceReplacement?.toLocaleString()} mi since replacement
                       {tireStatus.replacedDate ? ` (${fmtDate(tireStatus.replacedDate)})` : ''}
-                      {' \u00b7 '}
+                      {' · '}
                       {tireStatus.milesRemaining && tireStatus.milesRemaining > 0
                         ? `~${tireStatus.milesRemaining.toLocaleString()} mi remaining`
                         : 'past rated life'}
@@ -251,9 +256,9 @@ export default function Vehicles() {
                     {item.name}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                    {item.status === 'overdue' ? 'Overdue \u2014 ' : item.status === 'due-soon' ? 'Due ' : 'Scheduled for '}
+                    {item.status === 'overdue' ? 'Overdue — ' : item.status === 'due-soon' ? 'Due ' : 'Scheduled for '}
                     {item.monthLabel}
-                    {item.lastServiceDate ? ` \u00b7 last done ${fmtDate(item.lastServiceDate)}` : ' \u00b7 not logged yet'}
+                    {item.lastServiceDate ? ` · last done ${fmtDate(item.lastServiceDate)}` : ' · not logged yet'}
                   </div>
                 </div>
                 <div style={{ fontWeight: 600 }}>{fmtMoney(item.amount)}</div>
@@ -265,7 +270,7 @@ export default function Vehicles() {
             <div className="panel">
               <div className="panel-head">
                 <h2>Recommended maintenance</h2>
-                <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>By mileage \u2014 based on the manual + dealer sources</span>
+                <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>By mileage — based on the manual + dealer sources</span>
               </div>
               {!selectedVehicle.current_mileage && (
                 <div className="brief-item" style={{ marginBottom: 10 }}>
@@ -297,9 +302,9 @@ export default function Vehicles() {
                       <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
                         Every {item.intervalMiles.toLocaleString()} mi
                         {item.status !== 'unknown' && item.milesSinceService != null && (
-                          <> {'\u00b7'} {item.milesSinceService.toLocaleString()} mi since last done</>
+                          <> {'·'} {item.milesSinceService.toLocaleString()} mi since last done</>
                         )}
-                        {item.status === 'unknown' && ' \u00b7 not logged yet'}
+                        {item.status === 'unknown' && ' · not logged yet'}
                       </div>
                       {item.sourceNote && (
                         <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 3, fontStyle: 'italic' }}>{item.sourceNote}</div>
@@ -336,7 +341,7 @@ export default function Vehicles() {
             <div className="panel">
               <div className="panel-head">
                 <h2>Known issues to watch for</h2>
-                <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Reported by other owners \u2014 not a schedule, just things to keep an eye on</span>
+                <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Reported by other owners — not a schedule, just things to keep an eye on</span>
               </div>
               {vehicleKnownIssues.map((issue) => (
                 <div
@@ -392,7 +397,7 @@ export default function Vehicles() {
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 600, fontSize: 13.5 }}>{part.part_label}</div>
                         <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                          {[part.brand, part.part_number, part.size_spec].filter(Boolean).join(' \u00b7 ')}
+                          {[part.brand, part.part_number, part.size_spec].filter(Boolean).join(' · ')}
                         </div>
                       </div>
                       {part.amazon_url && (
@@ -424,9 +429,9 @@ export default function Vehicles() {
                   {vehicleMaintenanceHistory.map((entry) => (
                     <tr key={entry.id}>
                       <td>{fmtDate(entry.service_date)}</td>
-                      <td>{SERVICE_LABELS[entry.service_type]}{entry.description ? ` \u2014 ${entry.description}` : ''}</td>
-                      <td>{entry.mileage_at_service ? entry.mileage_at_service.toLocaleString() : '\u2014'}</td>
-                      <td style={{ textAlign: 'right' }}>{entry.cost != null ? fmtMoney(entry.cost) : '\u2014'}</td>
+                      <td>{SERVICE_LABELS[entry.service_type]}{entry.description ? ` — ${entry.description}` : ''}</td>
+                      <td>{entry.mileage_at_service ? entry.mileage_at_service.toLocaleString() : '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{entry.cost != null ? fmtMoney(entry.cost) : '—'}</td>
                       {isAdmin && (
                         <td>
                           <button className="qty-button" onClick={() => { if (confirm('Delete this service entry?')) deleteMaintenanceEntry(entry.id); }} aria-label="Delete">
@@ -513,6 +518,8 @@ export default function Vehicles() {
           }}
         />
       )}
+
+      {showScanReview && <HistoricalScanReview onClose={() => setShowScanReview(false)} />}
     </>
   );
 }
@@ -562,7 +569,7 @@ function LogServiceModal({
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
       <div className="panel" style={{ width: 420, margin: 0 }}>
         <div className="panel-head">
-          <h2>Log service \u2014 {vehicle.name}</h2>
+          <h2>Log service — {vehicle.name}</h2>
           <button className="qty-button" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
@@ -626,7 +633,7 @@ function LogMileageModal({
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
       <div className="panel" style={{ width: 360, margin: 0 }}>
         <div className="panel-head">
-          <h2>Log mileage \u2014 {vehicle.name}</h2>
+          <h2>Log mileage — {vehicle.name}</h2>
           <button className="qty-button" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
@@ -752,7 +759,7 @@ function LogTireReplacementModal({
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
       <div className="panel" style={{ width: 400, margin: 0 }}>
         <div className="panel-head">
-          <h2>Tires \u2014 {vehicle.name}</h2>
+          <h2>Tires — {vehicle.name}</h2>
           <button className="qty-button" onClick={onClose}><X size={14} /></button>
         </div>
         <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: -8 }}>

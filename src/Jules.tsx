@@ -6,7 +6,7 @@
 // reference panel drawn from her handbook.
 
 import { useMemo, useState } from 'react';
-import { Heart, Scissors, Syringe, ExternalLink, X, Trash2, AlertCircle, Info } from 'lucide-react';
+import { Heart, Scissors, Syringe, ExternalLink, X, Trash2, AlertCircle, Info, Search } from 'lucide-react';
 import {
   useJulesData,
   calculateMedicalUpcoming,
@@ -16,6 +16,7 @@ import {
   type MedicalLogEntry,
   type GroomingLogEntry,
 } from './useJulesData';
+import HistoricalScanReview from './HistoricalScanReview';
 
 function fmtMoney(n: number): string {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -49,6 +50,7 @@ export default function Jules() {
   const [showLogMedical, setShowLogMedical] = useState(false);
   const [showLogGrooming, setShowLogGrooming] = useState(false);
   const [showHandbook, setShowHandbook] = useState(false);
+  const [showScanReview, setShowScanReview] = useState(false);
 
   const medicalUpcoming = useMemo(() => calculateMedicalUpcoming(medicalLog), [medicalLog]);
   const groomingStatus = useMemo(() => calculateGroomingStatus(groomingLog), [groomingLog]);
@@ -74,9 +76,10 @@ export default function Jules() {
       <div className="page-header">
         <div>
           <h1>Jules</h1>
-          <p>{pet.breed} {pet.color ? `\u00b7 ${pet.color}` : ''}{pet.weight_lbs ? ` \u00b7 ~${pet.weight_lbs} lbs` : ''}</p>
+          <p>{pet.breed} {pet.color ? `· ${pet.color}` : ''}{pet.weight_lbs ? ` · ~${pet.weight_lbs} lbs` : ''}</p>
         </div>
         <div className="actions">
+          <button className="btn ghost" onClick={() => setShowScanReview(true)}><Search size={15} /> Scan calendar history</button>
           <button className="btn ghost" onClick={() => setShowHandbook(true)}><Heart size={15} /> Care guide</button>
         </div>
       </div>
@@ -144,7 +147,7 @@ export default function Jules() {
             </div>
             <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
               Last groom {fmtDate(groomingStatus.lastGroomDate!)} ({groomingStatus.daysSinceGroom} days ago)
-              {' \u00b7 '}next due around {fmtDate(groomingStatus.nextDueDate!)}
+              {' · '}next due around {fmtDate(groomingStatus.nextDueDate!)}
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>
               Suggested: {CUT_TYPE_LABELS[groomingStatus.suggestedCutType]} {groomingStatus.suggestedCutType === 'short_summer' ? '(pool season)' : '(cooler months)'}
@@ -164,9 +167,9 @@ export default function Jules() {
               {recentGrooming.map((entry) => (
                 <tr key={entry.id}>
                   <td>{fmtDate(entry.groom_date)}</td>
-                  <td>{entry.cut_type ? CUT_TYPE_LABELS[entry.cut_type] : '\u2014'}</td>
-                  <td><small>{entry.services || '\u2014'}</small></td>
-                  <td style={{ textAlign: 'right' }}>{entry.cost != null ? fmtMoney(entry.cost) : '\u2014'}</td>
+                  <td>{entry.cut_type ? CUT_TYPE_LABELS[entry.cut_type] : '—'}</td>
+                  <td><small>{entry.services || '—'}</small></td>
+                  <td style={{ textAlign: 'right' }}>{entry.cost != null ? fmtMoney(entry.cost) : '—'}</td>
                   <td>
                     <button className="qty-button" onClick={() => { if (confirm('Delete this grooming entry?')) deleteGrooming(entry.id); }} aria-label="Delete">
                       <Trash2 size={12} />
@@ -204,7 +207,7 @@ export default function Jules() {
                   {item.label}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                  Last {fmtDate(item.lastDate)} {'\u00b7'} due {fmtDate(item.dueDate)}
+                  Last {fmtDate(item.lastDate)} {'·'} due {fmtDate(item.dueDate)}
                 </div>
               </div>
             </div>
@@ -223,8 +226,8 @@ export default function Jules() {
               {recentMedical.map((entry) => (
                 <tr key={entry.id}>
                   <td>{fmtDate(entry.service_date)}</td>
-                  <td>{MEDICAL_LABELS[entry.item_type]}{entry.description && entry.description !== MEDICAL_LABELS[entry.item_type] ? ` \u2014 ${entry.description}` : ''}</td>
-                  <td style={{ textAlign: 'right' }}>{entry.cost != null ? fmtMoney(entry.cost) : '\u2014'}</td>
+                  <td>{MEDICAL_LABELS[entry.item_type]}{entry.description && entry.description !== MEDICAL_LABELS[entry.item_type] ? ` — ${entry.description}` : ''}</td>
+                  <td style={{ textAlign: 'right' }}>{entry.cost != null ? fmtMoney(entry.cost) : '—'}</td>
                   <td>
                     <button className="qty-button" onClick={() => { if (confirm('Delete this medical entry?')) deleteMedical(entry.id); }} aria-label="Delete">
                       <Trash2 size={12} />
@@ -262,6 +265,7 @@ export default function Jules() {
       )}
 
       {showHandbook && <HandbookModal onClose={() => setShowHandbook(false)} />}
+      {showScanReview && <HistoricalScanReview onClose={() => setShowScanReview(false)} />}
     </>
   );
 }
@@ -382,7 +386,7 @@ function LogMedicalModal({
             <input placeholder="Cost (optional)" type="number" step="0.01" value={cost} onChange={(e) => setCost(e.target.value)} />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Repeats every (months) \u2014 leave blank if one-time</label>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Repeats every (months) — leave blank if one-time</label>
             <input type="number" value={recurrence} onChange={(e) => setRecurrence(e.target.value)} style={{ width: '100%' }} />
           </div>
         </div>
@@ -412,19 +416,19 @@ function HandbookModal({ onClose }: { onClose: () => void }) {
           <p>2 cups Heart to Tail Complete Nutrition dry food + homemade chicken/veggie topper + Dogzymes Complete probiotic + 4 pumps salmon oil, all mixed together.</p>
 
           <h4 style={{ marginBottom: 4, marginTop: 16 }}>Medication</h4>
-          <p>Fluoxetine (Prozac) once daily with dinner, for anxiety. Prescribed by Lauren Saroli, DVM. Don't skip or stop abruptly \u2014 if a dose is missed, give it with the next meal and notify Kaylee/Adam.</p>
+          <p>Fluoxetine (Prozac) once daily with dinner, for anxiety. Prescribed by Lauren Saroli, DVM. Don't skip or stop abruptly — if a dose is missed, give it with the next meal and notify Kaylee/Adam.</p>
 
           <h4 style={{ marginBottom: 4, marginTop: 16 }}>Water safety</h4>
-          <p>Loves the pool and beach. Must wear her life vest whenever swimming \u2014 she's bottom-heavy and will sink without it.</p>
+          <p>Loves the pool and beach. Must wear her life vest whenever swimming — she's bottom-heavy and will sink without it.</p>
 
           <h4 style={{ marginBottom: 4, marginTop: 16 }}>Grooming basics (daily/ongoing, separate from her ~6-week groomer visits)</h4>
-          <p>Daily eye crusty removal to prevent staining. Occasional hygiene trim ("Brazilian wax") to prevent cling-ons after bathroom trips \u2014 clean with a wet wipe.</p>
+          <p>Daily eye crusty removal to prevent staining. Occasional hygiene trim ("Brazilian wax") to prevent cling-ons after bathroom trips — clean with a wet wipe.</p>
 
           <h4 style={{ marginBottom: 4, marginTop: 16 }}>If something seems wrong</h4>
           <p>Contact her humans immediately for: unusual breathing, persistent coughing beyond her normal occasional cough, vomiting more than once, unusual lethargy, or refusal to eat.</p>
 
           <h4 style={{ marginBottom: 4, marginTop: 16 }}>Vet</h4>
-          <p>Express Vets, North Canton \u2014 Lauren Saroli, DVM.</p>
+          <p>Express Vets, North Canton — Lauren Saroli, DVM.</p>
         </div>
       </div>
     </div>

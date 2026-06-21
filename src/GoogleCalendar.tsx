@@ -311,7 +311,7 @@ export default function GoogleCalendar() {
             <div className="gcal-today-item-time">{event.allDay ? 'All day' : formatTime(event.start)}</div>
             <div className="gcal-today-item-body">
               <div className="gcal-today-item-title">{event.title}</div>
-              {event.calendarName && <div className="gcal-today-item-loc">{event.calendarName}{event.location ? ` \u00b7 ${event.location}` : ''}</div>}
+              {event.calendarName && <div className="gcal-today-item-loc">{event.calendarName}{event.location ? ` · ${event.location}` : ''}</div>}
               {!event.calendarName && event.location && <div className="gcal-today-item-loc">{event.location}</div>}
             </div>
             <ExternalLink size={13} style={{ color: 'var(--muted)', flexShrink: 0, marginTop: 2 }} />
