@@ -49,6 +49,18 @@ export interface MileageEntry {
   notes: string | null;
 }
 
+export interface VehiclePart {
+  id: string;
+  vehicle_id: string;
+  service_type: ServiceType;
+  part_label: string;
+  brand: string | null;
+  part_number: string | null;
+  size_spec: string | null;
+  amazon_url: string | null;
+  notes: string | null;
+}
+
 export interface VehicleBudgetRule {
   id: string;
   name: string;
@@ -142,6 +154,7 @@ export function useVehiclesData() {
   const [maintenanceLog, setMaintenanceLog] = useState<MaintenanceEntry[]>([]);
   const [mileageLog, setMileageLog] = useState<MileageEntry[]>([]);
   const [vehicleRules, setVehicleRules] = useState<VehicleBudgetRule[]>([]);
+  const [parts, setParts] = useState<VehiclePart[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
 
   const loadAll = useCallback(async () => {
@@ -154,11 +167,12 @@ export function useVehiclesData() {
       const { data: sessionData } = await supabase.auth.getSession();
       const userId = sessionData.session?.user?.id;
 
-      const [vehiclesRes, maintenanceRes, mileageRes, rulesRes, userRes] = await Promise.all([
+      const [vehiclesRes, maintenanceRes, mileageRes, rulesRes, partsRes, userRes] = await Promise.all([
         supabase.from('vehicles').select('*').eq('active', true).order('name'),
         supabase.from('vehicle_maintenance_log').select('*').order('service_date', { ascending: false }),
         supabase.from('vehicle_mileage_log').select('*').order('reading_date', { ascending: false }),
         supabase.from('budget_recurring_rules').select('id, name, amount, recurrence, month_of_year, months, vehicle_id').eq('category', 'vehicle'),
+        supabase.from('vehicle_parts').select('*').order('service_type'),
         userId ? supabase.from('users').select('role').eq('id', userId).maybeSingle() : Promise.resolve({ data: null as any }),
       ]);
 
@@ -166,6 +180,7 @@ export function useVehiclesData() {
       if (maintenanceRes.data) setMaintenanceLog(maintenanceRes.data as MaintenanceEntry[]);
       if (mileageRes.data) setMileageLog(mileageRes.data as MileageEntry[]);
       if (rulesRes.data) setVehicleRules(rulesRes.data as VehicleBudgetRule[]);
+      if (partsRes.data) setParts(partsRes.data as VehiclePart[]);
       setIsAdmin((userRes.data as any)?.role === 'admin');
     } catch (err) {
       console.error('Failed to load vehicles data:', err);
@@ -263,6 +278,7 @@ export function useVehiclesData() {
     maintenanceLog,
     mileageLog,
     vehicleRules,
+    parts,
     isAdmin,
     refresh: loadAll,
     addVehicle,

@@ -5,13 +5,14 @@
 // estimate, and registration/insurance renewal month tracking.
 
 import { useMemo, useState } from 'react';
-import { Wrench, Gauge, X, Trash2, AlertCircle } from 'lucide-react';
+import { Wrench, Gauge, X, Trash2, AlertCircle, ExternalLink, Package } from 'lucide-react';
 import {
   useVehiclesData,
   calculateUpcoming,
   type Vehicle,
   type ServiceType,
   type MaintenanceEntry,
+  type VehiclePart,
 } from './useVehiclesData';
 
 const SERVICE_LABELS: Record<ServiceType, string> = {
@@ -41,7 +42,7 @@ function fmtDate(dateStr: string): string {
 
 export default function Vehicles() {
   const {
-    loading, vehicles, maintenanceLog, mileageLog, vehicleRules, isAdmin,
+    loading, vehicles, maintenanceLog, mileageLog, vehicleRules, parts, isAdmin,
     updateVehicle, logMaintenance, deleteMaintenanceEntry, logMileage, estimateMilesPerYear,
   } = useVehiclesData();
 
@@ -65,6 +66,11 @@ export default function Vehicles() {
   const vehicleMileageHistory = useMemo(
     () => mileageLog.filter((m) => m.vehicle_id === selectedVehicle?.id).slice(0, 10),
     [mileageLog, selectedVehicle]
+  );
+
+  const vehicleParts = useMemo(
+    () => parts.filter((p) => p.vehicle_id === selectedVehicle?.id),
+    [parts, selectedVehicle]
   );
 
   const milesPerYear = selectedVehicle ? estimateMilesPerYear(selectedVehicle.id) : null;
@@ -175,6 +181,40 @@ export default function Vehicles() {
               </div>
             ))}
           </div>
+
+          {vehicleParts.length > 0 && (
+            <div className="panel">
+              <div className="panel-head"><h2>Parts reference</h2></div>
+              {Object.entries(
+                vehicleParts.reduce<Record<string, VehiclePart[]>>((acc, p) => {
+                  (acc[p.service_type] ??= []).push(p);
+                  return acc;
+                }, {})
+              ).map(([type, items]) => (
+                <div key={type} style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 6 }}>
+                    {SERVICE_LABELS[type as ServiceType]}
+                  </div>
+                  {items.map((part) => (
+                    <div key={part.id} className="brief-item" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                      <Package size={14} color="var(--muted)" style={{ flexShrink: 0 }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13.5 }}>{part.part_label}</div>
+                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                          {[part.brand, part.part_number, part.size_spec].filter(Boolean).join(' \u00b7 ')}
+                        </div>
+                      </div>
+                      {part.amazon_url && (
+                        <a href={part.amazon_url} target="_blank" rel="noopener noreferrer" className="qty-button" aria-label="View on Amazon">
+                          <ExternalLink size={13} />
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="panel">
             <div className="panel-head"><h2>Service history</h2></div>
