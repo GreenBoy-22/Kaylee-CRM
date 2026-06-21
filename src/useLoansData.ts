@@ -22,6 +22,9 @@ export interface Loan {
   balance_updated_at: string;
   active: boolean;
   notes: string | null;
+  // lowercase substring matched against cached calendar event titles to
+  // find this loan's real payment dates (e.g. "loan payment" or "student loan")
+  calendar_keyword: string | null;
 }
 
 export interface BalanceHistoryEntry {
@@ -87,32 +90,71 @@ export function calculatePayoffProjection(loan: Loan): PayoffProjection {
 
 export interface BalanceEstimate {
   estimatedBalance: number;
-  monthsSinceUpdate: number;
-  isStale: boolean; // true if more than 1 month has passed since the last real update
+  paymentsSinceUpdate: number;
+  isStale: boolean; // true if at least one calendar-confirmed payment has occurred since the last real update
+  usedCalendarData: boolean; // false if no calendar events matched - falls back to month-counting
+}
+
+interface CalendarEventLike {
+  title: string;
+  start: string; // YYYY-MM-DD or ISO
+  allDay: boolean;
 }
 
 /**
- * Projects the loan balance forward from balance_updated_at to today using
- * standard amortization (payment minus accrued interest each month,
- * compounding). This is an ESTIMATE shown alongside the real logged
- * balance, never replacing it - logging a real balance always resets the
- * baseline this projects from.
+ * Counts how many of this loan's payments have actually occurred (per the
+ * household's Google Calendar "Loan Payment $1600" / "Student Loan
+ * Payment- $175" events) since the last logged balance, then applies
+ * amortization once per real payment date rather than once per calendar
+ * month. Falls back to month-counting if no calendar events are available
+ * or the loan has no calendar_keyword set.
  */
-export function calculateEstimatedCurrentBalance(loan: Loan, today: Date = new Date()): BalanceEstimate {
-  const lastUpdate = new Date(loan.balance_updated_at + 'T00:00:00');
-  const monthsSinceUpdate = Math.max(
-    0,
-    (today.getFullYear() - lastUpdate.getFullYear()) * 12 + (today.getMonth() - lastUpdate.getMonth()) - (today.getDate() < lastUpdate.getDate() ? 1 : 0)
-  );
+export function calculateEstimatedCurrentBalance(
+  loan: Loan,
+  calendarEvents: CalendarEventLike[] = [],
+  today: Date = new Date()
+): BalanceEstimate {
+  const lastUpdateKey = loan.balance_updated_at;
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-  if (monthsSinceUpdate === 0) {
-    return { estimatedBalance: loan.current_balance, monthsSinceUpdate: 0, isStale: false };
+  let paymentDates: string[] = [];
+  let usedCalendarData = false;
+
+  if (loan.calendar_keyword) {
+    const keyword = loan.calendar_keyword.toLowerCase();
+    const matches = calendarEvents.filter((e) => {
+      const titleLower = e.title.toLowerCase();
+      const dateKey = e.start.slice(0, 10);
+      return titleLower.includes(keyword) && dateKey > lastUpdateKey && dateKey <= todayKey;
+    });
+    if (matches.length > 0 || calendarEvents.length > 0) {
+      // We have calendar data to work with (even if zero matches found in
+      // range, that's still a real answer, not a fallback situation).
+      usedCalendarData = true;
+      paymentDates = matches.map((e) => e.start.slice(0, 10)).sort();
+    }
+  }
+
+  if (!usedCalendarData) {
+    // Fallback: estimate one payment per calendar month since last update.
+    const lastUpdate = new Date(lastUpdateKey + 'T00:00:00');
+    const monthsSinceUpdate = Math.max(
+      0,
+      (today.getFullYear() - lastUpdate.getFullYear()) * 12 + (today.getMonth() - lastUpdate.getMonth()) - (today.getDate() < lastUpdate.getDate() ? 1 : 0)
+    );
+    paymentDates = Array(monthsSinceUpdate).fill(lastUpdateKey); // dates unused in fallback path, just count matters
+  }
+
+  const paymentsSinceUpdate = paymentDates.length;
+
+  if (paymentsSinceUpdate === 0) {
+    return { estimatedBalance: loan.current_balance, paymentsSinceUpdate: 0, isStale: false, usedCalendarData };
   }
 
   const monthlyRate = loan.interest_rate / 100 / 12;
   let balance = loan.current_balance;
 
-  for (let i = 0; i < monthsSinceUpdate; i++) {
+  for (let i = 0; i < paymentsSinceUpdate; i++) {
     const interest = balance * monthlyRate;
     const principalPortion = loan.monthly_payment - interest;
     balance = Math.max(0, balance - principalPortion);
@@ -120,8 +162,9 @@ export function calculateEstimatedCurrentBalance(loan: Loan, today: Date = new D
 
   return {
     estimatedBalance: Math.round(balance * 100) / 100,
-    monthsSinceUpdate,
-    isStale: monthsSinceUpdate >= 1,
+    paymentsSinceUpdate,
+    isStale: true,
+    usedCalendarData,
   };
 }
 

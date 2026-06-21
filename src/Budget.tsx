@@ -21,6 +21,7 @@ import {
   type CommissionMonth,
 } from './useBudgetData';
 import { useLoansData, calculatePayoffProjection, calculateEstimatedCurrentBalance, type Loan } from './useLoansData';
+import { supabase } from './lib/supabase';
 
 type ViewMode = 'period' | 'month';
 
@@ -1204,6 +1205,20 @@ function LoansPanel() {
   const { loading, loans, history, isAdmin, updateBalance, updateLoan } = useLoansData();
   const [editingBalanceId, setEditingBalanceId] = useState<string | null>(null);
   const [editingRateId, setEditingRateId] = useState<string | null>(null);
+  const [calendarEvents, setCalendarEvents] = useState<{ title: string; start: string; allDay: boolean }[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      if (!supabase) return;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData.session?.user?.id;
+      if (!userId) return;
+      const { data } = await supabase.from('google_calendar_cache').select('events').eq('user_id', userId).maybeSingle();
+      if (data && (data as any).events) {
+        setCalendarEvents((data as any).events as { title: string; start: string; allDay: boolean }[]);
+      }
+    })();
+  }, []);
 
   if (loading) {
     return <div className="panel"><h2>Loans</h2><p>Loading...</p></div>;
@@ -1220,8 +1235,8 @@ function LoansPanel() {
     <div className="panel">
       <div className="panel-head"><h2>Loans</h2></div>
       <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: -8, marginBottom: 14 }}>
-        Balances update when you log a real statement number. Between updates, the balance shown is an estimate
-        based on payment minus interest each month — log the real number whenever you get a new statement to keep it accurate.
+        Balances update when you log a real statement number. Between updates, the estimate counts actual payment
+        dates from your calendar and applies payment minus interest for each one — log the real number whenever you get a new statement to keep it accurate.
       </p>
 
       <div className="stats-row" style={{ marginBottom: 16 }}>
@@ -1236,7 +1251,7 @@ function LoansPanel() {
       </div>
 
       {loans.map((loan) => {
-        const estimate = calculateEstimatedCurrentBalance(loan);
+        const estimate = calculateEstimatedCurrentBalance(loan, calendarEvents);
         // Projection uses the estimated balance when stale, so payoff math
         // stays current between manual updates - but the logged balance
         // itself is never overwritten by this, only displayed alongside it.
@@ -1261,7 +1276,9 @@ function LoansPanel() {
                       </span>
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                      Last logged {fmtMoney(loan.current_balance)} on {fmtDate(loan.balance_updated_at)} ({estimate.monthsSinceUpdate} mo ago)
+                      Last logged {fmtMoney(loan.current_balance)} on {fmtDate(loan.balance_updated_at)}
+                      {' · '}{estimate.paymentsSinceUpdate} payment{estimate.paymentsSinceUpdate === 1 ? '' : 's'} since
+                      {!estimate.usedCalendarData && ' (estimated by month, no calendar match found)'}
                     </div>
                   </>
                 ) : (
