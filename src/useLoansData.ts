@@ -85,6 +85,46 @@ export function calculatePayoffProjection(loan: Loan): PayoffProjection {
   };
 }
 
+export interface BalanceEstimate {
+  estimatedBalance: number;
+  monthsSinceUpdate: number;
+  isStale: boolean; // true if more than 1 month has passed since the last real update
+}
+
+/**
+ * Projects the loan balance forward from balance_updated_at to today using
+ * standard amortization (payment minus accrued interest each month,
+ * compounding). This is an ESTIMATE shown alongside the real logged
+ * balance, never replacing it - logging a real balance always resets the
+ * baseline this projects from.
+ */
+export function calculateEstimatedCurrentBalance(loan: Loan, today: Date = new Date()): BalanceEstimate {
+  const lastUpdate = new Date(loan.balance_updated_at + 'T00:00:00');
+  const monthsSinceUpdate = Math.max(
+    0,
+    (today.getFullYear() - lastUpdate.getFullYear()) * 12 + (today.getMonth() - lastUpdate.getMonth()) - (today.getDate() < lastUpdate.getDate() ? 1 : 0)
+  );
+
+  if (monthsSinceUpdate === 0) {
+    return { estimatedBalance: loan.current_balance, monthsSinceUpdate: 0, isStale: false };
+  }
+
+  const monthlyRate = loan.interest_rate / 100 / 12;
+  let balance = loan.current_balance;
+
+  for (let i = 0; i < monthsSinceUpdate; i++) {
+    const interest = balance * monthlyRate;
+    const principalPortion = loan.monthly_payment - interest;
+    balance = Math.max(0, balance - principalPortion);
+  }
+
+  return {
+    estimatedBalance: Math.round(balance * 100) / 100,
+    monthsSinceUpdate,
+    isStale: monthsSinceUpdate >= 1,
+  };
+}
+
 export function useLoansData() {
   const [loading, setLoading] = useState(true);
   const [loans, setLoans] = useState<Loan[]>([]);

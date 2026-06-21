@@ -20,7 +20,7 @@ import {
   type RecurringRule,
   type CommissionMonth,
 } from './useBudgetData';
-import { useLoansData, calculatePayoffProjection, type Loan } from './useLoansData';
+import { useLoansData, calculatePayoffProjection, calculateEstimatedCurrentBalance, type Loan } from './useLoansData';
 
 type ViewMode = 'period' | 'month';
 
@@ -1219,6 +1219,10 @@ function LoansPanel() {
   return (
     <div className="panel">
       <div className="panel-head"><h2>Loans</h2></div>
+      <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: -8, marginBottom: 14 }}>
+        Balances update when you log a real statement number. Between updates, the balance shown is an estimate
+        based on payment minus interest each month — log the real number whenever you get a new statement to keep it accurate.
+      </p>
 
       <div className="stats-row" style={{ marginBottom: 16 }}>
         <div className="stat-card">
@@ -1232,7 +1236,12 @@ function LoansPanel() {
       </div>
 
       {loans.map((loan) => {
-        const projection = calculatePayoffProjection(loan);
+        const estimate = calculateEstimatedCurrentBalance(loan);
+        // Projection uses the estimated balance when stale, so payoff math
+        // stays current between manual updates - but the logged balance
+        // itself is never overwritten by this, only displayed alongside it.
+        const projectionLoan = estimate.isStale ? { ...loan, current_balance: estimate.estimatedBalance } : loan;
+        const projection = calculatePayoffProjection(projectionLoan);
         const loanHistory = history.filter((h) => h.loan_id === loan.id).slice(-6);
 
         return (
@@ -1243,8 +1252,24 @@ function LoansPanel() {
                 <div style={{ fontSize: 12, color: 'var(--muted)' }}>{LOAN_TYPE_LABELS[loan.loan_type]}{loan.lender ? ` · ${loan.lender}` : ''}</div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 18, fontWeight: 700 }}>{fmtMoney(loan.current_balance)}</div>
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>as of {fmtDate(loan.balance_updated_at)}</div>
+                {estimate.isStale ? (
+                  <>
+                    <div style={{ fontSize: 18, fontWeight: 700 }}>
+                      {fmtMoney(estimate.estimatedBalance)}
+                      <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--amber)', border: '1px solid var(--amber)', borderRadius: 4, padding: '1px 5px', marginLeft: 6, verticalAlign: 'middle' }}>
+                        ESTIMATE
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                      Last logged {fmtMoney(loan.current_balance)} on {fmtDate(loan.balance_updated_at)} ({estimate.monthsSinceUpdate} mo ago)
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 18, fontWeight: 700 }}>{fmtMoney(loan.current_balance)}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>as of {fmtDate(loan.balance_updated_at)}</div>
+                  </>
+                )}
               </div>
             </div>
 
