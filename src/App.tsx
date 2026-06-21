@@ -12,6 +12,7 @@ import GoogleCalendarToday from './GoogleCalendarToday';
 import Budget from './Budget';
 import Vehicles from './Vehicles';
 import Jules from './Jules';
+import { useDailyBriefing } from './useDailyBriefing';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
@@ -441,12 +442,6 @@ const COMPACT_ROW_CSS = `
 }
 `;
 
-const briefing = [
-  'Today focuses on approval, quick wins, and expiring inventory.',
-  'Adam should stay at 2-3 tasks max; no Sunday tasks should be generated.',
-  'Work mode keeps student records FERPA-safe: first name/nickname only, GROW notes only, clipboard copy only.',
-  'Budget page is scaffolded next; calendar cashflow is the source of truth.'
-];
 
 function getRoleFromEmail(email = ''): Role {
   const lowered = email.toLowerCase();
@@ -2039,8 +2034,20 @@ function computeTackleToday(choreTasks: ChoreTask[]): ChoreTask[] {
 }
 
 function Briefing({ compact = false }: { compact?: boolean }) {
-  const list = compact ? briefing.slice(0, 2) : briefing;
-  return <section className="panel"><h2>Daily Briefing</h2>{list.map((item) => <div className="brief-item" key={item}>{item}</div>)}</section>;
+  const { loading, lines } = useDailyBriefing();
+  const list = compact ? lines.slice(0, 3) : lines;
+  const severityColor: Record<string, string> = { urgent: 'var(--red)', warning: 'var(--amber)', info: 'var(--purple)' };
+  return (
+    <section className="panel">
+      <h2>Daily Briefing</h2>
+      {loading && <div className="brief-item">Loading...</div>}
+      {!loading && list.map((item) => (
+        <div className="brief-item" key={item.id} style={{ borderLeft: `3px solid ${severityColor[item.severity]}` }}>
+          {item.text}
+        </div>
+      ))}
+    </section>
+  );
 }
 
 function Inventory({ inventory, createItem, updateQuantity, editable }: { inventory: InventoryItem[]; createItem: (item: Omit<InventoryItem, 'id'>) => void; updateQuantity: (id: string, quantity: number) => void; editable: boolean }) {
