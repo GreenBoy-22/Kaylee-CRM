@@ -10,6 +10,7 @@ import {
   useVehiclesData,
   calculateUpcoming,
   calculateTireStatus,
+  calculateMileageUpcoming,
   type Vehicle,
   type ServiceType,
   type MaintenanceEntry,
@@ -43,7 +44,7 @@ function fmtDate(dateStr: string): string {
 
 export default function Vehicles() {
   const {
-    loading, vehicles, maintenanceLog, mileageLog, vehicleRules, parts, isAdmin,
+    loading, vehicles, maintenanceLog, mileageLog, vehicleRules, parts, serviceIntervals, knownIssues, isAdmin,
     updateVehicle, logMaintenance, deleteMaintenanceEntry, logMileage, estimateMilesPerYear,
   } = useVehiclesData();
 
@@ -77,6 +78,16 @@ export default function Vehicles() {
   const tireStatus = useMemo(
     () => (selectedVehicle ? calculateTireStatus(selectedVehicle) : null),
     [selectedVehicle]
+  );
+
+  const mileageUpcoming = useMemo(
+    () => (selectedVehicle ? calculateMileageUpcoming(serviceIntervals, maintenanceLog, selectedVehicle) : []),
+    [serviceIntervals, maintenanceLog, selectedVehicle]
+  );
+
+  const vehicleKnownIssues = useMemo(
+    () => knownIssues.filter((k) => k.vehicle_id === selectedVehicle?.id),
+    [knownIssues, selectedVehicle]
   );
 
   const [showLogTires, setShowLogTires] = useState(false);
@@ -245,6 +256,84 @@ export default function Vehicles() {
               </div>
             ))}
           </div>
+
+          {mileageUpcoming.length > 0 && (
+            <div className="panel">
+              <div className="panel-head">
+                <h2>Recommended maintenance</h2>
+                <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>By mileage \u2014 based on the manual + dealer sources</span>
+              </div>
+              {!selectedVehicle.current_mileage && (
+                <div className="brief-item" style={{ marginBottom: 10 }}>
+                  Log your current mileage above to see how close each item is to due.
+                </div>
+              )}
+              {mileageUpcoming.map((item) => (
+                <div
+                  key={item.intervalId}
+                  className="brief-item"
+                  style={{
+                    borderLeft: `3px solid ${
+                      item.status === 'overdue' ? 'var(--red)' : item.status === 'due-soon' ? 'var(--amber)' : item.status === 'good' ? 'var(--green)' : 'var(--border)'
+                    }`,
+                    marginBottom: 8,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                    <div>
+                      <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13.5 }}>
+                        {item.status === 'overdue' && <AlertCircle size={13} color="var(--red)" />}
+                        {item.name}
+                        {item.sourceConfidence !== 'factory' && (
+                          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--amber)', border: '1px solid var(--amber)', borderRadius: 4, padding: '1px 5px' }}>
+                            {item.sourceConfidence === 'disputed' ? 'DISPUTED' : 'COMMUNITY'}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                        Every {item.intervalMiles.toLocaleString()} mi
+                        {item.status !== 'unknown' && item.milesSinceService != null && (
+                          <> {'\u00b7'} {item.milesSinceService.toLocaleString()} mi since last done</>
+                        )}
+                        {item.status === 'unknown' && ' \u00b7 not logged yet'}
+                      </div>
+                      {item.sourceNote && (
+                        <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 3, fontStyle: 'italic' }}>{item.sourceNote}</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {vehicleKnownIssues.length > 0 && (
+            <div className="panel">
+              <div className="panel-head">
+                <h2>Known issues to watch for</h2>
+                <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Reported by other owners \u2014 not a schedule, just things to keep an eye on</span>
+              </div>
+              {vehicleKnownIssues.map((issue) => (
+                <div
+                  key={issue.id}
+                  className="brief-item"
+                  style={{
+                    borderLeft: `3px solid ${issue.severity === 'significant' ? 'var(--red)' : issue.severity === 'moderate' ? 'var(--amber)' : 'var(--border)'}`,
+                    marginBottom: 8,
+                  }}
+                >
+                  <div style={{ fontWeight: 600, fontSize: 13.5 }}>{issue.title}</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 3 }}>{issue.description}</div>
+                  {issue.symptoms && (
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}><strong>Watch for:</strong> {issue.symptoms}</div>
+                  )}
+                  {issue.source_note && (
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, fontStyle: 'italic' }}>Source: {issue.source_note}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
           {vehicleParts.length > 0 && (
             <div className="panel">

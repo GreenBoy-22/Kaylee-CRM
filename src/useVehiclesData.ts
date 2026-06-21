@@ -151,6 +151,107 @@ export function calculateUpcoming(
   return items.sort((a, b) => statusOrder[a.status] - statusOrder[b.status] || a.month - b.month);
 }
 
+export interface ServiceInterval {
+  id: string;
+  vehicle_id: string;
+  service_type: ServiceType | string;
+  name: string;
+  interval_miles: number;
+  source_confidence: 'factory' | 'disputed' | 'community';
+  source_note: string | null;
+  notes: string | null;
+  active: boolean;
+}
+
+export interface KnownIssue {
+  id: string;
+  vehicle_id: string;
+  title: string;
+  description: string;
+  symptoms: string | null;
+  source_note: string | null;
+  severity: 'minor' | 'moderate' | 'significant';
+}
+
+export interface MileageUpcomingItem {
+  intervalId: string;
+  name: string;
+  intervalMiles: number;
+  milesSinceService: number | null;
+  milesRemaining: number | null;
+  percentUsed: number | null;
+  status: 'overdue' | 'due-soon' | 'good' | 'unknown';
+  sourceConfidence: ServiceInterval['source_confidence'];
+  sourceNote: string | null;
+  lastServiceDate: string | null;
+  lastServiceMileage: number | null;
+}
+
+/**
+ * Mileage-based equivalent of calculateUpcoming - estimates wear against
+ * a service interval using current mileage and the most recent matching
+ * maintenance log entry. Falls back to 'unknown' status (not overdue) when
+ * there's no current mileage or service history, since we never assume a
+ * service was missed without evidence.
+ */
+export function calculateMileageUpcoming(
+  intervals: ServiceInterval[],
+  maintenanceLog: MaintenanceEntry[],
+  vehicle: Vehicle
+): MileageUpcomingItem[] {
+  const vehicleIntervals = intervals.filter((i) => i.vehicle_id === vehicle.id && i.active);
+  const currentMileage = vehicle.current_mileage;
+
+  return vehicleIntervals
+    .map((interval): MileageUpcomingItem => {
+      const relatedLogs = maintenanceLog
+        .filter((m) => m.vehicle_id === vehicle.id && m.service_type === interval.service_type)
+        .sort((a, b) => b.service_date.localeCompare(a.service_date));
+      const lastService = relatedLogs[0] ?? null;
+
+      if (!currentMileage || !lastService?.mileage_at_service) {
+        return {
+          intervalId: interval.id,
+          name: interval.name,
+          intervalMiles: interval.interval_miles,
+          milesSinceService: null,
+          milesRemaining: null,
+          percentUsed: null,
+          status: 'unknown',
+          sourceConfidence: interval.source_confidence,
+          sourceNote: interval.source_note,
+          lastServiceDate: lastService?.service_date ?? null,
+          lastServiceMileage: lastService?.mileage_at_service ?? null,
+        };
+      }
+
+      const milesSinceService = Math.max(0, currentMileage - lastService.mileage_at_service);
+      const milesRemaining = interval.interval_miles - milesSinceService;
+      const percentUsed = Math.min(100, Math.round((milesSinceService / interval.interval_miles) * 100));
+      let status: MileageUpcomingItem['status'] = 'good';
+      if (milesRemaining <= 0) status = 'overdue';
+      else if (percentUsed >= 85) status = 'due-soon';
+
+      return {
+        intervalId: interval.id,
+        name: interval.name,
+        intervalMiles: interval.interval_miles,
+        milesSinceService,
+        milesRemaining,
+        percentUsed,
+        status,
+        sourceConfidence: interval.source_confidence,
+        sourceNote: interval.source_note,
+        lastServiceDate: lastService.service_date,
+        lastServiceMileage: lastService.mileage_at_service,
+      };
+    })
+    .sort((a, b) => {
+      const order = { overdue: 0, 'due-soon': 1, unknown: 2, good: 3 };
+      return order[a.status] - order[b.status];
+    });
+}
+
 export interface TireStatus {
   hasData: boolean; // false if no replacement date/mileage logged yet
   milesSinceReplacement: number | null;
@@ -211,6 +312,8 @@ export function useVehiclesData() {
   const [mileageLog, setMileageLog] = useState<MileageEntry[]>([]);
   const [vehicleRules, setVehicleRules] = useState<VehicleBudgetRule[]>([]);
   const [parts, setParts] = useState<VehiclePart[]>([]);
+  const [serviceIntervals, setServiceIntervals] = useState<ServiceInterval[]>([]);
+  const [knownIssues, setKnownIssues] = useState<KnownIssue[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
 
   const loadAll = useCallback(async () => {
@@ -223,12 +326,14 @@ export function useVehiclesData() {
       const { data: sessionData } = await supabase.auth.getSession();
       const userId = sessionData.session?.user?.id;
 
-      const [vehiclesRes, maintenanceRes, mileageRes, rulesRes, partsRes, userRes] = await Promise.all([
+      const [vehiclesRes, maintenanceRes, mileageRes, rulesRes, partsRes, intervalsRes, issuesRes, userRes] = await Promise.all([
         supabase.from('vehicles').select('*').eq('active', true).order('name'),
         supabase.from('vehicle_maintenance_log').select('*').order('service_date', { ascending: false }),
         supabase.from('vehicle_mileage_log').select('*').order('reading_date', { ascending: false }),
         supabase.from('budget_recurring_rules').select('id, name, amount, recurrence, month_of_year, months, vehicle_id').eq('category', 'vehicle'),
         supabase.from('vehicle_parts').select('*').order('service_type'),
+        supabase.from('vehicle_service_intervals').select('*').eq('active', true),
+        supabase.from('vehicle_known_issues').select('*'),
         userId ? supabase.from('users').select('role').eq('id', userId).maybeSingle() : Promise.resolve({ data: null as any }),
       ]);
 
@@ -237,6 +342,8 @@ export function useVehiclesData() {
       if (mileageRes.data) setMileageLog(mileageRes.data as MileageEntry[]);
       if (rulesRes.data) setVehicleRules(rulesRes.data as VehicleBudgetRule[]);
       if (partsRes.data) setParts(partsRes.data as VehiclePart[]);
+      if (intervalsRes.data) setServiceIntervals(intervalsRes.data as ServiceInterval[]);
+      if (issuesRes.data) setKnownIssues(issuesRes.data as KnownIssue[]);
       setIsAdmin((userRes.data as any)?.role === 'admin');
     } catch (err) {
       console.error('Failed to load vehicles data:', err);
@@ -335,6 +442,8 @@ export function useVehiclesData() {
     mileageLog,
     vehicleRules,
     parts,
+    serviceIntervals,
+    knownIssues,
     isAdmin,
     refresh: loadAll,
     addVehicle,
