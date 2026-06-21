@@ -9,6 +9,7 @@ import { Wrench, Gauge, X, Trash2, AlertCircle, ExternalLink, Package } from 'lu
 import {
   useVehiclesData,
   calculateUpcoming,
+  calculateTireStatus,
   type Vehicle,
   type ServiceType,
   type MaintenanceEntry,
@@ -72,6 +73,13 @@ export default function Vehicles() {
     () => parts.filter((p) => p.vehicle_id === selectedVehicle?.id),
     [parts, selectedVehicle]
   );
+
+  const tireStatus = useMemo(
+    () => (selectedVehicle ? calculateTireStatus(selectedVehicle) : null),
+    [selectedVehicle]
+  );
+
+  const [showLogTires, setShowLogTires] = useState(false);
 
   const milesPerYear = selectedVehicle ? estimateMilesPerYear(selectedVehicle.id) : null;
 
@@ -151,6 +159,62 @@ export default function Vehicles() {
               <button className="btn primary" onClick={() => setShowLogService(true)}><Wrench size={15} /> Log service</button>
             </div>
           </div>
+
+          {tireStatus && (
+            <div className="panel">
+              <div className="panel-head">
+                <h2>Tires</h2>
+                {isAdmin && (
+                  <button className="btn ghost" onClick={() => setShowLogTires(true)}>
+                    {tireStatus.hasData ? 'Update' : 'Log replacement'}
+                  </button>
+                )}
+              </div>
+
+              {!tireStatus.hasData && (
+                <div className="brief-item">
+                  No tire replacement logged yet{tireStatus.ratedMiles ? ` (rated for ${tireStatus.ratedMiles.toLocaleString()} miles)` : ''}.
+                  {isAdmin ? ' Log it once you have the receipt details.' : ''}
+                </div>
+              )}
+
+              {tireStatus.hasData && (
+                <>
+                  <div
+                    className="brief-item"
+                    style={{
+                      borderLeft: `3px solid ${tireStatus.status === 'overdue' ? 'var(--red)' : tireStatus.status === 'due-soon' ? 'var(--amber)' : 'var(--green)'}`,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {tireStatus.status === 'overdue' && <AlertCircle size={14} color="var(--red)" />}
+                        {tireStatus.status === 'overdue' ? 'Overdue for new tires' : tireStatus.status === 'due-soon' ? 'Due soon' : 'Good condition'}
+                      </div>
+                      <div style={{ fontSize: 13, color: 'var(--muted)' }}>{tireStatus.percentUsed}% of rated life</div>
+                    </div>
+                    <div style={{ height: 8, background: '#f0f0f4', borderRadius: 4, overflow: 'hidden', marginBottom: 8 }}>
+                      <div
+                        style={{
+                          height: '100%',
+                          width: `${tireStatus.percentUsed}%`,
+                          background: tireStatus.status === 'overdue' ? 'var(--red)' : tireStatus.status === 'due-soon' ? 'var(--amber)' : 'var(--green)',
+                        }}
+                      />
+                    </div>
+                    <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+                      {tireStatus.milesSinceReplacement?.toLocaleString()} mi since replacement
+                      {tireStatus.replacedDate ? ` (${fmtDate(tireStatus.replacedDate)})` : ''}
+                      {' \u00b7 '}
+                      {tireStatus.milesRemaining && tireStatus.milesRemaining > 0
+                        ? `~${tireStatus.milesRemaining.toLocaleString()} mi remaining`
+                        : 'past rated life'}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           <div className="panel">
             <div className="panel-head"><h2>What's due</h2></div>
@@ -302,6 +366,17 @@ export default function Vehicles() {
           onSave={async (patch) => {
             await updateVehicle(selectedVehicle.id, patch);
             setShowEditVehicle(false);
+          }}
+        />
+      )}
+
+      {showLogTires && selectedVehicle && (
+        <LogTireReplacementModal
+          vehicle={selectedVehicle}
+          onClose={() => setShowLogTires(false)}
+          onSave={async (patch) => {
+            await updateVehicle(selectedVehicle.id, patch);
+            setShowLogTires(false);
           }}
         />
       )}
@@ -500,6 +575,68 @@ function EditVehicleModal({
         </div>
         <div className="form-actions">
           <button className="btn primary" onClick={handleSave} disabled={submitting}>
+            {submitting ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LogTireReplacementModal({
+  vehicle,
+  onClose,
+  onSave,
+}: {
+  vehicle: Vehicle;
+  onClose: () => void;
+  onSave: (patch: Partial<Vehicle>) => Promise<void>;
+}) {
+  const [ratedMiles, setRatedMiles] = useState(vehicle.tire_rated_miles ? String(vehicle.tire_rated_miles) : '');
+  const [replacedDate, setReplacedDate] = useState(vehicle.tire_replaced_date ?? toKey(new Date()));
+  const [replacedMileage, setReplacedMileage] = useState(vehicle.tire_replaced_mileage ? String(vehicle.tire_replaced_mileage) : '');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSave = async () => {
+    if (!replacedMileage) return;
+    setSubmitting(true);
+    try {
+      await onSave({
+        tire_rated_miles: ratedMiles ? parseInt(ratedMiles, 10) : vehicle.tire_rated_miles,
+        tire_replaced_date: replacedDate,
+        tire_replaced_mileage: parseInt(replacedMileage, 10),
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+      <div className="panel" style={{ width: 400, margin: 0 }}>
+        <div className="panel-head">
+          <h2>Tires \u2014 {vehicle.name}</h2>
+          <button className="qty-button" onClick={onClose}><X size={14} /></button>
+        </div>
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: -8 }}>
+          Enter what's on the receipt: the date and odometer reading when these tires went on.
+        </p>
+        <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Date replaced</label>
+            <input type="date" value={replacedDate} onChange={(e) => setReplacedDate(e.target.value)} style={{ width: '100%' }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Odometer reading at replacement</label>
+            <input placeholder="e.g. 62000" type="number" value={replacedMileage} onChange={(e) => setReplacedMileage(e.target.value)} style={{ width: '100%' }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Rated tire life (miles)</label>
+            <input placeholder="e.g. 50000" type="number" value={ratedMiles} onChange={(e) => setRatedMiles(e.target.value)} style={{ width: '100%' }} />
+          </div>
+        </div>
+        <div className="form-actions">
+          <button className="btn primary" onClick={handleSave} disabled={submitting || !replacedMileage}>
             {submitting ? 'Saving...' : 'Save'}
           </button>
         </div>

@@ -25,6 +25,9 @@ export interface Vehicle {
   current_mileage_updated_at: string | null;
   registration_renewal_month: number | null;
   insurance_renewal_month: number | null;
+  tire_rated_miles: number | null;
+  tire_replaced_date: string | null;
+  tire_replaced_mileage: number | null;
   notes: string | null;
   active: boolean;
 }
@@ -146,6 +149,59 @@ export function calculateUpcoming(
   // Overdue first, then due-soon, then scheduled; within each, by month.
   const statusOrder = { overdue: 0, 'due-soon': 1, scheduled: 2 };
   return items.sort((a, b) => statusOrder[a.status] - statusOrder[b.status] || a.month - b.month);
+}
+
+export interface TireStatus {
+  hasData: boolean; // false if no replacement date/mileage logged yet
+  milesSinceReplacement: number | null;
+  milesRemaining: number | null;
+  percentUsed: number | null; // 0-100
+  status: 'unknown' | 'good' | 'due-soon' | 'overdue';
+  replacedDate: string | null;
+  replacedMileage: number | null;
+  ratedMiles: number | null;
+}
+
+/**
+ * Estimates tire wear from current mileage vs. mileage at replacement,
+ * against the vehicle's rated tire life. Returns hasData: false (status:
+ * 'unknown') if replacement mileage/date hasn't been logged yet - this is
+ * intentional, not a bug, since we never fabricate that history.
+ */
+export function calculateTireStatus(vehicle: Vehicle): TireStatus {
+  const { tire_rated_miles, tire_replaced_mileage, tire_replaced_date, current_mileage } = vehicle;
+
+  if (!tire_rated_miles || tire_replaced_mileage == null || !current_mileage) {
+    return {
+      hasData: false,
+      milesSinceReplacement: null,
+      milesRemaining: null,
+      percentUsed: null,
+      status: 'unknown',
+      replacedDate: tire_replaced_date,
+      replacedMileage: tire_replaced_mileage,
+      ratedMiles: tire_rated_miles,
+    };
+  }
+
+  const milesSinceReplacement = Math.max(0, current_mileage - tire_replaced_mileage);
+  const milesRemaining = tire_rated_miles - milesSinceReplacement;
+  const percentUsed = Math.min(100, Math.round((milesSinceReplacement / tire_rated_miles) * 100));
+
+  let status: TireStatus['status'] = 'good';
+  if (milesRemaining <= 0) status = 'overdue';
+  else if (percentUsed >= 85) status = 'due-soon';
+
+  return {
+    hasData: true,
+    milesSinceReplacement,
+    milesRemaining,
+    percentUsed,
+    status,
+    replacedDate: tire_replaced_date,
+    replacedMileage: tire_replaced_mileage,
+    ratedMiles: tire_rated_miles,
+  };
 }
 
 export function useVehiclesData() {
