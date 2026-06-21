@@ -3,13 +3,19 @@ import type { Session } from '@supabase/supabase-js';
 import {
   Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Plus, Copy, RefreshCw, Settings, LogOut,
-  Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload
+  Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
+  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
+import GoogleCalendar from './GoogleCalendar';
+import GoogleCalendarToday from './GoogleCalendarToday';
+import Budget from './Budget';
+import Vehicles from './Vehicles';
+import Jules from './Jules';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'adam' | 'vehicles' | 'suggestions' | 'students' | 'settings';
+type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'suggestions' | 'students' | 'outreach' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -20,7 +26,16 @@ type Profile = {
   role: Role;
 };
 
+type HouseholdUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  todoist_id: string | null;
+};
+
 type AccessLevel = 'hidden' | 'view' | 'edit';
+
 
 type ModulePermission = {
   id?: string;
@@ -56,6 +71,7 @@ type Student = {
   constructive_note: string | null;
   last_contact_date: string | null;
   next_appointment_date: string | null;
+  next_call_at?: string | null;
   graduation_goal_date?: string | null;
   momentum?: string | null;
   last_academic_activity_date?: string | null;
@@ -71,6 +87,7 @@ type Student = {
   known_blockers?: string | null;
   preferred_contact_method?: string | null;
   student_timezone?: string | null;
+  email?: string | null;
   missed_call_count: number;
   archived: boolean;
 };
@@ -90,6 +107,19 @@ type Touchpoint = {
   copied: boolean;
 };
 
+type EmailDraft = {
+  id: string;
+  student_id: string | null;
+  cohort_label: string | null;
+  template_kind: string;
+  subject: string;
+  body: string;
+  status: 'pending' | 'sent' | 'archived' | string;
+  created_at: string;
+  sent_at: string | null;
+  edited: boolean;
+};
+
 type TaskItem = {
   id: string;
   title: string;
@@ -99,6 +129,67 @@ type TaskItem = {
   priority: Priority;
   status: string;
   source: string;
+};
+
+type ChoreTask = {
+  id: string;
+  name: string;
+  description: string | null;
+  day_of_week: string;
+  room: string | null;
+  recurrence: string | null;
+  effort_level: 'light' | 'medium' | 'heavy' | string;
+  estimated_minutes: number | null;
+  priority: number;
+  due_date: string | null;
+  todoist_task_id: string | null;
+  todoist_section: string | null;
+  source_project: string | null;
+  is_completed: boolean;
+  status: string;
+  deleted_in_todoist: boolean;
+  last_completed_at: string | null;
+  last_synced_at: string | null;
+  labels: string[] | null;
+  notes: string | null;
+  assigned_to: string | null;
+  todoist_assignee_id: string | null;
+  escalation_note: string | null;
+  escalated_at: string | null;
+  escalated_to: string | null;
+};
+
+type ChoreSuggestion = {
+  id: string;
+  title: string;
+  description: string;
+  why_it_matters: string;
+  category: 'homeowner' | 'vehicle' | 'tool' | 'dog' | 'garden' | 'preserving' | 'seasonal' | 'safety' | string;
+  effort_level: 'light' | 'medium' | 'heavy' | string;
+  estimated_minutes: number;
+  frequency: string;
+  month_triggers: number[] | null;
+  origin: 'seed' | 'manual' | 'ai' | string;
+  status: 'pending' | 'snoozed' | 'dismissed' | 'added' | 'done' | string;
+  snoozed_until: string | null;
+  last_done_at: string | null;
+  next_due_at: string | null;
+  added_to_todoist_at: string | null;
+  todoist_task_id: string | null;
+  required_tools: string[] | null;
+  tags: string[] | null;
+};
+
+type TodoistSyncState = {
+  id: number;
+  last_sync_at: string | null;
+  last_sync_status: 'never' | 'success' | 'error' | 'running' | string;
+  last_sync_error: string | null;
+  last_sync_added: number;
+  last_sync_updated: number;
+  last_sync_removed: number;
+  source_project_ids: string[];
+  source_project_names: string[];
 };
 
 type NavEntry = readonly [Page, string, React.ElementType];
@@ -114,8 +205,8 @@ const homeNav: readonly NavEntry[] = [
   ['budget', 'Budget', WalletCards],
   ['inventory', 'Inventory', Inbox],
   ['chores', 'Chores & Tasks', ListTodo],
-  ['adam', 'Adam’s Tasks', ShieldCheck],
   ['vehicles', 'Vehicles', Car],
+  ['jules', 'Jules', Heart],
   ['suggestions', 'Home Suggestions', Home]
 ];
 
@@ -124,7 +215,8 @@ const workNav: readonly NavEntry[] = [
   ['today', 'Today’s Tasks', ClipboardCheck],
   ['briefing', 'Daily Briefing', Sparkles],
   ['calendar', 'Calendar', CalendarDays],
-  ['students', 'Students', Users]
+  ['students', 'Students', Users],
+  ['outreach', 'Outreach Drafts', Mail]
 ];
 
 const moduleMeta: { page: Page; module_name: string; label: string; default_access: AccessLevel }[] = [
@@ -134,11 +226,12 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'calendar', module_name: 'calendar', label: 'Calendar', default_access: 'edit' },
   { page: 'inventory', module_name: 'inventory', label: 'Inventory', default_access: 'edit' },
   { page: 'chores', module_name: 'chores', label: 'Chores & Tasks', default_access: 'edit' },
-  { page: 'adam', module_name: 'adam_tasks', label: 'Adam’s Tasks', default_access: 'edit' },
   { page: 'vehicles', module_name: 'vehicles', label: 'Vehicles', default_access: 'view' },
+  { page: 'jules', module_name: 'jules', label: 'Jules', default_access: 'edit' },
   { page: 'suggestions', module_name: 'home_suggestions', label: 'Home Suggestions', default_access: 'edit' },
   { page: 'budget', module_name: 'budget', label: 'Budget', default_access: 'view' },
-  { page: 'students', module_name: 'students', label: 'Students', default_access: 'hidden' }
+  { page: 'students', module_name: 'students', label: 'Students', default_access: 'hidden' },
+  { page: 'outreach', module_name: 'outreach', label: 'Outreach Drafts', default_access: 'hidden' }
 ];
 
 const pageToModule = Object.fromEntries(moduleMeta.map((item) => [item.page, item.module_name])) as Record<string, string>;
@@ -168,27 +261,185 @@ const seedTasks: TaskItem[] = [
   { id: 't3', title: "Approve Adam's Friday task plan", owner: 'Kaylee', mode: 'home', minutes: 5, priority: 'urgent', status: 'pending_approval', source: 'Adam' }
 ];
 
-const adamPlan = [
-  { day: 'Mon', tasks: ['Take trash out', 'Clear nightstand'], rationale: 'Quick wins first; no tedious stacking.' },
-  { day: 'Tue', tasks: ['Unload dishwasher', 'Water porch plants'], rationale: 'Two light tasks only.' },
-  { day: 'Wed', tasks: ['Vacuum living room'], rationale: 'Room-level subtask, not whole-house vacuuming.' },
-  { day: 'Thu', tasks: ['Put laundry in hamper', 'Wipe bathroom counter'], rationale: 'Short, contained, visible finish.' },
-  { day: 'Fri', tasks: ['Reset car trash'], rationale: 'One tiny task before weekend.' },
-  { day: 'Sat', tasks: ['Yard work block'], rationale: 'Saturday heavy day; only task.' },
-  { day: 'Sun', tasks: ['Rest day'], rationale: 'Sunday is always rest.' }
-];
 
-const vehicles = [
-  { name: '2016 Toyota Corolla', miles: 134000, type: 'Gas', urgent: ['Spark plugs overdue', 'Transmission fluid unknown'], ok: ['Brakes completed 2025', 'Tire rotation at 133,900 mi'] },
-  { name: '2013 Nissan Leaf', miles: 82500, type: 'EV', urgent: ['12V auxiliary battery likely due', 'HV battery health check'], ok: ['Registration tracked'] }
-];
+const COMPACT_ROW_CSS = `
+.ct-panel { padding-bottom: 6px; }
+.ct-list { display: flex; flex-direction: column; }
 
-const homeSuggestions = [
-  { title: 'Replace HVAC filter', urgency: 'urgent', reason: 'Georgia pollen + renter-safe maintenance.', effort: '10 min' },
-  { title: 'Check under sinks for leaks', urgency: 'soon', reason: 'Tenant-only prevention before humidity damage.', effort: '15 min' },
-  { title: 'Pest entry point walkthrough', urgency: 'seasonal', reason: 'Canton summer pest pressure.', effort: '20 min' },
-  { title: 'Clean dryer lint path', urgency: 'routine', reason: 'Low-cost fire prevention.', effort: '15 min' }
-];
+.ct-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border, rgba(0,0,0,0.07));
+}
+.ct-row:last-child { border-bottom: none; }
+
+.ct-checkbox {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 1.5px solid var(--muted, #9aa0a6);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  color: transparent;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.ct-checkbox:disabled { cursor: default; }
+.ct-checkbox:hover:not(:disabled) { border-color: var(--accent, #4F46E5); }
+.ct-checkbox.checked { background: var(--accent, #4F46E5); border-color: var(--accent, #4F46E5); color: #fff; }
+.ct-checkbox.dot-urgent { border-color: #e5484d; }
+.ct-checkbox.dot-warning { border-color: #f5a524; }
+.ct-checkbox.dot-normal { border-color: var(--accent, #4F46E5); }
+.ct-checkbox.dot-good { border-color: #9aa0a6; }
+
+.ct-body { flex: 1; min-width: 0; }
+
+.ct-title {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text, #1a1a1a);
+  word-break: break-word;
+}
+.ct-title-done { text-decoration: line-through; color: var(--muted, #9aa0a6); }
+
+.ct-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 3px;
+  row-gap: 2px;
+}
+
+.ct-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--muted, #9aa0a6);
+  white-space: nowrap;
+}
+.ct-meta-item svg { flex-shrink: 0; }
+.ct-meta-overdue { color: #e5484d; font-weight: 600; }
+.ct-meta-due { color: #2f9e44; }
+.ct-meta-muted { color: var(--muted, #9aa0a6); }
+.ct-meta-tag { color: var(--muted, #9aa0a6); }
+
+.ct-reason {
+  margin-top: 4px;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--accent, #4F46E5);
+  opacity: 0.85;
+}
+
+.ct-day-group { border-bottom: 1px solid var(--border, rgba(0,0,0,0.07)); padding: 4px 0; }
+.ct-day-group:last-child { border-bottom: none; }
+.ct-day-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 4px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+}
+.ct-day-summary::-webkit-details-marker { display: none; }
+.ct-day-summary strong { font-size: 13px; letter-spacing: 0.01em; }
+.ct-day-count {
+  font-size: 12px;
+  color: var(--muted, #9aa0a6);
+  background: var(--surface-2, rgba(0,0,0,0.04));
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.ct-day-today > summary strong {
+  color: var(--accent, #4F46E5);
+}
+.ct-day-today {
+  border-left: 2px solid var(--accent, #4F46E5);
+  padding-left: 6px;
+}
+.ct-day-overdue > summary strong {
+  color: #e5484d;
+}
+.ct-day-overdue {
+  border-left: 2px solid #e5484d;
+  padding-left: 6px;
+}
+.last-sync-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted, #9aa0a6);
+  margin: 4px 0 14px;
+}
+.last-sync-status {
+  text-transform: capitalize;
+}
+.last-sync-status.error { color: #e5484d; }
+.last-sync-status.running { color: #f5a524; }
+.ct-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 6px;
+  font-size: 13px;
+  color: var(--muted, #9aa0a6);
+}
+
+.view-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--surface-2, rgba(0,0,0,0.04));
+  border-radius: 10px;
+  padding: 4px;
+  margin: 4px 0 16px;
+  width: fit-content;
+}
+.view-toggle button {
+  border: none;
+  background: transparent;
+  padding: 7px 14px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted, #9aa0a6);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+.view-toggle button:hover {
+  color: var(--text, #1a1a1a);
+}
+.view-toggle button.active {
+  background: var(--surface, #fff);
+  color: var(--text, #1a1a1a);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+}
+
+.ct-row-with-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ct-row-with-action .ct-row {
+  flex: 1;
+}
+.ct-take-button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+`;
 
 const briefing = [
   'Today focuses on approval, quick wins, and expiring inventory.',
@@ -221,6 +472,12 @@ function App() {
   const [students, setStudents] = useState<Student[]>(seedStudents);
   const [touchpoints, setTouchpoints] = useState<Touchpoint[]>(seedTouchpoints);
   const [tasks, setTasks] = useState<TaskItem[]>(seedTasks);
+  const [drafts, setDrafts] = useState<EmailDraft[]>([]);
+  const [choreTasks, setChoreTasks] = useState<ChoreTask[]>([]);
+  const [choreSuggestions, setChoreSuggestions] = useState<ChoreSuggestion[]>([]);
+  const [syncState, setSyncState] = useState<TodoistSyncState | null>(null);
+  const [householdUsers, setHouseholdUsers] = useState<HouseholdUser[]>([]);
+  const [syncing, setSyncing] = useState(false);
   const [permissions, setPermissions] = useState<ModulePermission[]>(defaultAdamPermissions);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('Ready.');
@@ -289,18 +546,31 @@ function App() {
     if (!supabase) return;
     setLoading(true);
     try {
-      const [invResult, studentResult, touchpointResult, taskResult, permissionResult] = await Promise.all([
+      const [
+        invResult, studentResult, touchpointResult, taskResult,
+        permissionResult, draftResult, choreResult, suggestionResult, syncStateResult, userResult
+      ] = await Promise.all([
         supabase.from('inventory_items').select('*').order('created_at', { ascending: false }),
         supabase.from('students').select('*').order('created_at', { ascending: false }),
         supabase.from('student_touchpoints').select('*').order('touchpoint_date', { ascending: false }),
         supabase.from('tasks').select('*').order('created_at', { ascending: false }),
-        supabase.from('module_permissions').select('*').eq('role', 'limited').order('module_name', { ascending: true })
+        supabase.from('module_permissions').select('*').eq('role', 'limited').order('module_name', { ascending: true }),
+        supabase.from('email_drafts').select('*').order('created_at', { ascending: false }),
+        supabase.from('chore_tasks').select('*').eq('deleted_in_todoist', false).order('priority', { ascending: false }),
+        supabase.from('chore_suggestions').select('*').order('category', { ascending: true }),
+        supabase.from('todoist_sync_state').select('*').eq('id', 1).maybeSingle(),
+        supabase.from('users').select('*')
       ]);
 
       if (!invResult.error && invResult.data) setInventory(invResult.data as InventoryItem[]);
       if (!studentResult.error && studentResult.data) setStudents(normalizeStudents(studentResult.data as Student[]));
       if (!touchpointResult.error && touchpointResult.data) setTouchpoints(touchpointResult.data as Touchpoint[]);
       if (!taskResult.error && taskResult.data) setTasks(taskResult.data as TaskItem[]);
+      if (!draftResult.error && draftResult.data) setDrafts(draftResult.data as EmailDraft[]);
+      if (!choreResult.error && choreResult.data) setChoreTasks(choreResult.data as ChoreTask[]);
+      if (!suggestionResult.error && suggestionResult.data) setChoreSuggestions(suggestionResult.data as ChoreSuggestion[]);
+      if (!syncStateResult.error && syncStateResult.data) setSyncState(syncStateResult.data as TodoistSyncState);
+      if (!userResult.error && userResult.data) setHouseholdUsers(userResult.data as HouseholdUser[]);
       if (!permissionResult.error && permissionResult.data && permissionResult.data.length) {
         setPermissions(mergePermissions(permissionResult.data as ModulePermission[]));
       }
@@ -327,6 +597,7 @@ function App() {
       constructive_note: row.constructive_note || '',
       last_contact_date: row.last_contact_date || null,
       next_appointment_date: row.next_appointment_date || null,
+      next_call_at: row.next_call_at || null,
       graduation_goal_date: row.graduation_goal_date || null,
       momentum: row.momentum || '',
       last_academic_activity_date: row.last_academic_activity_date || null,
@@ -342,38 +613,93 @@ function App() {
       known_blockers: row.known_blockers || '',
       preferred_contact_method: row.preferred_contact_method || '',
       student_timezone: row.student_timezone || '',
+      email: row.email || '',
       missed_call_count: Number(row.missed_call_count || 0),
       archived: Boolean(row.archived)
     }));
   }
 
-  function generateStudentSupport(note: string, course?: string | null, momentum?: string | null) {
+  function generateStudentSupport(
+    note: string,
+    course?: string | null,
+    momentum?: string | null,
+    student?: Student | null,
+    pastTouchpoints?: Touchpoint[]
+  ) {
     const lower = note.toLowerCase();
-    const courseText = course ? ` in ${course}` : '';
-    const next_call_prep = [
-      `Check progress${courseText} and ask what changed since the last touchpoint.`,
-      momentum ? `Confirm whether momentum is still ${momentum.toLowerCase()} and what support would make next week easier.` : 'Ask the student to name one realistic study block before the next call.',
-      lower.includes('assessment') || lower.includes('oa') || lower.includes('pa') ? 'Ask what is left before the assessment and whether pacing or confidence is the blocker.' : 'Ask what the next measurable course action is.'
-    ].join(' ');
-    const constructive_note = lower.includes('behind') || lower.includes('miss') || lower.includes('ghost')
-      ? 'Lead with empathy, then ask for a specific commitment and confirm the next appointment before ending the call.'
-      : 'Ask one clarifying question before offering resources; keep the next step small and specific.';
+    const courseText = course ? course : (student?.course || 'their current course');
+    const m = (momentum || student?.momentum || '').toLowerCase();
+    const missedCount = Number(student?.missed_call_count || 0);
+    const courseEnd = student?.course_end_date || '';
+    const gradGoal = student?.graduation_goal_date || '';
+    const lastActivity = student?.last_academic_activity_date || '';
+
+    // Pull recent touchpoint history (most recent 3, excluding this note)
+    const recent = (pastTouchpoints || []).slice(0, 3);
+    const recentSummary = recent.map((t) => `${t.touchpoint_date} (${t.touchpoint_type}): ${(t.note || '').slice(0, 140)}`).filter(Boolean);
+
+    // Theme detection from current + past notes
+    const allText = [note, ...recent.map((t) => t.note || '')].join(' ').toLowerCase();
+    const hasAssessment = /\b(assessment|oa\b|pa\b|exam|test|proctored)/.test(allText);
+    const hasZyBooks = /\bzy ?books?|labs?\b/.test(allText);
+    const hasBlocked = /\b(block|stuck|behind|struggl|overwhelm|hard time|confus|fail)/.test(allText);
+    const hasLife = /\b(work|job|family|kid|sick|health|move|moving|loss|funeral|childcare)/.test(allText);
+    const hasGhost = missedCount >= 2 || /\b(no answer|voicemail|no reply|no response|haven.?t heard)/.test(allText);
+    const isLowMomentum = m.includes('low');
+    const isHighMomentum = m.includes('high') && !m.includes('low');
+
+    // ===== Talking points: things to definitely curate / dig into =====
+    const talkingPoints: string[] = [];
+    talkingPoints.push(`Open with a specific reference to last contact${recent[0] ? ` (${recent[0].touchpoint_date}, ${recent[0].touchpoint_type})` : ''} so the student knows you remember.`);
+    if (hasAssessment) talkingPoints.push(`Curate from past notes any assessment chatter — confirm which OA/PA is up next in ${courseText} and whether they have a scheduled date.`);
+    if (hasZyBooks) talkingPoints.push(`Follow up on ZyBooks participation and labs — ask which module they are on and what percent complete.`);
+    if (hasBlocked) talkingPoints.push(`Past notes show a blocker theme — gently surface it: "Last time you mentioned ___; how is that piece going now?"`);
+    if (hasLife) talkingPoints.push(`Past notes flagged a life circumstance — acknowledge it briefly without prying, then ask how it is affecting study time this week.`);
+    if (courseEnd) talkingPoints.push(`Course end date is ${courseEnd} — calculate weeks remaining out loud and confirm pacing is realistic.`);
+    if (gradGoal) talkingPoints.push(`Graduation goal is ${gradGoal} — tie this week's action back to that target.`);
+    if (lastActivity) talkingPoints.push(`Most recent academic activity was ${lastActivity} — ask what they have done in the course since then.`);
+    if (isLowMomentum) talkingPoints.push(`Momentum is low — ask what one small win this week would look like. Avoid overwhelming with multiple goals.`);
+    if (isHighMomentum) talkingPoints.push(`Momentum is high — celebrate it explicitly and ask what is fueling the rhythm so you can help protect it.`);
+    if (hasGhost) talkingPoints.push(`Multiple missed touches — lead with "I have been trying to reach you because I care about your progress, not to chase you." Then confirm best contact method and time.`);
+    if (recentSummary.length) talkingPoints.push(`Recent notes for cross-reference: ${recentSummary.join(' | ')}`);
+
+    const next_call_prep = '• ' + talkingPoints.join('\n• ');
+
+    // ===== Coaching questions for Kaylee (specific, GROW-aligned) =====
+    const coachQuestions: string[] = [];
+    coachQuestions.push(`Goal — "What do you most want to walk away from today's call with?"`);
+    coachQuestions.push(`Reality — "On a scale of 1-10, where are you with ${courseText} this week, and what makes it that number?"`);
+    if (hasBlocked || isLowMomentum) {
+      coachQuestions.push(`Reality — "What is the one thing that has been hardest to make progress on lately?"`);
+      coachQuestions.push(`Options — "What have you already tried, and what is one thing you haven't tried yet?"`);
+    } else {
+      coachQuestions.push(`Options — "What are two or three different ways you could get to your next milestone?"`);
+    }
+    if (hasAssessment) coachQuestions.push(`Options — "If we mapped your study time backward from your assessment date, what does each week need to look like?"`);
+    if (hasLife) coachQuestions.push(`Reality — "How is your study time fitting around what is going on outside of school right now?"`);
+    coachQuestions.push(`Will — "By our next call, what is the ONE specific thing you will have completed, and what day?"`);
+    coachQuestions.push(`Will — "What could get in the way of that, and what is your plan if it does?"`);
+    coachQuestions.push(`Self-check for Kaylee: did I ask before I offered? Did I end with a commitment in the student's own words?`);
+
+    const constructive_note = '• ' + coachQuestions.join('\n• ');
+
     const follow_up_email = `Hi {first_name},
 
-Thank you for connecting with me. Based on our last touchpoint, the next best step is to focus on one specific course action before our next check-in. Please reply with what you plan to complete next and what support you need from me.
+Thank you for connecting with me${recent[0] ? ` on ${recent[0].touchpoint_date}` : ''}. Based on our conversation, the next best step is to focus on one specific course action in ${courseText} before our next check-in${courseEnd ? ` (course end ${courseEnd})` : ''}. Please reply with what you plan to complete next and what support you need from me.
 
 Best,
 Kaylee`;
-    const follow_up_text = `Hi {first_name}, this is Kaylee checking in. Before our next call, what is the one course task you plan to complete next?`;
+    const follow_up_text = `Hi {first_name}, this is Kaylee checking in. Before our next call, what is the one ${courseText} task you plan to complete next?`;
+
     return { next_call_prep, constructive_note, follow_up_email, follow_up_text };
   }
 
   function ferpaWarnings(text: string) {
     const warnings: string[] = [];
-    if (/\d{6,}/.test(text)) warnings.push('Possible student ID or long identifying number');
+    if (/\d{6,}/.test(text)) warnings.push('Possible student ID or long identifying number');
     if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text)) warnings.push('Possible email address');
-    if (/\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/.test(text)) warnings.push('Possible phone number');
-    if (/\d{3}-\d{2}-\d{4}/.test(text)) warnings.push('Possible SSN-like number');
+    if (/\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/.test(text)) warnings.push('Possible phone number');
+    if (/\d{3}-\d{2}-\d{4}/.test(text)) warnings.push('Possible SSN-like number');
     return warnings;
   }
 
@@ -446,33 +772,63 @@ Kaylee`;
 
 
   function parseCsv(text: string) {
+    // Robust RFC 4180 CSV parser. Handles quoted fields, escaped quotes (""),
+    // and newlines (LF, CR, CRLF) both as row terminators and inside quoted fields.
     const rows: string[][] = [];
     let row: string[] = [];
     let value = '';
     let inQuotes = false;
-    for (let i = 0; i < text.length; i += 1) {
+    let i = 0;
+    while (i < text.length) {
       const char = text[i];
-      const next = text[i + 1];
-      if (char === '"' && inQuotes && next === '"') {
-        value += '"';
+      if (inQuotes) {
+        if (char === '"') {
+          if (text[i + 1] === '"') {
+            // Escaped quote inside quoted field
+            value += '"';
+            i += 2;
+            continue;
+          }
+          // End of quoted field
+          inQuotes = false;
+          i += 1;
+          continue;
+        }
+        // Any other char (including newlines and commas) is literal inside quotes
+        value += char;
         i += 1;
-      } else if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
+        continue;
+      }
+      // Not in quotes
+      if (char === '"') {
+        inQuotes = true;
+        i += 1;
+        continue;
+      }
+      if (char === ',') {
         row.push(value.trim());
         value = '';
-      } else if ((char === '\n' || char === '\r') && !inQuotes) {
-        if (char === '\r' && next === '\n') i += 1;
+        i += 1;
+        continue;
+      }
+      if (char === '\r' || char === '\n') {
+        // Handle CRLF as one terminator
+        if (char === '\r' && text[i + 1] === '\n') i += 1;
         row.push(value.trim());
         if (row.some((cell) => cell !== '')) rows.push(row);
         row = [];
         value = '';
-      } else {
-        value += char;
+        i += 1;
+        continue;
       }
+      value += char;
+      i += 1;
     }
-    row.push(value.trim());
-    if (row.some((cell) => cell !== '')) rows.push(row);
+    // Flush trailing value/row at EOF
+    if (value !== '' || row.length > 0) {
+      row.push(value.trim());
+      if (row.some((cell) => cell !== '')) rows.push(row);
+    }
     return rows;
   }
 
@@ -480,6 +836,16 @@ Kaylee`;
     if (!value) return null;
     const trimmed = value.trim();
     if (!trimmed) return null;
+    // ISO format YYYY-MM-DD passes through
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    // US format M/D/YYYY or MM/DD/YYYY -> normalize to YYYY-MM-DD
+    const us = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (us) {
+      const month = us[1].padStart(2, '0');
+      const day = us[2].padStart(2, '0');
+      return `${us[3]}-${month}-${day}`;
+    }
+    // Fallback: try Date parsing
     const date = new Date(trimmed);
     if (Number.isNaN(date.getTime())) return null;
     return date.toISOString().slice(0, 10);
@@ -581,21 +947,80 @@ Kaylee`;
         };
       });
 
-    if (!cleaned.length) return setMessage('No importable students found. Make sure the CSV includes DisplayName.');
+    if (!cleaned.length) return setMessage('No importable students found. Make sure the CSV includes Name and StudentID.');
 
-    const existingKeys = new Set(students.map((student) => `${student.display_name.toLowerCase()}|${String(student.course || '').toLowerCase()}`));
-    const newStudents = cleaned.filter((student) => !existingKeys.has(`${student.display_name.toLowerCase()}|${String(student.course || '').toLowerCase()}`));
-    if (!newStudents.length) return setMessage('CSV processed, but all students already appear to exist.');
-
-    if (!supabase) {
-      setStudents((current) => [...newStudents.map((student) => ({ ...student, id: crypto.randomUUID() } as Student)), ...current]);
-      return setMessage(`Imported ${newStudents.length} students locally.`);
+    // Update-only mode: match by student_id. Skip any CSV row whose ID isn't already in the DB.
+    // Only update fields that come from Salesforce; preserve everything Kaylee has edited in the UI.
+    const existingById = new Map<string, Student>();
+    for (const s of students) {
+      const sid = String(s.student_id || '').trim();
+      if (sid) existingById.set(sid, s);
     }
 
-    const { data, error } = await supabase.from('students').insert(newStudents).select();
-    if (error) return setMessage(`CSV import failed: ${error.message}`);
-    setStudents((current) => normalizeStudents([...(data as Student[]), ...current]));
-    setMessage(`Imported ${data?.length || newStudents.length} FERPA-safe students.`);
+    type UpdateRow = {
+      id: string;
+      patch: Partial<Student>;
+    };
+    const updates: UpdateRow[] = [];
+    let skippedNoId = 0;
+    let skippedNotFound = 0;
+    for (const row of cleaned) {
+      const sid = String(row.student_id || '').trim();
+      if (!sid) { skippedNoId++; continue; }
+      const match = existingById.get(sid);
+      if (!match) { skippedNotFound++; continue; }
+      // Salesforce-sourced fields ONLY. Manual fields (admin_notes, goal, status,
+      // missed_call_count, next_appointment_date, last_contact_date, next_call_prep,
+      // next_conversation_focus, constructive_note, grow_note, display_name) are preserved.
+      const patch: Partial<Student> = {
+        course: row.course || match.course,
+        risk: riskFromMomentum(row.momentum) || match.risk,
+        graduation_goal_date: row.graduation_goal_date ?? match.graduation_goal_date,
+        momentum: row.momentum || match.momentum,
+        last_academic_activity_date: row.last_academic_activity_date ?? match.last_academic_activity_date,
+        course_end_date: row.course_end_date ?? match.course_end_date,
+        term_end_date: row.term_end_date ?? match.term_end_date,
+        enrolled_cu: row.enrolled_cu ?? match.enrolled_cu,
+        term_remaining_cu: row.term_remaining_cu ?? match.term_remaining_cu,
+        term_completed_cu: row.term_completed_cu ?? match.term_completed_cu,
+        contact_term: row.contact_term ?? match.contact_term,
+        weeks_in_course: row.weeks_in_course ?? match.weeks_in_course,
+        student_timezone: row.student_timezone || match.student_timezone
+      };
+      updates.push({ id: match.id, patch });
+    }
+
+    if (!updates.length) {
+      const parts = [];
+      if (skippedNotFound) parts.push(`${skippedNotFound} student${skippedNotFound === 1 ? '' : 's'} not in system (skipped)`);
+      if (skippedNoId) parts.push(`${skippedNoId} row${skippedNoId === 1 ? '' : 's'} missing Student ID (skipped)`);
+      return setMessage(`No updates applied. ${parts.join(', ') || 'CSV had no matching rows.'}`);
+    }
+
+    if (!supabase) {
+      setStudents((current) => current.map((s) => {
+        const u = updates.find((u) => u.id === s.id);
+        return u ? { ...s, ...u.patch } : s;
+      }));
+      return setMessage(`Updated ${updates.length} students locally${skippedNotFound ? ` · ${skippedNotFound} not in system, skipped` : ''}.`);
+    }
+
+    // Apply updates in parallel (small batch, fine for ~150 students).
+    const results = await Promise.all(updates.map(async (u) => {
+      const { data, error } = await supabase.from('students').update(u.patch).eq('id', u.id).select().single();
+      return { id: u.id, data: data as Student | null, error };
+    }));
+    const errors = results.filter((r) => r.error);
+    if (errors.length === results.length) {
+      return setMessage(`CSV update failed: ${errors[0].error?.message || 'unknown error'}`);
+    }
+    setStudents((current) => current.map((s) => {
+      const r = results.find((r) => r.id === s.id && r.data);
+      return r && r.data ? r.data : s;
+    }));
+    const skipMsg = skippedNotFound ? ` · ${skippedNotFound} not in system, skipped` : '';
+    const errMsg = errors.length ? ` · ${errors.length} failed` : '';
+    setMessage(`Updated ${results.length - errors.length} students from CSV${skipMsg}${errMsg}.`);
   }
 
   async function createStudent(student: Omit<Student, 'id' | 'copied' | 'archived'>) {
@@ -625,12 +1050,13 @@ Kaylee`;
 
   async function createTouchpoint(input: Omit<Touchpoint, 'id' | 'next_call_prep' | 'constructive_note' | 'follow_up_email' | 'follow_up_text' | 'copied'>) {
     if (!isAdmin()) return setMessage('Touchpoint logs are admin-only.');
-    const generated = generateStudentSupport(input.note, input.course, input.momentum);
+    const student = students.find((s) => s.id === input.student_id);
+    const pastForStudent = touchpoints.filter((t) => t.student_id === input.student_id);
+    const generated = generateStudentSupport(input.note, input.course, input.momentum, student, pastForStudent);
     const touchpoint: Touchpoint = { ...input, ...generated, copied: false, id: crypto.randomUUID() };
     setTouchpoints((current) => [touchpoint, ...current]);
 
     const isMissed = input.touchpoint_type.toLowerCase().includes('missed') || input.touchpoint_type.toLowerCase().includes('no-show');
-    const student = students.find((s) => s.id === input.student_id);
     const missed_call_count = isMissed ? Number(student?.missed_call_count || 0) + 1 : Number(student?.missed_call_count || 0);
     const status = missed_call_count >= 3 ? 'Ghost' : student?.status || 'Active';
     await updateStudent(input.student_id, {
@@ -647,6 +1073,152 @@ Kaylee`;
     if (error) return setMessage(`Touchpoint save failed: ${error.message}`);
     setTouchpoints((current) => [data as Touchpoint, ...current.filter((t) => t.id !== touchpoint.id)]);
     setMessage('Touchpoint saved and next-call prep generated.');
+  }
+
+  function buildDraftForStudent(student: Student, kind: string, cohortLabel: string): { subject: string; body: string } {
+    const name = student.display_name || 'there';
+    const course = student.course || 'your current course';
+    const courseEnd = student.course_end_date ? ` (course end ${student.course_end_date})` : '';
+    const lastContact = student.last_contact_date || '—';
+    const missed = Number(student.missed_call_count || 0);
+
+    const sigBlock = '\n\nBest,\nKaylee Green\nProgram Mentor · BS Cybersecurity & Information Assurance\nWestern Governors University';
+
+    if (kind === 'ghost') {
+      return {
+        subject: `Checking in — let's get you back on track in ${course}`,
+        body: `Hi ${name},\n\nI haven't been able to reach you on our last few attempts and I want you to know I'm still here for you. You're not in trouble — I just want to make sure nothing is getting in the way that I could help with.\n\nCan you reply with a day and time this week that works for a quick 15-minute call? Even a short conversation will help us figure out the next best step in ${course}${courseEnd}.\n\nIf life is happening right now and you need a different kind of support, just say so. We can work with where you are.${sigBlock}`
+      };
+    }
+    if (kind === 'high_risk') {
+      return {
+        subject: `Let's build a plan for ${course}`,
+        body: `Hi ${name},\n\nI've been reviewing your progress and I want us to take a focused look at ${course}${courseEnd} together. My goal is to help you identify one or two concrete steps that will move you forward this week.\n\nWhen you have a moment, please reply with the biggest blocker you're facing right now — even a one-line answer helps me prepare so our next call is as useful as possible.\n\nYou've got this, and I'm in your corner.${sigBlock}`
+      };
+    }
+    if (kind === 'course_ending') {
+      return {
+        subject: `${course} is wrapping up soon — let's plan the finish`,
+        body: `Hi ${name},\n\nWe're approaching the end window for ${course}${courseEnd}. I want to make sure you have a clear path to complete it on time and a plan for what comes next in your term.\n\nCan you let me know where you are in the course and what the last remaining piece looks like? If we need to adjust anything — pacing, resources, an extension conversation — now is the right time to talk through it.${sigBlock}`
+      };
+    }
+    if (kind === 'no_contact_14') {
+      return {
+        subject: `Quick check-in — how are things going?`,
+        body: `Hi ${name},\n\nIt's been a couple of weeks since we last connected (around ${lastContact}) and I wanted to reach out to see how things are going in ${course}.\n\nNo need for a long update — even a quick reply telling me what you've completed or what you're working on this week is helpful. If anything has shifted or you need support, I'd rather hear it from you than guess.${sigBlock}`
+      };
+    }
+    if (kind === 'win') {
+      return {
+        subject: `Nice work on ${course}!`,
+        body: `Hi ${name},\n\nI saw your recent progress in ${course} and wanted to send a quick note: well done. The consistency you're showing matters, and it's what gets students across the finish line at WGU.\n\nKeep the momentum going — let me know what you're tackling next so I can be ready to support.${sigBlock}`
+      };
+    }
+    // generic check-in
+    return {
+      subject: `Checking in on ${course}`,
+      body: `Hi ${name},\n\nI wanted to check in and see how things are going with ${course}${courseEnd}. ${missed > 0 ? `I noticed we've had a couple of missed connections recently. ` : ''}Whenever you have a moment, reply with where you're at and anything you'd like support with on our next call.${sigBlock}`
+    };
+  }
+
+  function selectCohort(cohort: string): Student[] {
+    const active = students.filter((s) => !s.archived);
+    const today = new Date();
+    if (cohort === 'high_risk') return active.filter((s) => String(s.risk).toLowerCase().includes('high'));
+    if (cohort === 'ghost') return active.filter((s) => studentStatusSignals(s, touchpoints).isGhost);
+    if (cohort === 'no_contact_14') return active.filter((s) => {
+      const last = s.last_contact_date ? new Date(s.last_contact_date) : null;
+      if (!last) return true;
+      return (today.getTime() - last.getTime()) / 86400000 >= 14;
+    });
+    if (cohort === 'course_ending') return active.filter((s) => {
+      if (!s.course_end_date) return false;
+      const end = new Date(s.course_end_date);
+      const diff = (end.getTime() - today.getTime()) / 86400000;
+      return diff <= 30 && diff >= 0;
+    });
+    if (cohort.startsWith('course:')) {
+      const code = cohort.slice('course:'.length).toLowerCase();
+      return active.filter((s) => (s.course || '').toLowerCase().includes(code));
+    }
+    if (cohort === 'all_active') return active;
+    return [];
+  }
+
+  async function generateCohortDrafts(cohort: string, cohortLabel: string, kind: string) {
+    if (!isAdmin()) return setMessage('Outreach is admin-only.');
+    const targets = selectCohort(cohort);
+    if (targets.length === 0) {
+      setMessage(`No students in cohort "${cohortLabel}".`);
+      return;
+    }
+    const rows = targets.map((student) => {
+      const { subject, body } = buildDraftForStudent(student, kind, cohortLabel);
+      return { student_id: student.id, cohort_label: cohortLabel, template_kind: kind, subject, body, status: 'pending', edited: false };
+    });
+    if (!supabase) {
+      const locals: EmailDraft[] = rows.map((r) => ({
+        ...r, id: crypto.randomUUID(), created_at: new Date().toISOString(), sent_at: null
+      } as EmailDraft));
+      setDrafts((current) => [...locals, ...current]);
+      setMessage(`Generated ${locals.length} drafts locally.`);
+      return;
+    }
+    const { data, error } = await supabase.from('email_drafts').insert(rows).select();
+    if (error) return setMessage(`Draft generation failed: ${error.message}`);
+    setDrafts((current) => [...(data as EmailDraft[]), ...current]);
+    setMessage(`Generated ${data?.length || 0} drafts for "${cohortLabel}".`);
+  }
+
+  async function generateSingleDraft(studentId: string, kind: string) {
+    if (!isAdmin()) return setMessage('Outreach is admin-only.');
+    const student = students.find((s) => s.id === studentId);
+    if (!student) return;
+    const { subject, body } = buildDraftForStudent(student, kind, 'single');
+    const row = { student_id: student.id, cohort_label: 'single', template_kind: kind, subject, body, status: 'pending', edited: false };
+    if (!supabase) {
+      const local: EmailDraft = { ...row, id: crypto.randomUUID(), created_at: new Date().toISOString(), sent_at: null } as EmailDraft;
+      setDrafts((current) => [local, ...current]);
+      return setMessage('Draft created locally.');
+    }
+    const { data, error } = await supabase.from('email_drafts').insert(row).select().single();
+    if (error) return setMessage(`Draft save failed: ${error.message}`);
+    setDrafts((current) => [data as EmailDraft, ...current]);
+    setMessage(`Draft created for ${student.display_name}.`);
+  }
+
+  async function updateDraft(id: string, patch: Partial<EmailDraft>) {
+    setDrafts((current) => current.map((d) => d.id === id ? { ...d, ...patch } : d));
+    if (!supabase) return;
+    await supabase.from('email_drafts').update(patch).eq('id', id);
+  }
+
+  async function markDraftSent(id: string) {
+    const draft = drafts.find((d) => d.id === id);
+    if (!draft) return;
+    const sentAt = new Date().toISOString();
+    await updateDraft(id, { status: 'sent', sent_at: sentAt });
+    // Auto-log a touchpoint
+    if (draft.student_id) {
+      const student = students.find((s) => s.id === draft.student_id);
+      if (student) {
+        await createTouchpoint({
+          student_id: draft.student_id,
+          touchpoint_type: 'Email sent',
+          touchpoint_date: new Date().toISOString().slice(0, 10),
+          course: student.course || '',
+          momentum: '',
+          note: `[${draft.cohort_label || 'outreach'} · ${draft.template_kind}] ${draft.subject}\n\n${draft.body}`
+        });
+      }
+    }
+    setMessage('Draft marked sent and touchpoint logged.');
+  }
+
+  async function deleteDraft(id: string) {
+    setDrafts((current) => current.filter((d) => d.id !== id));
+    if (!supabase) return;
+    await supabase.from('email_drafts').delete().eq('id', id);
   }
 
   async function copyStudentText(text: string, id?: string, table: 'students' | 'student_touchpoints' = 'students') {
@@ -668,6 +1240,255 @@ Kaylee`;
     if (!supabase) return;
     const { error } = await supabase.from('tasks').update({ status: 'completed' }).eq('id', id);
     if (error) setMessage(`Task update failed: ${error.message}`);
+  }
+
+  async function syncTodoistNow() {
+    if (!supabase) return setMessage('Supabase not configured.');
+    if (syncing) return;
+    setSyncing(true);
+    setMessage('Pulling tasks from Todoist…');
+    try {
+      const { data, error } = await supabase.functions.invoke('sync-todoist', { body: {} });
+      if (error) throw new Error(error.message);
+      if (data?.success === false) throw new Error(data?.error || 'Sync failed');
+      setMessage(`Todoist synced: ${data?.added ?? 0} added, ${data?.updated ?? 0} updated, ${data?.removed ?? 0} removed.`);
+      // Reload chores + sync state
+      const [choreResult, syncStateResult] = await Promise.all([
+        supabase.from('chore_tasks').select('*').eq('deleted_in_todoist', false).order('priority', { ascending: false }),
+        supabase.from('todoist_sync_state').select('*').eq('id', 1).maybeSingle()
+      ]);
+      if (!choreResult.error && choreResult.data) setChoreTasks(choreResult.data as ChoreTask[]);
+      if (!syncStateResult.error && syncStateResult.data) setSyncState(syncStateResult.data as TodoistSyncState);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setMessage(`Todoist sync failed: ${msg}`);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function completeChore(id: string) {
+    if (!canEdit('chores')) return setMessage('Chores are view-only for Adam right now.');
+    const now = new Date().toISOString();
+    const target = choreTasks.find((c) => c.id === id);
+
+    // Optimistic local update so the UI responds immediately.
+    setChoreTasks((current) => current.map((c) => c.id === id ? { ...c, is_completed: true, status: 'completed', last_completed_at: now } : c));
+    if (!supabase) return;
+
+    const { error } = await supabase.from('chore_tasks').update({
+      is_completed: true, status: 'completed', last_completed_at: now
+    }).eq('id', id);
+    if (error) return setMessage(`Chore update failed: ${error.message}`);
+
+    // Tell Todoist this occurrence is done. For recurring chores this is
+    // what advances the due date to the next occurrence — without this
+    // call, Todoist never hears about it and the SAME stale due date
+    // comes back on every future sync.
+    if (target?.todoist_task_id) {
+      try {
+        const { data, error: fnError } = await supabase.functions.invoke('todoist-complete-task', {
+          body: { todoist_task_id: target.todoist_task_id }
+        });
+        if (fnError) throw new Error(fnError.message);
+        if (data?.success === false) throw new Error(data?.error || 'Complete failed');
+
+        if (data?.fully_completed) {
+          // One-off task: Todoist has no next occurrence. Leave it marked
+          // completed locally; the next sync will soft-delete it once it
+          // drops off Todoist's active list.
+          setMessage('Chore completed in Todoist.');
+        } else if (data?.next_due_date) {
+          // Recurring task rolled forward — reflect the new due date and
+          // reopen it locally so it's not stuck showing "done" forever.
+          const nextDue = data.next_due_date as string;
+          const nextRecurrence = data.next_recurrence as string | null;
+          setChoreTasks((current) => current.map((c) => c.id === id ? {
+            ...c,
+            is_completed: false,
+            status: 'sent',
+            due_date: nextDue,
+            recurrence: nextRecurrence ?? c.recurrence
+          } : c));
+          await supabase.from('chore_tasks').update({
+            is_completed: false,
+            status: 'sent',
+            due_date: nextDue,
+            recurrence: nextRecurrence ?? target.recurrence,
+            updated_at: new Date().toISOString()
+          }).eq('id', id);
+          setMessage(`Chore done — next occurrence ${new Date(nextDue).toLocaleDateString()}.`);
+        } else {
+          setMessage('Chore marked done. Todoist confirmed but did not return a next due date.');
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setMessage(`Marked done locally, but Todoist sync failed: ${msg}. It may show overdue again until you sync.`);
+      }
+    } else {
+      setMessage('Chore marked done.');
+    }
+  }
+
+  async function uncompleteChore(id: string) {
+    if (!canEdit('chores')) return;
+    setChoreTasks((current) => current.map((c) => c.id === id ? { ...c, is_completed: false, status: 'sent' } : c));
+    if (!supabase) return;
+    await supabase.from('chore_tasks').update({ is_completed: false, status: 'sent' }).eq('id', id);
+  }
+
+  function computeNextDue(frequency: string): string {
+    const d = new Date();
+    const f = (frequency || '').toLowerCase();
+    if (f === 'monthly') d.setMonth(d.getMonth() + 1);
+    else if (f === 'quarterly') d.setMonth(d.getMonth() + 3);
+    else if (f === 'biannual' || f === 'biannually') d.setMonth(d.getMonth() + 6);
+    else if (f === 'annual' || f === 'yearly') d.setFullYear(d.getFullYear() + 1);
+    else if (f === 'biennial') d.setFullYear(d.getFullYear() + 2);
+    else if (f.includes('5 year')) d.setFullYear(d.getFullYear() + 5);
+    else if (f.includes('3 year')) d.setFullYear(d.getFullYear() + 3);
+    else d.setMonth(d.getMonth() + 6);
+    return d.toISOString();
+  }
+
+  async function markSuggestionDone(id: string) {
+    if (!canEdit('chores')) return setMessage('Suggestions are view-only for Adam right now.');
+    const target = choreSuggestions.find((s) => s.id === id);
+    if (!target) return;
+    const now = new Date().toISOString();
+    const next_due_at = computeNextDue(target.frequency);
+    setChoreSuggestions((current) => current.map((s) => s.id === id ? { ...s, status: 'done', last_done_at: now, next_due_at } : s));
+    if (!supabase) return;
+    const { error } = await supabase.from('chore_suggestions').update({
+      status: 'done', last_done_at: now, next_due_at, updated_at: now
+    }).eq('id', id);
+    if (error) setMessage(`Suggestion update failed: ${error.message}`);
+    else setMessage(`"${target.title}" marked done. Next due ${new Date(next_due_at).toLocaleDateString()}.`);
+  }
+
+  async function snoozeSuggestion(id: string, days: number) {
+    if (!canEdit('chores')) return;
+    const snoozed = new Date();
+    snoozed.setDate(snoozed.getDate() + days);
+    const snoozedIso = snoozed.toISOString().slice(0, 10);
+    setChoreSuggestions((current) => current.map((s) => s.id === id ? { ...s, status: 'snoozed', snoozed_until: snoozedIso } : s));
+    if (!supabase) return;
+    await supabase.from('chore_suggestions').update({
+      status: 'snoozed', snoozed_until: snoozedIso, updated_at: new Date().toISOString()
+    }).eq('id', id);
+    setMessage(`Snoozed for ${days} days.`);
+  }
+
+  async function dismissSuggestion(id: string) {
+    if (!canEdit('chores')) return;
+    setChoreSuggestions((current) => current.map((s) => s.id === id ? { ...s, status: 'dismissed' } : s));
+    if (!supabase) return;
+    await supabase.from('chore_suggestions').update({
+      status: 'dismissed', updated_at: new Date().toISOString()
+    }).eq('id', id);
+    setMessage('Suggestion dismissed.');
+  }
+
+  async function restoreSuggestion(id: string) {
+    if (!canEdit('chores')) return;
+    setChoreSuggestions((current) => current.map((s) => s.id === id ? { ...s, status: 'pending', snoozed_until: null } : s));
+    if (!supabase) return;
+    await supabase.from('chore_suggestions').update({
+      status: 'pending', snoozed_until: null, updated_at: new Date().toISOString()
+    }).eq('id', id);
+  }
+
+  async function addSuggestionToTodoist(id: string, assigneeTodoistId?: string | null) {
+    if (!canEdit('chores')) return setMessage('Adding to Todoist is admin-only.');
+    if (!supabase) return setMessage('Supabase not configured.');
+    const target = choreSuggestions.find((s) => s.id === id);
+    if (!target) return;
+    setMessage(`Adding "${target.title}" to Todoist…`);
+    try {
+      const priorityMap: Record<string, number> = { light: 1, medium: 2, heavy: 3 };
+      const { data, error } = await supabase.functions.invoke('todoist-create-task', {
+        body: {
+          title: target.title,
+          description: target.why_it_matters,
+          category: target.category,
+          priority: priorityMap[target.effort_level] ?? 2
+        }
+      });
+      if (error) throw new Error(error.message);
+      if (data?.success === false) throw new Error(data?.error || 'Create failed');
+      const now = new Date().toISOString();
+      const newTaskId = data?.todoist_task_id ?? null;
+
+      // If approving specifically for someone (Adam), assign it to them in
+      // Todoist right away rather than leaving it unassigned.
+      if (assigneeTodoistId && newTaskId) {
+        try {
+          await supabase.functions.invoke('todoist-assign-task', {
+            body: { todoist_task_id: newTaskId, responsible_uid: assigneeTodoistId }
+          });
+        } catch (assignErr) {
+          console.error('Assignment after create failed', assignErr);
+        }
+      }
+
+      setChoreSuggestions((current) => current.map((s) => s.id === id ? { ...s, status: 'added', added_to_todoist_at: now, todoist_task_id: newTaskId } : s));
+      await supabase.from('chore_suggestions').update({
+        status: 'added', added_to_todoist_at: now, todoist_task_id: newTaskId, updated_at: now
+      }).eq('id', id);
+      setMessage(assigneeTodoistId
+        ? `Sent "${target.title}" to Todoist and assigned it. Sync will mirror it into Chores within 15 minutes (or click Sync now).`
+        : `Added "${target.title}" to Todoist. Run Sync to mirror it into Chores.`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setMessage(`Add to Todoist failed: ${msg}`);
+    }
+  }
+
+  /** "Send to Adam" from the Review & Approve panel: creates the task in
+   * Todoist (if not already there) and assigns it to Adam. */
+  async function approveSuggestionForAdam(id: string) {
+    const adam = householdUsers.find((u) => u.name.toLowerCase() === 'adam');
+    if (!adam?.todoist_id) return setMessage("Adam's Todoist ID isn't set up yet — check Settings.");
+    await addSuggestionToTodoist(id, adam.todoist_id);
+  }
+
+  /** "I'll do this instead" from the Review & Approve panel: creates the
+   * task in Todoist (if not already there) and assigns it to Kaylee. */
+  async function approveSuggestionForSelf(id: string) {
+    const kaylee = householdUsers.find((u) => u.name.toLowerCase() === 'kaylee');
+    await addSuggestionToTodoist(id, kaylee?.todoist_id ?? null);
+  }
+
+  /** Reassigns an existing chore (already in Todoist) to a different
+   * household member — used for "I'll take this one" on Adam's list, and
+   * for manually pulling back an escalated task. */
+  async function reassignChore(choreId: string, toUserName: 'Kaylee' | 'Adam') {
+    if (!canEdit('chores')) return setMessage('Reassigning chores is admin-only.');
+    if (!supabase) return setMessage('Supabase not configured.');
+    const chore = choreTasks.find((c) => c.id === choreId);
+    if (!chore?.todoist_task_id) return setMessage('This chore has no linked Todoist task to reassign.');
+    const target = householdUsers.find((u) => u.name === toUserName);
+    if (!target?.todoist_id) return setMessage(`${toUserName}'s Todoist ID isn't set up yet — check Settings.`);
+
+    setMessage(`Reassigning "${chore.name}" to ${toUserName}…`);
+    try {
+      const { data, error } = await supabase.functions.invoke('todoist-assign-task', {
+        body: { todoist_task_id: chore.todoist_task_id, responsible_uid: target.todoist_id }
+      });
+      if (error) throw new Error(error.message);
+      if (data?.success === false) throw new Error(data?.error || 'Reassign failed');
+
+      setChoreTasks((current) => current.map((c) => c.id === choreId ? {
+        ...c, assigned_to: target.id, todoist_assignee_id: target.todoist_id, escalation_note: null
+      } : c));
+      await supabase.from('chore_tasks').update({
+        assigned_to: target.id, todoist_assignee_id: target.todoist_id, escalation_note: null, updated_at: new Date().toISOString()
+      }).eq('id', choreId);
+      setMessage(`"${chore.name}" is now assigned to ${toUserName}.`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setMessage(`Reassign failed: ${msg}`);
+    }
   }
 
   async function signOut() {
@@ -699,6 +1520,7 @@ Kaylee`;
 
   return (
     <div className="app-shell">
+      <style>{COMPACT_ROW_CSS}</style>
       <header className="topbar">
         <div className="logo"><span className="logo-mark">KH</span><span>Kaylee's Hub</span></div>
         <div className="toggle-wrap">
@@ -729,17 +1551,18 @@ Kaylee`;
         </aside>
         <main className="content">
           {!activeCanEdit && activeRole === 'limited' && page !== 'dashboard' && <ViewOnlyBanner />}
-          {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} role={activeRole} setPage={setPage} />}
-          {page === 'today' && <Today tasks={tasks.filter((task) => activeRole === 'admin' || task.mode === 'home')} completeTask={completeTask} editable={canEdit('today')} />}
+          {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} choreTasks={choreTasks} householdUsers={householdUsers} role={activeRole} setPage={setPage} />}
+          {page === 'today' && <Today tasks={tasks.filter((task) => activeRole === 'admin' || task.mode === 'home')} choreTasks={choreTasks} householdUsers={householdUsers} completeTask={completeTask} completeChore={completeChore} editable={canEdit('today') && canEdit('chores')} />}
           {page === 'briefing' && <Briefing />}
-          {page === 'calendar' && <Placeholder title="Calendar" sub="Google Calendar integration will connect here after auth basics are stable." />}
-          {page === 'budget' && <Placeholder title="Budget" sub={activeRole === 'limited' ? 'Kaylee controls whether this is visible/editable for Adam.' : 'Calendar-based cashflow page scaffold.'} />}
+          {page === 'calendar' && <GoogleCalendar />}
+          {page === 'budget' && <Budget />}
           {page === 'inventory' && <Inventory inventory={inventory} createItem={createInventoryItem} updateQuantity={updateInventoryQuantity} editable={canEdit('inventory')} />}
-          {page === 'chores' && <Placeholder title="Chores & Tasks" sub="Todoist integration will connect here." />}
-          {page === 'adam' && <Adam editable={canEdit('adam')} />}
+          {page === 'chores' && <Chores choreTasks={choreTasks} choreSuggestions={choreSuggestions} syncState={syncState} syncing={syncing} householdUsers={householdUsers} currentUserName={activeName} syncTodoistNow={syncTodoistNow} completeChore={completeChore} uncompleteChore={uncompleteChore} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} approveSuggestionForAdam={approveSuggestionForAdam} approveSuggestionForSelf={approveSuggestionForSelf} reassignChore={reassignChore} editable={canEdit('chores')} />}
           {page === 'vehicles' && <Vehicles />}
-          {page === 'suggestions' && <Suggestions editable={canEdit('suggestions')} />}
-          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} />}
+          {page === 'jules' && <Jules />}
+          {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
+          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
+          {page === 'outreach' && activeRole === 'admin' && <Outreach drafts={drafts} students={students} generateCohortDrafts={generateCohortDrafts} updateDraft={updateDraft} markDraftSent={markDraftSent} deleteDraft={deleteDraft} />}
           {page === 'settings' && activeRole === 'admin' && <SettingsPage permissions={permissions} updatePermission={updatePermission} />}
         </main>
       </div>
@@ -906,7 +1729,7 @@ function timelineForStudent(student: Student, touchpoints: Touchpoint[]) {
   return [...profileEvents, ...touchEvents].sort((a, b) => String(b.date).localeCompare(String(a.date)));
 }
 
-function Dashboard({ mode, inventory, students, touchpoints, tasks, role, setPage }: { mode: Mode; inventory: InventoryItem[]; students: Student[]; touchpoints: Touchpoint[]; tasks: TaskItem[]; role: Role; setPage: (page: Page) => void }) {
+function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, householdUsers, role, setPage }: { mode: Mode; inventory: InventoryItem[]; students: Student[]; touchpoints: Touchpoint[]; tasks: TaskItem[]; choreTasks: ChoreTask[]; householdUsers: HouseholdUser[]; role: Role; setPage: (page: Page) => void }) {
   const expiring = inventory.filter((item) => item.expires).length;
   const pending = tasks.filter((task) => task.status === 'pending_approval').length;
   const activeStudents = students.filter((student) => !student.archived);
@@ -915,7 +1738,23 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, role, setPag
   const supportStudents = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).isSupport);
   const followUpsDue = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).needsFollowUp);
   const today = new Date().toISOString().slice(0, 10);
-  const callsToday = activeStudents.filter((student) => student.next_appointment_date === today);
+  const isSameDay = (iso: string | null | undefined, ymd: string) => !!iso && iso.slice(0, 10) === ymd;
+  const callsToday = activeStudents
+    .filter((student) => isSameDay(student.next_call_at, today) || student.next_appointment_date === today)
+    .sort((a, b) => {
+      const at = a.next_call_at ? new Date(a.next_call_at).getTime() : Number.MAX_SAFE_INTEGER;
+      const bt = b.next_call_at ? new Date(b.next_call_at).getTime() : Number.MAX_SAFE_INTEGER;
+      return at - bt;
+    });
+  const nowMs = Date.now();
+  const sevenDaysMs = nowMs + 7 * 24 * 60 * 60 * 1000;
+  const callsThisWeek = activeStudents
+    .filter((student) => {
+      if (!student.next_call_at) return false;
+      const t = new Date(student.next_call_at).getTime();
+      return t > nowMs && t <= sevenDaysMs && !isSameDay(student.next_call_at, today);
+    })
+    .sort((a, b) => new Date(a.next_call_at!).getTime() - new Date(b.next_call_at!).getTime());
   const priorityQueue = [...activeStudents].sort((a, b) => priorityScore(b, touchpoints) - priorityScore(a, touchpoints)).slice(0, 6);
 
   if (mode === 'work' && role === 'admin') {
@@ -929,6 +1768,28 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, role, setPag
         ['Calls today', String(callsToday.length), 'manual now · Outlook later'],
         ['Follow-ups due', String(followUpsDue.length), 'copy/draft needed']
       ]} />
+      <section className="panel">
+        <div className="panel-head"><h2>Today’s Scheduled Calls</h2><Phone size={17} /></div>
+        {callsToday.length === 0 && <div className="brief-item">No calls scheduled for today. Add a "Next call" datetime when logging a touchpoint to populate this list.</div>}
+        {callsToday.map((student) => {
+          const timeText = student.next_call_at
+            ? new Date(student.next_call_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+            : 'All day';
+          return <button className="mentor-queue-row" key={student.id} onClick={() => setPage('students')}>
+            <span className="queue-rank">{timeText}</span>
+            <div>
+              <strong>{student.display_name}</strong>
+              <p>{student.student_id ? `ID ${student.student_id} · ` : ''}{student.course || 'No course'} · {student.status}</p>
+            </div>
+            <span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span>
+          </button>;
+        })}
+        {callsThisWeek.length > 0 && <details style={{ marginTop: 12 }}><summary><strong>Upcoming this week ({callsThisWeek.length})</strong></summary>
+          {callsThisWeek.map((student) => <div className="brief-item" key={student.id}>
+            <strong>{new Date(student.next_call_at!).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</strong> · {student.display_name} · {student.course || 'No course'}
+          </div>)}
+        </details>}
+      </section>
       <div className="mentor-grid">
         <section className="panel mentor-action-panel">
           <div className="panel-head"><h2>Today’s Priority Queue</h2><span className="readonly-pill"><AlertTriangle size={14} /> Risk ordered</span></div>
@@ -971,13 +1832,210 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, role, setPag
   return <>
     <Header title={role === 'limited' ? 'Adam home dashboard' : mode === 'home' ? 'Home command center' : 'Work command center'} sub={role === 'limited' ? 'Home-only view. Kaylee controls which sections are editable.' : mode === 'home' ? 'Tasks, approvals, inventory, vehicles, and tenant-safe home care.' : 'FERPA-safe student workflow, GROW notes, and daily planning.'} />
     <Stats items={mode === 'home' ? [['Open tasks', String(tasks.filter((task) => task.status !== 'completed' && task.mode === 'home').length), 'home'], ['Adam pending', String(pending), 'approval needed'], ['Inventory', String(inventory.length), `${expiring} expiring`], ['Vehicle alerts', '4', 'critical/due']] : [['Active students', String(activeStudents.length), 'FERPA-safe'], ['Need copy', String(students.filter((s) => !s.copied).length), 'Salesforce'], ['FERPA', 'On', 'clipboard only'], ['Calls today', String(callsToday.length), 'manual now']]} />
-    <div className="grid two"><Today tasks={tasks.filter((task) => mode === 'work' ? task.mode === 'work' : task.mode === 'home').slice(0, 3)} completeTask={() => undefined} editable={false} /><Briefing compact /></div>
+    {mode === 'home' && <GoogleCalendarToday />}
+    <div className="grid two"><Today tasks={tasks.filter((task) => mode === 'work' ? task.mode === 'work' : task.mode === 'home').slice(0, 3)} choreTasks={mode === 'home' ? choreTasks : []} householdUsers={householdUsers} completeTask={() => undefined} completeChore={() => undefined} editable={false} compact /><Briefing compact /></div>
   </>;
 }
 
-function Today({ tasks, completeTask, editable, compact = false }: { tasks: TaskItem[]; completeTask: (id: string) => void; editable: boolean; compact?: boolean }) {
+/* ============================================================
+   COMPACT TASK ROW — Todoist-density row used across Today,
+   Chores, and Adam's Tasks. Circle checkbox, title, then a thin
+   metadata line (time/recurrence/project/section) underneath.
+   ============================================================ */
+
+function CompactTaskRow({
+  title, completed, onToggle, editable, timeLabel, overdue,
+  recurrence, projectLabel, sectionLabel, priorityDot, reason
+}: {
+  title: string;
+  completed: boolean;
+  onToggle: () => void;
+  editable: boolean;
+  timeLabel?: string | null;
+  overdue?: boolean;
+  recurrence?: string | null;
+  projectLabel?: string | null;
+  sectionLabel?: string | null;
+  priorityDot?: 'urgent' | 'warning' | 'normal' | 'good' | null;
+  reason?: string | null;
+}) {
+  const metaParts: { icon: React.ReactNode; text: string; tone?: 'overdue' | 'due' | 'muted' }[] = [];
+  if (timeLabel) metaParts.push({ icon: <Clock size={11} />, text: timeLabel, tone: overdue ? 'overdue' : 'due' });
+  if (recurrence) metaParts.push({ icon: <Repeat size={11} />, text: recurrence, tone: 'muted' });
+
+  return (
+    <div className="ct-row">
+      <button
+        type="button"
+        className={`ct-checkbox ${completed ? 'checked' : ''} ${priorityDot && !completed ? `dot-${priorityDot}` : ''}`}
+        onClick={editable ? onToggle : undefined}
+        disabled={!editable}
+        aria-label={completed ? 'Mark not done' : 'Mark done'}
+      >
+        {completed && <CheckCircle2 size={13} strokeWidth={2.5} />}
+      </button>
+      <div className="ct-body">
+        <div className={`ct-title ${completed ? 'ct-title-done' : ''}`}>{title}</div>
+        {(metaParts.length > 0 || projectLabel || sectionLabel) && (
+          <div className="ct-meta">
+            {metaParts.map((m, i) => (
+              <span className={`ct-meta-item ct-meta-${m.tone || 'muted'}`} key={i}>{m.icon}{m.text}</span>
+            ))}
+            {(projectLabel || sectionLabel) && (
+              <span className="ct-meta-item ct-meta-tag">
+                <Hash size={11} />
+                {projectLabel}{sectionLabel ? ` / ${sectionLabel}` : ''}
+              </span>
+            )}
+          </div>
+        )}
+        {reason && <div className="ct-reason">{reason}</div>}
+      </div>
+    </div>
+  );
+}
+
+function choreToRowProps(chore: ChoreTask, showReason: boolean) {
+  const due = chore.due_date ? new Date(chore.due_date) : null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  // Overdue means the due date falls on a day strictly before today — NOT
+  // just "not completed yet today". A daily chore due today at 9pm should
+  // read as "Today", not "Overdue", until the day actually passes.
+  const dueIsBeforeToday = due ? (() => {
+    const dueDay = new Date(due); dueDay.setHours(0, 0, 0, 0);
+    return dueDay.getTime() < today.getTime();
+  })() : false;
+  const overdue = dueIsBeforeToday && !chore.is_completed;
+  const dueToday = due ? sameYmd(due, new Date()) : false;
+  const priorityDot: 'urgent' | 'warning' | 'normal' | 'good' =
+    chore.priority === 4 ? 'urgent' : chore.priority === 3 ? 'warning' : chore.priority === 2 ? 'normal' : 'good';
+
+  let timeLabel: string | null = null;
+  if (due) {
+    const hasTime = chore.due_date && chore.due_date.includes('T');
+    if (overdue) timeLabel = `Overdue · ${due.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
+    else if (dueToday && hasTime) timeLabel = due.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    else if (dueToday) timeLabel = 'Today';
+    else timeLabel = due.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  }
+
+  let reason: string | null = null;
+  if (showReason) {
+    const parts: string[] = [];
+    if (overdue && due) parts.push(`Wasn't done ${due.toLocaleDateString()}`);
+    else if (dueToday) parts.push('Due today');
+    else if (chore.day_of_week === dayOfWeekName(new Date())) parts.push(`Scheduled for ${chore.day_of_week}`);
+    else if (chore.day_of_week === 'Daily') parts.push('Daily recurring');
+    if (chore.priority >= 3) parts.push('Higher priority');
+    reason = parts.length ? `Why today: ${parts.join(' · ')}` : null;
+  }
+
+  return {
+    title: chore.name,
+    completed: chore.is_completed,
+    timeLabel,
+    overdue,
+    recurrence: chore.recurrence,
+    projectLabel: chore.source_project,
+    sectionLabel: chore.todoist_section || chore.room,
+    priorityDot,
+    reason
+  };
+}
+
+function Today({ tasks, choreTasks, householdUsers, completeTask, completeChore, editable, compact = false }: { tasks: TaskItem[]; choreTasks: ChoreTask[]; householdUsers: HouseholdUser[]; completeTask: (id: string) => void; completeChore: (id: string) => void; editable: boolean; compact?: boolean }) {
   const list = compact ? tasks.slice(0, 3) : tasks;
-  return <section className="panel"><h2>Today’s Tasks</h2>{list.map((task) => <div className={`task-card ${task.priority}`} key={task.id}>{editable ? <button className="check" onClick={() => completeTask(task.id)} /> : <span className="check disabled" />}<div><strong>{task.title}</strong><p>{task.owner} · {task.minutes} min · {task.source} · {task.status}</p></div></div>)}</section>;
+  const kaylee = householdUsers.find((u) => u.name.toLowerCase() === 'kaylee') ?? null;
+  // Today's Tasks is Kaylee's personal daily view — Adam has his own tab
+  // under Chores & Tasks. Unassigned chores default to her until delegated.
+  const myChoreTasks = useMemo(() => {
+    if (!kaylee) return choreTasks;
+    return choreTasks.filter((c) => c.assigned_to === kaylee.id || !c.assigned_to);
+  }, [choreTasks, kaylee]);
+  const tackleList = useMemo(() => computeTackleToday(myChoreTasks), [myChoreTasks]);
+  const shown = compact ? tackleList.slice(0, 3) : tackleList;
+
+  return <>
+    <section className="panel ct-panel">
+      <div className="panel-head">
+        <h2>{compact ? "Today's Tackle List" : "Today's Task Outlook Center"}</h2>
+        {!compact && <span className="readonly-pill"><Zap size={14} /> {tackleList.length} for today</span>}
+      </div>
+      {shown.length === 0 && <div className="brief-item">No chores queued for today. Run <strong>Sync from Todoist</strong> on the Chores tab to pull the latest, or add a new task in Todoist.</div>}
+      <div className="ct-list">
+        {shown.map((chore) => {
+          const props = choreToRowProps(chore, true);
+          return <CompactTaskRow
+            key={chore.id}
+            {...props}
+            editable={editable}
+            onToggle={() => completeChore(chore.id)}
+          />;
+        })}
+      </div>
+    </section>
+    {!compact && tasks.length > 0 && <section className="panel ct-panel">
+      <h2>Other Tasks</h2>
+      <div className="ct-list">
+        {list.map((task) => <CompactTaskRow
+          key={task.id}
+          title={task.title}
+          completed={task.status === 'completed'}
+          onToggle={() => completeTask(task.id)}
+          editable={editable}
+          priorityDot={task.priority}
+          projectLabel={task.source}
+          reason={null}
+          timeLabel={task.minutes ? `${task.minutes} min` : null}
+        />)}
+      </div>
+    </section>}
+  </>;
+}
+
+function sameYmd(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function dayOfWeekName(d: Date) {
+  return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getDay()];
+}
+
+function computeTackleToday(choreTasks: ChoreTask[]): ChoreTask[] {
+  const now = new Date();
+  const todayName = dayOfWeekName(now);
+  const isWeekend = now.getDay() === 0 || now.getDay() === 6;
+  const todayYmd = now.toISOString().slice(0, 10);
+
+  const candidates = choreTasks.filter((c) => !c.is_completed && c.status !== 'completed' && !c.deleted_in_todoist).map((c) => {
+    const due = c.due_date ? new Date(c.due_date) : null;
+    const dueYmd = due ? due.toISOString().slice(0, 10) : null;
+    let score = 0;
+    let matches = false;
+
+    // Overdue: highest priority
+    if (due && dueYmd && dueYmd < todayYmd) { score += 1000; matches = true; }
+    // Due today
+    if (dueYmd === todayYmd) { score += 800; matches = true; }
+    // Day of week match
+    if (c.day_of_week === todayName) { score += 500; matches = true; }
+    if (c.day_of_week === 'Daily') { score += 600; matches = true; }
+    if (c.day_of_week === 'Weekly' && (todayName === 'Sunday' || todayName === 'Monday')) { score += 300; matches = true; }
+    if (c.day_of_week === 'Monthly' && now.getDate() <= 7) { score += 250; matches = true; }
+    if ((c.day_of_week === 'Anytime') && isWeekend) { score += 100; matches = true; }
+
+    // Priority bump
+    score += (c.priority || 1) * 50;
+    // Lighter chores edge slightly higher for morning momentum
+    if (c.effort_level === 'light') score += 25;
+    if (c.effort_level === 'heavy') score -= 25;
+
+    return { chore: c, score, matches };
+  })
+  .filter((x) => x.matches)
+  .sort((a, b) => b.score - a.score);
+
+  return candidates.map((x) => x.chore);
 }
 
 function Briefing({ compact = false }: { compact?: boolean }) {
@@ -1003,16 +2061,132 @@ function Inventory({ inventory, createItem, updateQuantity, editable }: { invent
   </>;
 }
 
-function Adam({ editable }: { editable: boolean }) {
-  return <><Header title="Adam’s Tasks" sub="ADHD-safe, Kaylee-approved task planning.">{editable ? <button className="btn primary">Create task plan</button> : <span className="readonly-pill"><Eye size={14} /> View only</span>}</Header><Stats items={[["Pending approval", '3'], ['Max/day', '2–3'], ['Heavy day', 'Saturday'], ['Sunday', 'Rest']]} /><div className="day-grid">{adamPlan.map((day) => <div className="day-card" key={day.day}><h3>{day.day}</h3>{day.tasks.map((task) => <p key={task}>{task}</p>)}<small>{day.rationale}</small></div>)}</div></>;
+
+function Suggestions({ choreSuggestions, markSuggestionDone, snoozeSuggestion, dismissSuggestion, restoreSuggestion, addSuggestionToTodoist, editable }: { choreSuggestions: ChoreSuggestion[]; markSuggestionDone: (id: string) => void; snoozeSuggestion: (id: string, days: number) => void; dismissSuggestion: (id: string) => void; restoreSuggestion: (id: string) => void; addSuggestionToTodoist: (id: string) => void; editable: boolean }) {
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [showDismissed, setShowDismissed] = useState(false);
+
+  const categories: { id: string; label: string; icon: React.ElementType }[] = [
+    { id: 'all', label: 'All', icon: Home },
+    { id: 'homeowner', label: 'Home', icon: Home },
+    { id: 'safety', label: 'Safety', icon: ShieldCheck },
+    { id: 'vehicle', label: 'Vehicles', icon: Car },
+    { id: 'tool', label: 'Tools', icon: Wrench },
+    { id: 'dog', label: 'Dogs', icon: Bone },
+    { id: 'garden', label: 'Garden', icon: Flower2 },
+    { id: 'preserving', label: 'Preserving', icon: Archive }
+  ];
+
+  const visible = choreSuggestions.filter((s) => {
+    if (s.status === 'dismissed' && !showDismissed) return false;
+    if (categoryFilter !== 'all' && s.category !== categoryFilter) return false;
+    return true;
+  });
+
+  const counts = {
+    pending: choreSuggestions.filter((s) => s.status === 'pending').length,
+    snoozed: choreSuggestions.filter((s) => s.status === 'snoozed').length,
+    added: choreSuggestions.filter((s) => s.status === 'added').length,
+    done: choreSuggestions.filter((s) => s.status === 'done').length
+  };
+
+  return <>
+    <Header title="Home Suggestions" sub="New-homeowner playbook: HVAC, plumbing, vehicles, tools, dogs, garden, and food preserving.">
+      {editable ? null : <span className="readonly-pill"><Eye size={14} /> View only</span>}
+    </Header>
+    <Stats items={[
+      ['Pending', String(counts.pending), 'not yet acted on'],
+      ['Snoozed', String(counts.snoozed), 'come back later'],
+      ['In Todoist', String(counts.added), 'mirrored to chores'],
+      ['Completed', String(counts.done), 'this cycle']
+    ]} />
+    <section className="panel">
+      <div className="panel-head">
+        <h2>Browse by category</h2>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          <input type="checkbox" checked={showDismissed} onChange={(e) => setShowDismissed(e.target.checked)} />
+          Show dismissed
+        </label>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {categories.map((cat) => {
+          const Icon = cat.icon;
+          const active = categoryFilter === cat.id;
+          return <button key={cat.id} className={active ? 'btn primary' : 'btn ghost'} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setCategoryFilter(cat.id)}>
+            <Icon size={14} /> {cat.label}
+          </button>;
+        })}
+      </div>
+    </section>
+    {visible.length === 0 && <section className="panel"><div className="brief-item">Nothing in this category right now.</div></section>}
+    {visible.map((s) => <SuggestionCard key={s.id}
+      suggestion={s}
+      editable={editable}
+      onAdd={() => addSuggestionToTodoist(s.id)}
+      onDone={() => markSuggestionDone(s.id)}
+      onSnooze={(days) => snoozeSuggestion(s.id, days)}
+      onDismiss={() => dismissSuggestion(s.id)}
+      onRestore={() => restoreSuggestion(s.id)}
+    />)}
+  </>;
 }
 
-function Vehicles() {
-  return <><Header title="Vehicles" sub="Maintenance tracking for Corolla and Leaf." /><div className="grid two">{vehicles.map((vehicle) => <section className="panel" key={vehicle.name}><h2>{vehicle.name}</h2><p>{vehicle.type} · {vehicle.miles.toLocaleString()} miles</p><h3>Urgent</h3>{vehicle.urgent.map((item) => <div className="brief-item urgent" key={item}>{item}</div>)}<h3>Okay</h3>{vehicle.ok.map((item) => <div className="brief-item good" key={item}>{item}</div>)}</section>)}</div></>;
-}
+function SuggestionCard({ suggestion, editable, onAdd, onDone, onSnooze, onDismiss, onRestore }: {
+  suggestion: ChoreSuggestion;
+  editable: boolean;
+  onAdd: () => void;
+  onDone: () => void;
+  onSnooze: (days: number) => void;
+  onDismiss: () => void;
+  onRestore: () => void;
+}) {
+  const monthNow = new Date().getMonth() + 1;
+  const isInSeason = !suggestion.month_triggers || suggestion.month_triggers.length === 0 || suggestion.month_triggers.includes(monthNow);
+  const urgencyClass = suggestion.status === 'snoozed' ? '' :
+    suggestion.status === 'added' ? 'good' :
+    suggestion.status === 'done' ? 'good' :
+    suggestion.status === 'dismissed' ? '' :
+    isInSeason ? 'urgent' : '';
 
-function Suggestions({ editable }: { editable: boolean }) {
-  return <><Header title="Home Suggestions" sub="Tenant-only Canton/Georgia-aware home care.">{editable ? <button className="btn primary">Generate ideas</button> : <span className="readonly-pill"><Eye size={14} /> View only</span>}</Header>{homeSuggestions.map((item) => <section className={`panel suggestion ${item.urgency}`} key={item.title}><h2>{item.title}</h2><p>{item.reason}</p><small>{item.effort}</small></section>)}</>;
+  const lastDone = suggestion.last_done_at ? new Date(suggestion.last_done_at).toLocaleDateString() : null;
+  const nextDue = suggestion.next_due_at ? new Date(suggestion.next_due_at).toLocaleDateString() : null;
+  const snoozedUntil = suggestion.snoozed_until ? new Date(suggestion.snoozed_until).toLocaleDateString() : null;
+
+  return <section className={`panel suggestion ${urgencyClass}`}>
+    <div className="panel-head">
+      <h2>{suggestion.title}</h2>
+      <span className="readonly-pill" style={{ textTransform: 'capitalize' }}>{suggestion.category} · {suggestion.frequency}</span>
+    </div>
+    <p>{suggestion.description}</p>
+    {suggestion.why_it_matters && <p style={{ color: 'var(--muted, #888)', fontStyle: 'italic' }}>{suggestion.why_it_matters}</p>}
+    <small>
+      {suggestion.estimated_minutes} min · {suggestion.effort_level} effort
+      {isInSeason ? ' · 🟢 In season now' : suggestion.month_triggers && suggestion.month_triggers.length ? ` · Best months: ${suggestion.month_triggers.join(', ')}` : ''}
+      {lastDone ? ` · Last done ${lastDone}` : ''}
+      {nextDue ? ` · Next due ${nextDue}` : ''}
+      {snoozedUntil && suggestion.status === 'snoozed' ? ` · Snoozed until ${snoozedUntil}` : ''}
+      {suggestion.status === 'added' && suggestion.added_to_todoist_at ? ` · Sent to Todoist ${new Date(suggestion.added_to_todoist_at).toLocaleDateString()}` : ''}
+    </small>
+    {editable && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+      {(suggestion.status === 'pending' || suggestion.status === 'snoozed') && <>
+        <button className="btn primary" onClick={onAdd}><Send size={14} /> Add to Todoist</button>
+        <button className="btn ghost" onClick={onDone}><CheckCircle2 size={14} /> I did this</button>
+        <button className="btn ghost" onClick={() => onSnooze(30)}><Clock size={14} /> Snooze 30d</button>
+        <button className="btn ghost" onClick={() => onSnooze(90)}><Clock size={14} /> Snooze 90d</button>
+        <button className="btn ghost" onClick={onDismiss}><Trash2 size={14} /> Dismiss</button>
+      </>}
+      {suggestion.status === 'added' && <>
+        <span className="readonly-pill" style={{ background: 'rgba(34,197,94,0.15)' }}><CheckCircle2 size={14} /> In Todoist</span>
+        <button className="btn ghost" onClick={onDone}><CheckCircle2 size={14} /> Mark cycle done</button>
+      </>}
+      {suggestion.status === 'done' && <>
+        <button className="btn ghost" onClick={onRestore}><RefreshCw size={14} /> Reset</button>
+      </>}
+      {suggestion.status === 'dismissed' && <>
+        <button className="btn ghost" onClick={onRestore}><RefreshCw size={14} /> Restore</button>
+      </>}
+    </div>}
+  </section>;
 }
 
 const touchpointTypes = [
@@ -1024,7 +2198,7 @@ const touchpointTypes = [
 const riskLevels = ['Low', 'Medium', 'High', 'High Risk'];
 const studentStatuses = ['Active', 'Support', 'Ghost', 'Portal-only', 'Archived'];
 
-function Students({ students, touchpoints, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, createTouchpoint, copyText, ferpaWarnings }: {
+function Students({ students, touchpoints, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, createTouchpoint, copyText, ferpaWarnings, generateSingleDraft, drafts, setPage }: {
   students: Student[];
   touchpoints: Touchpoint[];
   importStudentsFromCsv: (text: string) => Promise<void>;
@@ -1034,11 +2208,25 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
   createTouchpoint: (touchpoint: Omit<Touchpoint, 'id' | 'next_call_prep' | 'constructive_note' | 'follow_up_email' | 'follow_up_text' | 'copied'>) => void;
   copyText: (text: string, id?: string, table?: 'students' | 'student_touchpoints') => void;
   ferpaWarnings: (text: string) => string[];
+  generateSingleDraft: (studentId: string, kind: string) => void;
+  drafts: EmailDraft[];
+  setPage: (page: Page) => void;
 }) {
   const activeStudents = students.filter((student) => !student.archived);
   const archivedStudents = students.filter((student) => student.archived);
   const [showArchived, setShowArchived] = useState(false);
-  const visibleStudents = showArchived ? archivedStudents : activeStudents;
+  const [search, setSearch] = useState('');
+  const baseList = showArchived ? archivedStudents : activeStudents;
+  const visibleStudents = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const filtered = q
+      ? baseList.filter((s) =>
+          s.display_name.toLowerCase().includes(q) ||
+          String(s.student_id || '').toLowerCase().includes(q)
+        )
+      : baseList;
+    return [...filtered].sort((a, b) => a.display_name.localeCompare(b.display_name, undefined, { sensitivity: 'base' }));
+  }, [baseList, search]);
   const [selectedId, setSelectedId] = useState(visibleStudents[0]?.id || students[0]?.id || '');
   const selected = students.find((student) => student.id === selectedId) || visibleStudents[0] || students[0];
   const selectedTouchpoints = selected ? touchpoints.filter((touchpoint) => touchpoint.student_id === selected.id) : [];
@@ -1047,11 +2235,11 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
   const [editingProfile, setEditingProfile] = useState(false);
   const [studentForm, setStudentForm] = useState({
     display_name: '', student_id: '', course: '', goal: '', risk: 'Medium', status: 'Active',
-    admin_notes: '', next_appointment_date: '', graduation_goal_date: '', missed_call_count: '0'
+    admin_notes: '', next_appointment_date: '', graduation_goal_date: '', missed_call_count: '0', email: ''
   });
   const [touchForm, setTouchForm] = useState({
     touchpoint_type: 'Call to student', touchpoint_date: new Date().toISOString().slice(0, 10),
-    course: '', momentum: '', note: ''
+    course: '', momentum: '', note: '', next_call_at: ''
   });
 
   useEffect(() => {
@@ -1059,7 +2247,7 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
   }, [showArchived, students.length]);
 
   function resetStudentForm() {
-    setStudentForm({ display_name: '', student_id: '', course: '', goal: '', risk: 'Medium', status: 'Active', admin_notes: '', next_appointment_date: '', graduation_goal_date: '', missed_call_count: '0' });
+    setStudentForm({ display_name: '', student_id: '', course: '', goal: '', risk: 'Medium', status: 'Active', admin_notes: '', next_appointment_date: '', graduation_goal_date: '', missed_call_count: '0', email: '' });
   }
 
   function submitStudent() {
@@ -1079,8 +2267,9 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
       last_contact_date: null,
       grow_note: '',
       next_call_prep: '',
-      constructive_note: ''
-    });
+      constructive_note: '',
+      email: studentForm.email || null
+    } as Omit<Student, 'id' | 'copied' | 'archived'>);
     resetStudentForm();
     setAddingStudent(false);
   }
@@ -1097,7 +2286,8 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
       admin_notes: selected.admin_notes || '',
       next_appointment_date: selected.next_appointment_date || '',
       graduation_goal_date: selected.graduation_goal_date || '',
-      missed_call_count: String(selected.missed_call_count || 0)
+      missed_call_count: String(selected.missed_call_count || 0),
+      email: selected.email || ''
     });
     setEditingProfile(true);
   }
@@ -1116,7 +2306,8 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
       admin_notes: studentForm.admin_notes,
       next_appointment_date: studentForm.next_appointment_date || null,
       graduation_goal_date: studentForm.graduation_goal_date || null,
-      missed_call_count: Number(studentForm.missed_call_count || 0)
+      missed_call_count: Number(studentForm.missed_call_count || 0),
+      email: studentForm.email || null
     });
     setEditingProfile(false);
   }
@@ -1133,7 +2324,11 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
       momentum: touchForm.momentum,
       note: touchForm.note
     });
-    setTouchForm({ touchpoint_type: 'Call to student', touchpoint_date: new Date().toISOString().slice(0, 10), course: selected.course || '', momentum: '', note: '' });
+    if (touchForm.next_call_at) {
+      const iso = new Date(touchForm.next_call_at).toISOString();
+      updateStudent(selected.id, { next_call_at: iso } as Partial<Student>);
+    }
+    setTouchForm({ touchpoint_type: 'Call to student', touchpoint_date: new Date().toISOString().slice(0, 10), course: selected.course || '', momentum: '', note: '', next_call_at: '' });
   }
 
 
@@ -1153,22 +2348,51 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
   return <>
     <Header title="Students" sub="FERPA-safe student history, touchpoints, next-call prep, and follow-up drafts.">
       <button className="btn primary" onClick={() => setAddingStudent(!addingStudent)}><Plus size={15} /> Add Student</button>
-      <label className="btn ghost upload-button"><Upload size={15} /> {importingCsv ? 'Importing...' : 'Import FERPA CSV'}<input type="file" accept=".csv,text/csv" onChange={(e) => handleCsvUpload(e.target.files?.[0])} /></label>
+      <label className="btn ghost upload-button" title="Updates existing students from Salesforce CSV by Student ID. Does not create new students or overwrite your notes."><Upload size={15} /> {importingCsv ? 'Updating...' : 'Update from Salesforce CSV'}<input type="file" accept=".csv,text/csv" onChange={(e) => handleCsvUpload(e.target.files?.[0])} /></label>
       <button className="btn ghost" onClick={() => setShowArchived(!showArchived)}><Archive size={15} /> {showArchived ? 'Active' : 'Archived'}</button>
     </Header>
     <Stats items={[["Active", String(activeStudents.length)], ["Archived", String(archivedStudents.length)], ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived).length)], ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived).length)]]} />
-    {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input placeholder="Course" value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
+    {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input placeholder="Course" value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email (for outreach drafts)" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
     <div className="students-crm-layout">
-      <section className="panel student-scroll-list"><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div>{visibleStudents.length === 0 && <div className="brief-item">No students in this view yet.</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} onClick={() => setSelectedId(student.id)}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>
+      <section className="panel student-scroll-list"><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div><div className="student-search-row"><Search size={15} /><input type="text" placeholder="Search by name or ID" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search students" /></div>{visibleStudents.length === 0 && <div className="brief-item">{search ? 'No students match that search.' : 'No students in this view yet.'}</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} onClick={() => setSelectedId(student.id)}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>
       {selected ? <section className="student-detail-pane">
-        <section className="panel"><div className="panel-head"><div><h2>{selected.display_name}</h2><p>{selected.course || 'No course'} · {selected.status} · {selected.risk}</p></div><div className="actions"><button className="btn ghost" onClick={startEditProfile}><Edit3 size={15} /> Edit</button>{!selected.archived && <button className="btn warning" onClick={() => archiveStudent(selected.id)}><Archive size={15} /> Archive</button>}</div></div>{activeWarnings.length > 0 && <FerpaWarning warnings={activeWarnings} />}<StudentHealthPanel student={selected} touchpoints={touchpoints} />
-        <div className="profile-grid"><div><strong>Student ID</strong><p>{selected.student_id || '—'}</p></div><div><strong>Goal</strong><p>{selected.goal || 'No goal saved yet.'}</p></div><div><strong>Last contact</strong><p>{selected.last_contact_date || '—'}</p></div><div><strong>Next appointment</strong><p>{selected.next_appointment_date || '—'}</p></div><div><strong>Graduation goal</strong><p>{selected.graduation_goal_date || '—'}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Last academic activity</strong><p>{selected.last_academic_activity_date || '—'}</p></div><div><strong>Course end date</strong><p>{selected.course_end_date || '—'}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
-        {editingProfile && <section className="panel"><h2>Edit profile</h2><div className="form-grid"><input value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} /><div className="form-actions"><button className="btn primary" onClick={saveProfileEdit}><Save size={15} /> Save Profile</button></div></section>}
-        <section className="panel"><h2>Admin Notes</h2><textarea value={selected.admin_notes || ''} onChange={(e) => updateStudent(selected.id, { admin_notes: e.target.value })} placeholder="Private notes for Kaylee. Keep FERPA-safe." /></section>
-        <section className="panel"><div className="panel-head"><h2>Next Call Prep</h2><FileText size={17} /></div><div className="brief-item focus-item"><strong>Next conversation focus:</strong><br />{selected.next_conversation_focus || 'Set a next conversation focus after your next touchpoint.'}</div><div className="brief-item"><strong>Prepared talking points:</strong><br />{selected.next_call_prep || 'Add a touchpoint note to generate next-call prep.'}</div><div className="brief-item"><strong>Latest course note:</strong><br />{selected.latest_course_note || 'No imported course note yet.'}</div><div className="brief-item"><strong>Constructive coaching note for Kaylee:</strong><br />{selected.constructive_note || 'Add a touchpoint to generate a self-coaching reminder.'}</div></section>
-        <section className="panel"><h2>Add Touchpoint</h2><div className="form-grid"><select value={touchForm.touchpoint_type} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_type: e.target.value })}>{touchpointTypes.map((type) => <option key={type}>{type}</option>)}</select><input type="date" value={touchForm.touchpoint_date} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_date: e.target.value })} /><input placeholder="Course" value={touchForm.course || selected.course || ''} onChange={(e) => setTouchForm({ ...touchForm, course: e.target.value })} /><input placeholder="Momentum" value={touchForm.momentum} onChange={(e) => setTouchForm({ ...touchForm, momentum: e.target.value })} /></div><textarea placeholder="What happened? What did the student say? What is the next step?" value={touchForm.note} onChange={(e) => setTouchForm({ ...touchForm, note: e.target.value })} />{ferpaWarnings(touchForm.note).length > 0 && <FerpaWarning warnings={ferpaWarnings(touchForm.note)} />}<div className="form-actions"><button className="btn primary" onClick={submitTouchpoint}><Save size={15} /> Save Touchpoint + Generate Prep</button></div></section>
-        <StudentTimeline student={selected} touchpoints={selectedTouchpoints} />
-        <section className="panel"><h2>Touchpoint Log</h2>{selectedTouchpoints.length === 0 && <div className="brief-item">No touchpoints yet. Add the first call, email, text, or voicemail above.</div>}{selectedTouchpoints.map((touchpoint) => <div className="touchpoint-card" key={touchpoint.id}><div className="panel-head"><div><strong>{touchpoint.touchpoint_type}</strong><p>{touchpoint.touchpoint_date} · {touchpoint.course || selected.course || 'No course'} · {touchpoint.momentum || 'Momentum not set'}</p></div>{touchpoint.touchpoint_type.includes('Email') ? <Mail size={17} /> : touchpoint.touchpoint_type.includes('Text') ? <MessageSquare size={17} /> : <Phone size={17} />}</div><p>{touchpoint.note}</p><details><summary>Next-call prep and follow-up drafts</summary><div className="brief-item"><strong>Next call:</strong> {touchpoint.next_call_prep}</div><div className="brief-item"><strong>Kaylee coaching:</strong> {touchpoint.constructive_note}</div><textarea readOnly value={touchpoint.follow_up_email || ''} /><button className="btn primary" onClick={() => copyText(touchpoint.follow_up_email || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Email Draft</button><textarea readOnly value={touchpoint.follow_up_text || ''} /><button className="btn ghost" onClick={() => copyText(touchpoint.follow_up_text || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Text Draft</button></details></div>)}</section>
+        {/* TOP ZONE: header + health + quick facts + next call prep — always visible without scrolling */}
+        <section className="panel student-top-zone">
+          <div className="panel-head"><div><h2>{selected.display_name}</h2><p>{selected.course || 'No course'} · {selected.status} · {selected.risk}</p></div><div className="actions"><select className="btn ghost" defaultValue="" onChange={(e) => { if (e.target.value) { generateSingleDraft(selected.id, e.target.value); e.target.value = ''; } }}><option value="" disabled>Draft email…</option><option value="check_in">Generic check-in</option><option value="ghost">Ghost outreach</option><option value="high_risk">High-risk plan</option><option value="course_ending">Course ending soon</option><option value="no_contact_14">No contact 14+ days</option><option value="win">Recognize a win</option></select>{drafts.filter((d) => d.student_id === selected.id && d.status === 'pending').length > 0 && <button className="btn ghost" onClick={() => setPage('outreach')}><Mail size={15} /> {drafts.filter((d) => d.student_id === selected.id && d.status === 'pending').length} pending</button>}<button className="btn ghost" onClick={startEditProfile}><Edit3 size={15} /> Edit</button>{!selected.archived && <button className="btn warning" onClick={() => archiveStudent(selected.id)}><Archive size={15} /> Archive</button>}</div></div>
+          {activeWarnings.length > 0 && <FerpaWarning warnings={activeWarnings} />}
+          <StudentHealthPanel student={selected} touchpoints={touchpoints} />
+          <div className="quick-facts">
+            <div><span>Student ID</span><strong>{selected.student_id || '—'}</strong></div>
+            <div><span>Course</span><strong>{selected.course || '—'}</strong></div>
+            <div><span>Course end</span><strong>{selected.course_end_date || '—'}</strong></div>
+            <div><span>Next call</span><strong>{selected.next_call_at ? new Date(selected.next_call_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}</strong></div>
+            <div className="quick-facts-goal"><span>Goal</span><strong>{selected.goal || 'No goal saved yet.'}</strong></div>
+          </div>
+          <div className="next-call-compact">
+            <div className="next-call-compact-head"><FileText size={15} /> <strong>Next Call Prep</strong></div>
+            <div className="brief-item focus-item"><strong>Focus:</strong> {selected.next_conversation_focus || 'Set a next conversation focus after your next touchpoint.'}</div>
+            <details><summary>Talking points, latest note, coaching</summary>
+              <div className="brief-item"><strong>Prepared talking points:</strong><br />{selected.next_call_prep || 'Add a touchpoint note to generate next-call prep.'}</div>
+              <div className="brief-item"><strong>Latest course note:</strong><br />{selected.latest_course_note || 'No imported course note yet.'}</div>
+              <div className="brief-item"><strong>Constructive coaching note for Kaylee:</strong><br />{selected.constructive_note || 'Add a touchpoint to generate a self-coaching reminder.'}</div>
+            </details>
+          </div>
+        </section>
+
+        {editingProfile && <section className="panel"><h2>Edit profile</h2><div className="form-grid"><input value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} /><div className="form-actions"><button className="btn primary" onClick={saveProfileEdit}><Save size={15} /> Save Profile</button></div></section>}
+
+        {/* TWO-COLUMN ZONE: scrollable history on left, sticky touchpoint form on right */}
+        <div className="student-work-area">
+          <div className="student-work-main">
+            <section className="panel"><h2>Admin Notes</h2><textarea value={selected.admin_notes || ''} onChange={(e) => updateStudent(selected.id, { admin_notes: e.target.value })} placeholder="Private notes for Kaylee. Keep FERPA-safe." /></section>
+            <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{selected.last_contact_date || '—'}</p></div><div><strong>Next appointment</strong><p>{selected.next_appointment_date || '—'}</p></div><div><strong>Graduation goal</strong><p>{selected.graduation_goal_date || '—'}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Last academic activity</strong><p>{selected.last_academic_activity_date || '—'}</p></div><div><strong>Term end</strong><p>{selected.term_end_date || '—'}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
+            <StudentTimeline student={selected} touchpoints={selectedTouchpoints} />
+            <section className="panel"><h2>Touchpoint Log</h2>{selectedTouchpoints.length === 0 && <div className="brief-item">No touchpoints yet. Add the first call, email, text, or voicemail in the panel on the right.</div>}{selectedTouchpoints.map((touchpoint) => <div className="touchpoint-card" key={touchpoint.id}><div className="panel-head"><div><strong>{touchpoint.touchpoint_type}</strong><p>{touchpoint.touchpoint_date} · {touchpoint.course || selected.course || 'No course'} · {touchpoint.momentum || 'Momentum not set'}</p></div>{touchpoint.touchpoint_type.includes('Email') ? <Mail size={17} /> : touchpoint.touchpoint_type.includes('Text') ? <MessageSquare size={17} /> : <Phone size={17} />}</div><p>{touchpoint.note}</p><details><summary>Next-call prep and follow-up drafts</summary><div className="brief-item"><strong>Next call:</strong> {touchpoint.next_call_prep}</div><div className="brief-item"><strong>Kaylee coaching:</strong> {touchpoint.constructive_note}</div><textarea readOnly value={touchpoint.follow_up_email || ''} /><button className="btn primary" onClick={() => copyText(touchpoint.follow_up_email || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Email Draft</button><textarea readOnly value={touchpoint.follow_up_text || ''} /><button className="btn ghost" onClick={() => copyText(touchpoint.follow_up_text || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Text Draft</button></details></div>)}</section>
+          </div>
+          <aside className="student-work-side">
+            <section className="panel"><h2>Add Touchpoint</h2><div className="form-grid"><select value={touchForm.touchpoint_type} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_type: e.target.value })}>{touchpointTypes.map((type) => <option key={type}>{type}</option>)}</select><input type="date" value={touchForm.touchpoint_date} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_date: e.target.value })} /><input placeholder="Course" value={touchForm.course || selected.course || ''} onChange={(e) => setTouchForm({ ...touchForm, course: e.target.value })} /><input placeholder="Momentum" value={touchForm.momentum} onChange={(e) => setTouchForm({ ...touchForm, momentum: e.target.value })} /></div><label className="date-field"><span>Next call with this student (optional)</span><input type="datetime-local" value={touchForm.next_call_at} onChange={(e) => setTouchForm({ ...touchForm, next_call_at: e.target.value })} /></label><textarea placeholder="What happened? What did the student say? What is the next step?" value={touchForm.note} onChange={(e) => setTouchForm({ ...touchForm, note: e.target.value })} />{ferpaWarnings(touchForm.note).length > 0 && <FerpaWarning warnings={ferpaWarnings(touchForm.note)} />}<div className="form-actions"><button className="btn primary" onClick={submitTouchpoint}><Save size={15} /> Save Touchpoint + Generate Prep</button></div></section>
+          </aside>
+        </div>
       </section> : <section className="panel"><h2>Select a student</h2><p>Add or select a student to view their profile, touchpoints, and next-call prep.</p></section>}
     </div>
   </>;
@@ -1203,8 +2427,71 @@ function HealthBar({ label, value }: { label: string; value: number }) {
 }
 
 function StudentTimeline({ student, touchpoints }: { student: Student; touchpoints: Touchpoint[] }) {
-  const events = timelineForStudent(student, touchpoints).slice(0, 8);
-  return <section className="panel"><div className="panel-head"><h2>Student Timeline</h2><span className="readonly-pill"><CalendarDays size={14} /> {events.length}</span></div>{events.length === 0 && <div className="brief-item">No timeline events yet.</div>}{events.map((event) => <div className={`timeline-item ${event.kind}`} key={event.id}><div className="timeline-date">{event.date}</div><div><strong>{event.title}</strong><p>{event.detail}</p></div></div>)}</section>;
+  const events = timelineForStudent(student, touchpoints).slice(0, 12);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const touchpointDates = new Set(touchpoints.map((t) => t.touchpoint_date).filter(Boolean));
+  return <section className="panel">
+    <div className="panel-head">
+      <h2>Student Timeline</h2>
+      <button className="readonly-pill timeline-cal-btn" onClick={() => setCalendarOpen(!calendarOpen)} aria-expanded={calendarOpen}>
+        <CalendarDays size={14} /> {touchpointDates.size} touchpoint{touchpointDates.size === 1 ? '' : 's'}
+      </button>
+    </div>
+    {calendarOpen && <TouchpointCalendar dates={touchpointDates} />}
+    {events.length === 0 && <div className="brief-item">No timeline events yet.</div>}
+    {events.map((event) => <details className={`timeline-item-collapsible ${event.kind}`} key={event.id}>
+      <summary><span className="timeline-date">{event.date}</span> <strong>{event.title}</strong></summary>
+      <p>{event.detail}</p>
+    </details>)}
+  </section>;
+}
+
+function TouchpointCalendar({ dates }: { dates: Set<string> }) {
+  // Determine the latest touchpoint to anchor the calendar view; default to today.
+  const sorted = [...dates].sort();
+  const initialMonth = (() => {
+    const last = sorted[sorted.length - 1];
+    const d = last ? new Date(last + 'T00:00:00') : new Date();
+    return { year: d.getFullYear(), month: d.getMonth() };
+  })();
+  const [view, setView] = useState(initialMonth);
+
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const firstDay = new Date(view.year, view.month, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(view.year, view.month + 1, 0).getDate();
+
+  function shift(delta: number) {
+    let m = view.month + delta;
+    let y = view.year;
+    if (m < 0) { m = 11; y -= 1; }
+    if (m > 11) { m = 0; y += 1; }
+    setView({ year: y, month: m });
+  }
+
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const monthKey = `${view.year}-${String(view.month + 1).padStart(2, '0')}`;
+
+  return <div className="touchpoint-calendar">
+    <div className="touchpoint-calendar-head">
+      <button type="button" onClick={() => shift(-1)} aria-label="Previous month">‹</button>
+      <strong>{monthNames[view.month]} {view.year}</strong>
+      <button type="button" onClick={() => shift(1)} aria-label="Next month">›</button>
+    </div>
+    <div className="touchpoint-calendar-grid">
+      {['S','M','T','W','T','F','S'].map((d, i) => <span key={`hdr-${i}`} className="touchpoint-calendar-dow">{d}</span>)}
+      {cells.map((d, i) => {
+        if (d === null) return <span key={`empty-${i}`} className="touchpoint-calendar-cell empty" />;
+        const iso = `${monthKey}-${String(d).padStart(2, '0')}`;
+        const hit = dates.has(iso);
+        return <span key={iso} className={`touchpoint-calendar-cell ${hit ? 'has-touchpoint' : ''}`} title={hit ? `Touchpoint on ${iso}` : iso}>{d}</span>;
+      })}
+    </div>
+    <p className="touchpoint-calendar-legend"><span className="touchpoint-calendar-dot" /> Day with a logged touchpoint</p>
+  </div>;
 }
 
 function FerpaWarning({ warnings }: { warnings: string[] }) {
@@ -1220,6 +2507,516 @@ function SettingsPage({ permissions, updatePermission }: { permissions: ModulePe
     const current = accessFor(item.module_name);
     return <div className="permission-row" key={item.module_name}><div><strong>{item.label}</strong><p>{current === 'hidden' ? 'Hidden from Adam' : current === 'view' ? 'Visible · View-only' : 'Visible · Editable'}</p></div><label className="switch-row"><Eye size={15} /> Adam Access <select value={current} onChange={(e) => updatePermission(item.module_name, e.target.value as AccessLevel)}><option value="hidden">Hidden</option><option value="view">View Only</option><option value="edit">Edit</option></select></label></div>;
   })}</div></section><section className="panel"><h2>Access rules</h2><div className="brief-item"><strong>Kaylee:</strong> admin, full Home + Work access.</div><div className="brief-item"><strong>Adam:</strong> Home only. Hidden means no sidebar item. View Only means no add/save/edit buttons. Edit means full access.</div><div className="brief-item"><strong>Students:</strong> always admin-only and FERPA-safe.</div></section></>;
+}
+
+function Outreach({ drafts, students, generateCohortDrafts, updateDraft, markDraftSent, deleteDraft }: {
+  drafts: EmailDraft[];
+  students: Student[];
+  generateCohortDrafts: (cohort: string, cohortLabel: string, kind: string) => void;
+  updateDraft: (id: string, patch: Partial<EmailDraft>) => void;
+  markDraftSent: (id: string) => void;
+  deleteDraft: (id: string) => void;
+}) {
+  const [cohort, setCohort] = useState('high_risk');
+  const [kind, setKind] = useState('check_in');
+  const [courseCode, setCourseCode] = useState('');
+  const [filter, setFilter] = useState<'pending' | 'sent' | 'all'>('pending');
+  const [search, setSearch] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editBuffer, setEditBuffer] = useState<{ subject: string; body: string }>({ subject: '', body: '' });
+
+  const cohortOptions: { value: string; label: string }[] = [
+    { value: 'high_risk', label: 'All High Risk' },
+    { value: 'ghost', label: 'Ghost risk (3+ missed)' },
+    { value: 'no_contact_14', label: 'No contact in 14+ days' },
+    { value: 'course_ending', label: 'Course ending in 30 days' },
+    { value: 'course', label: 'Specific course code…' },
+    { value: 'all_active', label: 'All active students' }
+  ];
+  const kindOptions: { value: string; label: string }[] = [
+    { value: 'check_in', label: 'Generic check-in' },
+    { value: 'ghost', label: 'Ghost outreach' },
+    { value: 'high_risk', label: 'High-risk plan' },
+    { value: 'course_ending', label: 'Course ending soon' },
+    { value: 'no_contact_14', label: 'No contact 14+ days' },
+    { value: 'win', label: 'Recognize a win' }
+  ];
+
+  function studentName(id: string | null) {
+    if (!id) return 'Unknown';
+    const s = students.find((st) => st.id === id);
+    return s ? s.display_name : 'Unknown';
+  }
+  function studentEmail(id: string | null) {
+    if (!id) return '';
+    return students.find((st) => st.id === id)?.email || '';
+  }
+  function studentMeta(id: string | null) {
+    const s = students.find((st) => st.id === id);
+    if (!s) return '';
+    return `${s.student_id ? `ID ${s.student_id} · ` : ''}${s.course || 'No course'} · ${s.status}`;
+  }
+
+  const filtered = useMemo(() => {
+    return drafts.filter((d) => {
+      if (filter === 'pending' && d.status !== 'pending') return false;
+      if (filter === 'sent' && d.status !== 'sent') return false;
+      if (search) {
+        const name = studentName(d.student_id).toLowerCase();
+        const s = search.toLowerCase();
+        if (!name.includes(s) && !(d.subject || '').toLowerCase().includes(s) && !(d.cohort_label || '').toLowerCase().includes(s)) return false;
+      }
+      return true;
+    });
+  }, [drafts, filter, search, students]);
+
+  function runGenerate() {
+    const actualCohort = cohort === 'course' ? `course:${courseCode.trim()}` : cohort;
+    const label = cohort === 'course' ? `Course ${courseCode.toUpperCase()}` : (cohortOptions.find((c) => c.value === cohort)?.label || cohort);
+    generateCohortDrafts(actualCohort, label, kind);
+  }
+
+  function startEdit(d: EmailDraft) {
+    setEditingId(d.id);
+    setEditBuffer({ subject: d.subject, body: d.body });
+  }
+  function saveEdit(id: string) {
+    updateDraft(id, { subject: editBuffer.subject, body: editBuffer.body, edited: true });
+    setEditingId(null);
+  }
+
+  async function copyToClipboard(text: string) {
+    await navigator.clipboard?.writeText(text);
+  }
+
+  return <>
+    <Header title="Outreach Drafts" sub="Generate cohort-based email drafts, review and edit, then copy into Outlook to send. Marking a draft sent auto-logs a touchpoint." />
+    <section className="panel">
+      <h2>Generate cohort drafts</h2>
+      <div className="form-grid">
+        <label className="date-field"><span>Cohort</span>
+          <select value={cohort} onChange={(e) => setCohort(e.target.value)}>
+            {cohortOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+        <label className="date-field"><span>Email template</span>
+          <select value={kind} onChange={(e) => setKind(e.target.value)}>
+            {kindOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+        {cohort === 'course' && <input placeholder="Course code, e.g. D316" value={courseCode} onChange={(e) => setCourseCode(e.target.value)} />}
+      </div>
+      <div className="form-actions">
+        <button className="btn primary" onClick={runGenerate}><Sparkles size={15} /> Generate drafts</button>
+      </div>
+    </section>
+
+    <section className="panel">
+      <div className="panel-head">
+        <h2>Draft inbox ({filtered.length})</h2>
+        <div className="actions">
+          <select value={filter} onChange={(e) => setFilter(e.target.value as 'pending' | 'sent' | 'all')}>
+            <option value="pending">Pending</option>
+            <option value="sent">Sent</option>
+            <option value="all">All</option>
+          </select>
+          <input placeholder="Search name, subject, cohort" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+      </div>
+      {filtered.length === 0 && <div className="brief-item">No drafts match. Generate a cohort batch above or draft directly from a student profile.</div>}
+      {filtered.map((d) => {
+        const isEditing = editingId === d.id;
+        const email = studentEmail(d.student_id);
+        return <div className="touchpoint-card" key={d.id}>
+          <div className="panel-head">
+            <div>
+              <strong>{studentName(d.student_id)}</strong>
+              <p>{studentMeta(d.student_id)} · {d.cohort_label || 'single'} · {d.template_kind}{d.edited ? ' · edited' : ''}{d.status === 'sent' ? ` · sent ${d.sent_at ? new Date(d.sent_at).toLocaleString([], { month: 'short', day: 'numeric' }) : ''}` : ''}</p>
+            </div>
+            <Mail size={17} />
+          </div>
+          {email ? <p style={{ fontSize: 13, color: 'var(--muted, #888)' }}>To: {email}</p> : <p style={{ fontSize: 13, color: '#c44' }}>No email on file — add one on the student profile before sending.</p>}
+          {isEditing ? <>
+            <input value={editBuffer.subject} onChange={(e) => setEditBuffer({ ...editBuffer, subject: e.target.value })} />
+            <textarea value={editBuffer.body} onChange={(e) => setEditBuffer({ ...editBuffer, body: e.target.value })} rows={10} />
+            <div className="form-actions">
+              <button className="btn primary" onClick={() => saveEdit(d.id)}><Save size={15} /> Save edits</button>
+              <button className="btn ghost" onClick={() => setEditingId(null)}>Cancel</button>
+            </div>
+          </> : <>
+            <p><strong>Subject:</strong> {d.subject}</p>
+            <details open><summary>Email body</summary><pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 14 }}>{d.body}</pre></details>
+            <div className="form-actions">
+              <button className="btn primary" onClick={() => copyToClipboard(`Subject: ${d.subject}\n\n${d.body}`)}><Copy size={15} /> Copy subject + body</button>
+              <button className="btn ghost" onClick={() => copyToClipboard(d.body)}><Copy size={15} /> Copy body only</button>
+              {d.status === 'pending' && <button className="btn ghost" onClick={() => startEdit(d)}><Edit3 size={15} /> Edit</button>}
+              {d.status === 'pending' && <button className="btn primary" onClick={() => markDraftSent(d.id)}><Send size={15} /> Mark sent</button>}
+              <button className="btn warning" onClick={() => { if (confirm('Delete this draft?')) deleteDraft(d.id); }}><Trash2 size={15} /> Delete</button>
+            </div>
+          </>}
+        </div>;
+      })}
+    </section>
+  </>;
+}
+
+type ChoresViewMode = 'mine' | 'adam' | 'approval';
+
+function Chores({
+  choreTasks, choreSuggestions, syncState, syncing, householdUsers, currentUserName,
+  syncTodoistNow, completeChore, uncompleteChore,
+  markSuggestionDone, snoozeSuggestion, dismissSuggestion, restoreSuggestion,
+  addSuggestionToTodoist, approveSuggestionForAdam, approveSuggestionForSelf, reassignChore,
+  editable
+}: {
+  choreTasks: ChoreTask[];
+  choreSuggestions: ChoreSuggestion[];
+  syncState: TodoistSyncState | null;
+  syncing: boolean;
+  householdUsers: HouseholdUser[];
+  currentUserName: string;
+  syncTodoistNow: () => void;
+  completeChore: (id: string) => void;
+  uncompleteChore: (id: string) => void;
+  markSuggestionDone: (id: string) => void;
+  snoozeSuggestion: (id: string, days: number) => void;
+  dismissSuggestion: (id: string) => void;
+  restoreSuggestion: (id: string) => void;
+  addSuggestionToTodoist: (id: string, assigneeTodoistId?: string | null) => void;
+  approveSuggestionForAdam: (id: string) => void;
+  approveSuggestionForSelf: (id: string) => void;
+  reassignChore: (choreId: string, toUserName: 'Kaylee' | 'Adam') => void;
+  editable: boolean;
+}) {
+  const [showCompleted, setShowCompleted] = useState(false);
+  const [openKeys, setOpenKeys] = useState<Set<string> | null>(null); // null = not yet initialized
+  const [view, setView] = useState<ChoresViewMode>('mine');
+
+  const monthNow = new Date().getMonth() + 1;
+
+  const kaylee = householdUsers.find((u) => u.name.toLowerCase() === 'kaylee') ?? null;
+  const adam = householdUsers.find((u) => u.name.toLowerCase() === 'adam') ?? null;
+
+  // Split chores by who they're assigned to. Anything with no assignment
+  // at all defaults into Kaylee's view, since unassigned Todoist tasks are
+  // hers by default until she delegates them.
+  const myChores = useMemo(() => {
+    if (!kaylee) return choreTasks.filter((c) => !c.assigned_to);
+    return choreTasks.filter((c) => c.assigned_to === kaylee.id || !c.assigned_to);
+  }, [choreTasks, kaylee]);
+
+  const adamChores = useMemo(() => {
+    if (!adam) return [];
+    return choreTasks.filter((c) => c.assigned_to === adam.id);
+  }, [choreTasks, adam]);
+
+  // Recently-escalated chores: were Adam's, auto-moved to Kaylee for being
+  // 3+ days overdue. Surfaced as a callout at the top of "My Tasks".
+  const escalatedToMe = useMemo(() => {
+    return choreTasks.filter((c) => c.escalation_note && kaylee && c.assigned_to === kaylee.id);
+  }, [choreTasks, kaylee]);
+
+  // Suggestions worth reviewing: in-season AND pending (or overdue), same
+  // logic as before, just now feeding the "Needs Approval" tab instead of
+  // a fixed "this month" panel.
+  const reviewSuggestions = useMemo(() => {
+    const now = Date.now();
+    return choreSuggestions.filter((s) => {
+      if (s.status === 'dismissed') return false;
+      if (s.status === 'done') return false;
+      if (s.status === 'added') return false;
+      if (s.status === 'snoozed') {
+        if (!s.snoozed_until) return false;
+        if (new Date(s.snoozed_until).getTime() > now) return false;
+      }
+      const inSeason = !s.month_triggers || s.month_triggers.length === 0 || s.month_triggers.includes(monthNow);
+      const isOverdue = s.next_due_at ? new Date(s.next_due_at).getTime() < now : false;
+      return inSeason || isOverdue;
+    });
+  }, [choreSuggestions, monthNow]);
+
+  const activeList = view === 'mine' ? myChores : view === 'adam' ? adamChores : [];
+  const dateBuckets = useMemo(() => groupChoresByDate(activeList, showCompleted), [activeList, showCompleted]);
+
+  // Auto-expand Today + any overdue buckets the first time buckets compute
+  // for the CURRENT view; resets when switching views so each tab starts
+  // with a sensible default instead of carrying over the other tab's state.
+  useEffect(() => {
+    setOpenKeys(null);
+  }, [view]);
+
+  useEffect(() => {
+    if (openKeys !== null) return;
+    const initial = new Set<string>();
+    for (const bucket of dateBuckets) {
+      if (bucket.isToday || bucket.isOverdue) initial.add(bucket.key);
+    }
+    setOpenKeys(initial);
+  }, [dateBuckets, openKeys]);
+
+  function toggleKey(key: string) {
+    setOpenKeys((current) => {
+      const next = new Set(current ?? []);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  const lastSyncLabel = syncState?.last_sync_at
+    ? new Date(syncState.last_sync_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : 'never';
+
+  return <>
+    <Header title="Chores & Tasks" sub="Synced with Todoist.">
+      {editable
+        ? <button className="btn primary" onClick={syncTodoistNow} disabled={syncing}>
+            <RefreshCw size={15} className={syncing ? 'spin' : ''} /> {syncing ? 'Syncing…' : 'Sync from Todoist'}
+          </button>
+        : <span className="readonly-pill"><Eye size={14} /> View only</span>}
+    </Header>
+
+    <div className="last-sync-line">
+      <RefreshCw size={12} />
+      Last sync: {lastSyncLabel} · auto-syncs every 15 min
+      {syncState?.last_sync_status && syncState.last_sync_status !== 'success' && syncState.last_sync_status !== 'never' && (
+        <span className={`last-sync-status ${syncState.last_sync_status}`}>· {syncState.last_sync_status}</span>
+      )}
+    </div>
+
+    {syncState?.last_sync_status === 'error' && syncState?.last_sync_error && <section className="panel suggestion urgent">
+      <h2>Last sync failed</h2>
+      <p>{syncState.last_sync_error}</p>
+      <small>Make sure TODOIST_API_TOKEN is set in Supabase function secrets, then click Sync again.</small>
+    </section>}
+
+    {/* ============ 3-WAY TOGGLE ============ */}
+    <div className="view-toggle">
+      <button className={view === 'mine' ? 'active' : ''} onClick={() => setView('mine')}>
+        My Tasks{myChores.length > 0 ? ` (${myChores.filter((c) => !c.is_completed).length})` : ''}
+      </button>
+      <button className={view === 'adam' ? 'active' : ''} onClick={() => setView('adam')}>
+        Adam's Tasks{adamChores.length > 0 ? ` (${adamChores.filter((c) => !c.is_completed).length})` : ''}
+      </button>
+      <button className={view === 'approval' ? 'active' : ''} onClick={() => setView('approval')}>
+        Needs Approval{reviewSuggestions.length > 0 ? ` (${reviewSuggestions.length})` : ''}
+      </button>
+    </div>
+
+    {/* ============ ESCALATION CALLOUT (My Tasks only) ============ */}
+    {view === 'mine' && escalatedToMe.length > 0 && <section className="panel suggestion urgent">
+      <div className="panel-head">
+        <h2><AlertTriangle size={16} style={{ verticalAlign: 'text-bottom' }} /> Moved from Adam</h2>
+        <span className="readonly-pill">{escalatedToMe.length} task{escalatedToMe.length === 1 ? '' : 's'}</span>
+      </div>
+      {escalatedToMe.map((c) => (
+        <div className="brief-item" key={c.id}><strong>{c.name}</strong> — {c.escalation_note}</div>
+      ))}
+    </section>}
+
+    {/* ============ NEEDS APPROVAL TAB ============ */}
+    {view === 'approval' && <section className="panel">
+      <div className="panel-head">
+        <h2>Review &amp; Approve</h2>
+        <span className="readonly-pill">{reviewSuggestions.length} suggestion{reviewSuggestions.length === 1 ? '' : 's'}</span>
+      </div>
+      <p style={{ color: 'var(--muted, #888)', fontSize: 13, marginTop: -8 }}>
+        Things the Hub thinks are worth doing soon. Send a task to Adam, or take it yourself if it's a better fit for you.
+      </p>
+      {reviewSuggestions.length === 0 && <div className="brief-item">Nothing waiting on review right now.</div>}
+      <div className="grid two" style={{ gap: 12 }}>
+        {reviewSuggestions.map((s) => <ApprovalSuggestionCard
+          key={s.id}
+          suggestion={s}
+          editable={editable}
+          adamAvailable={Boolean(adam?.todoist_id)}
+          onSendToAdam={() => approveSuggestionForAdam(s.id)}
+          onTakeForSelf={() => approveSuggestionForSelf(s.id)}
+          onDone={() => markSuggestionDone(s.id)}
+          onSnooze={(days) => snoozeSuggestion(s.id, days)}
+          onDismiss={() => dismissSuggestion(s.id)}
+        />)}
+      </div>
+    </section>}
+
+    {/* ============ DATE-GROUPED LIST (My Tasks / Adam's Tasks) ============ */}
+    {view !== 'approval' && <section className="panel ct-panel">
+      <div className="panel-head">
+        <h2>{view === 'mine' ? 'My Tasks' : "Adam's Tasks"}</h2>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          <input type="checkbox" checked={showCompleted} onChange={(e) => setShowCompleted(e.target.checked)} />
+          Show completed
+        </label>
+      </div>
+      {dateBuckets.length === 0 && <div className="brief-item">
+        {view === 'adam'
+          ? "Nothing assigned to Adam right now. Approve a suggestion for him from Needs Approval, or assign a task to him in Todoist."
+          : 'Nothing scheduled. Sync Todoist or add tasks there.'}
+      </div>}
+      {dateBuckets.map((bucket) => {
+        const isOpen = openKeys?.has(bucket.key) ?? (bucket.isToday || bucket.isOverdue);
+        return <details key={bucket.key} className={`ct-day-group ${bucket.isToday ? 'ct-day-today' : ''} ${bucket.isOverdue ? 'ct-day-overdue' : ''}`} open={isOpen} onToggle={(e) => {
+          const nowOpen = (e.target as HTMLDetailsElement).open;
+          if (nowOpen !== isOpen) toggleKey(bucket.key);
+        }}>
+          <summary className="ct-day-summary">
+            <strong>{bucket.label}</strong>
+            <span className="ct-day-count">{bucket.chores.length}</span>
+          </summary>
+          <div className="ct-list">
+            {bucket.chores.map((chore) => {
+              const props = choreToRowProps(chore, bucket.isToday);
+              return <div className="ct-row-with-action" key={chore.id}>
+                <CompactTaskRow
+                  {...props}
+                  editable={editable}
+                  onToggle={() => chore.is_completed ? uncompleteChore(chore.id) : completeChore(chore.id)}
+                />
+                {editable && view === 'adam' && !chore.is_completed && (
+                  <button
+                    className="btn ghost tiny ct-take-button"
+                    onClick={() => reassignChore(chore.id, 'Kaylee')}
+                    title="Take this task yourself instead of Adam"
+                  >
+                    I'll do this
+                  </button>
+                )}
+              </div>;
+            })}
+          </div>
+        </details>;
+      })}
+    </section>}
+  </>;
+}
+
+function ApprovalSuggestionCard({ suggestion, editable, adamAvailable, onSendToAdam, onTakeForSelf, onDone, onSnooze, onDismiss }: {
+  suggestion: ChoreSuggestion;
+  editable: boolean;
+  adamAvailable: boolean;
+  onSendToAdam: () => void;
+  onTakeForSelf: () => void;
+  onDone: () => void;
+  onSnooze: (days: number) => void;
+  onDismiss: () => void;
+}) {
+  const iconMap: Record<string, React.ElementType> = {
+    homeowner: Home, vehicle: Car, tool: Wrench, dog: Bone,
+    garden: Flower2, preserving: Archive, safety: ShieldCheck, seasonal: Sun
+  };
+  const Icon = iconMap[suggestion.category] || Home;
+  return <div className="brief-item" style={{ padding: 12 }}>
+    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      <Icon size={20} style={{ marginTop: 2, flexShrink: 0 }} />
+      <div style={{ flex: 1 }}>
+        <strong>{suggestion.title}</strong>
+        <p style={{ fontSize: 13, margin: '4px 0' }}>{suggestion.why_it_matters || suggestion.description}</p>
+        <small>{suggestion.estimated_minutes} min · {suggestion.effort_level} · {suggestion.frequency}</small>
+        {editable && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+          <button className="btn primary tiny" onClick={onSendToAdam} disabled={!adamAvailable} title={adamAvailable ? 'Send to Adam in Todoist' : "Adam's Todoist ID isn't set up yet"}>
+            <Send size={12} /> Send to Adam
+          </button>
+          <button className="btn ghost tiny" onClick={onTakeForSelf}><CheckCircle2 size={12} /> I'll do this instead</button>
+          <button className="btn ghost tiny" onClick={onDone}><CheckCircle2 size={12} /> Already done</button>
+          <button className="btn ghost tiny" onClick={() => onSnooze(30)}><Clock size={12} /> 30d</button>
+          <button className="btn ghost tiny" onClick={onDismiss}><Trash2 size={12} /> Skip</button>
+        </div>}
+      </div>
+    </div>
+  </div>;
+}
+
+function startOfDay(d: Date): Date {
+  const copy = new Date(d);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+function addDays(d: Date, days: number): Date {
+  const copy = new Date(d);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+function dateGroupLabel(d: Date, today: Date): string {
+  const diffDays = Math.round((startOfDay(d).getTime() - today.getTime()) / 86400000);
+  if (diffDays < 0) return diffDays === -1 ? 'Yesterday' : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} · Overdue`;
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Tomorrow';
+  if (diffDays < 7) return d.toLocaleDateString([], { weekday: 'long' });
+  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+const WEEKDAY_INDEX: Record<string, number> = {
+  Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6
+};
+
+/**
+ * Estimates a calendar date for chores that don't carry an explicit
+ * due_date but do carry a day_of_week section (e.g. a "Monday" section
+ * task with no due date set in Todoist). Picks the next upcoming occurrence
+ * of that weekday, or today if day_of_week is "Daily".
+ */
+function estimateDateFromDayOfWeek(dayOfWeek: string, today: Date): Date | null {
+  if (dayOfWeek === 'Daily') return today;
+  if (dayOfWeek === 'Weekend') {
+    const dow = today.getDay();
+    const toSat = (6 - dow + 7) % 7;
+    return addDays(today, toSat);
+  }
+  const idx = WEEKDAY_INDEX[dayOfWeek];
+  if (idx === undefined) return null;
+  const dow = today.getDay();
+  const diff = (idx - dow + 7) % 7;
+  return addDays(today, diff);
+}
+
+/**
+ * Groups chores by actual calendar date — Today, Tomorrow, named weekdays,
+ * then a far-future bucket — the way Todoist's Upcoming view works, rather
+ * than by static Todoist section name. Chores with no real due date but a
+ * day_of_week section get slotted into their next likely occurrence so they
+ * still show up somewhere sensible. Anything with neither lands in "No date".
+ */
+function groupChoresByDate(choreTasks: ChoreTask[], showCompleted: boolean): { key: string; label: string; chores: ChoreTask[]; isToday: boolean; isOverdue: boolean }[] {
+  const today = startOfDay(new Date());
+  const buckets = new Map<string, { date: Date | null; chores: ChoreTask[] }>();
+
+  for (const chore of choreTasks) {
+    if (!showCompleted && chore.is_completed) continue;
+
+    let bucketDate: Date | null = null;
+    if (chore.due_date) {
+      bucketDate = startOfDay(new Date(chore.due_date));
+    } else if (chore.day_of_week && chore.day_of_week !== 'Anytime' && chore.day_of_week !== 'Monthly' && chore.day_of_week !== 'Jules') {
+      bucketDate = estimateDateFromDayOfWeek(chore.day_of_week, today);
+    }
+
+    const key = bucketDate ? bucketDate.toISOString().slice(0, 10) : 'no-date';
+    if (!buckets.has(key)) buckets.set(key, { date: bucketDate, chores: [] });
+    buckets.get(key)!.chores.push(chore);
+  }
+
+  const result: { key: string; label: string; chores: ChoreTask[]; isToday: boolean; isOverdue: boolean; sortKey: number }[] = [];
+  for (const [key, bucket] of buckets.entries()) {
+    const sorted = bucket.chores.sort((a, b) => (b.priority || 1) - (a.priority || 1));
+    if (key === 'no-date') {
+      result.push({ key, label: 'No date', chores: sorted, isToday: false, isOverdue: false, sortKey: Number.MAX_SAFE_INTEGER });
+      continue;
+    }
+    const d = bucket.date!;
+    const diffDays = Math.round((d.getTime() - today.getTime()) / 86400000);
+    result.push({
+      key,
+      label: dateGroupLabel(d, today),
+      chores: sorted,
+      isToday: diffDays === 0,
+      isOverdue: diffDays < 0,
+      sortKey: diffDays
+    });
+  }
+
+  result.sort((a, b) => a.sortKey - b.sortKey);
+  return result.map(({ sortKey, ...rest }) => rest);
 }
 
 function Placeholder({ title, sub }: { title: string; sub: string }) {
