@@ -4,17 +4,18 @@ import {
   Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash
+  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
 import GoogleCalendarToday from './GoogleCalendarToday';
 import Budget from './Budget';
 import Vehicles from './Vehicles';
+import Jules from './Jules';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'suggestions' | 'students' | 'outreach' | 'settings';
+type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'suggestions' | 'students' | 'outreach' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -205,6 +206,7 @@ const homeNav: readonly NavEntry[] = [
   ['inventory', 'Inventory', Inbox],
   ['chores', 'Chores & Tasks', ListTodo],
   ['vehicles', 'Vehicles', Car],
+  ['jules', 'Jules', Heart],
   ['suggestions', 'Home Suggestions', Home]
 ];
 
@@ -225,6 +227,7 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'inventory', module_name: 'inventory', label: 'Inventory', default_access: 'edit' },
   { page: 'chores', module_name: 'chores', label: 'Chores & Tasks', default_access: 'edit' },
   { page: 'vehicles', module_name: 'vehicles', label: 'Vehicles', default_access: 'view' },
+  { page: 'jules', module_name: 'jules', label: 'Jules', default_access: 'edit' },
   { page: 'suggestions', module_name: 'home_suggestions', label: 'Home Suggestions', default_access: 'edit' },
   { page: 'budget', module_name: 'budget', label: 'Budget', default_access: 'view' },
   { page: 'students', module_name: 'students', label: 'Students', default_access: 'hidden' },
@@ -1556,6 +1559,7 @@ Kaylee`;
           {page === 'inventory' && <Inventory inventory={inventory} createItem={createInventoryItem} updateQuantity={updateInventoryQuantity} editable={canEdit('inventory')} />}
           {page === 'chores' && <Chores choreTasks={choreTasks} choreSuggestions={choreSuggestions} syncState={syncState} syncing={syncing} householdUsers={householdUsers} currentUserName={activeName} syncTodoistNow={syncTodoistNow} completeChore={completeChore} uncompleteChore={uncompleteChore} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} approveSuggestionForAdam={approveSuggestionForAdam} approveSuggestionForSelf={approveSuggestionForSelf} reassignChore={reassignChore} editable={canEdit('chores')} />}
           {page === 'vehicles' && <Vehicles />}
+          {page === 'jules' && <Jules />}
           {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
           {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
           {page === 'outreach' && activeRole === 'admin' && <Outreach drafts={drafts} students={students} generateCohortDrafts={generateCohortDrafts} updateDraft={updateDraft} markDraftSent={markDraftSent} deleteDraft={deleteDraft} />}
