@@ -10,6 +10,7 @@ import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
 import GoogleCalendarToday from './GoogleCalendarToday';
 import Budget from './Budget';
+import Vehicles from './Vehicles';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
@@ -257,10 +258,6 @@ const seedTasks: TaskItem[] = [
   { id: 't3', title: "Approve Adam's Friday task plan", owner: 'Kaylee', mode: 'home', minutes: 5, priority: 'urgent', status: 'pending_approval', source: 'Adam' }
 ];
 
-const vehicles = [
-  { name: '2016 Toyota Corolla', miles: 134000, type: 'Gas', urgent: ['Spark plugs overdue', 'Transmission fluid unknown'], ok: ['Brakes completed 2025', 'Tire rotation at 133,900 mi'] },
-  { name: '2013 Nissan Leaf', miles: 82500, type: 'EV', urgent: ['12V auxiliary battery likely due', 'HV battery health check'], ok: ['Registration tracked'] }
-];
 
 const COMPACT_ROW_CSS = `
 .ct-panel { padding-bottom: 6px; }
@@ -2060,9 +2057,6 @@ function Inventory({ inventory, createItem, updateQuantity, editable }: { invent
   </>;
 }
 
-function Vehicles() {
-  return <><Header title="Vehicles" sub="Maintenance tracking for Corolla and Leaf." /><div className="grid two">{vehicles.map((vehicle) => <section className="panel" key={vehicle.name}><h2>{vehicle.name}</h2><p>{vehicle.type} · {vehicle.miles.toLocaleString()} miles</p><h3>Urgent</h3>{vehicle.urgent.map((item) => <div className="brief-item urgent" key={item}>{item}</div>)}<h3>Okay</h3>{vehicle.ok.map((item) => <div className="brief-item good" key={item}>{item}</div>)}</section>)}</div></>;
-}
 
 function Suggestions({ choreSuggestions, markSuggestionDone, snoozeSuggestion, dismissSuggestion, restoreSuggestion, addSuggestionToTodoist, editable }: { choreSuggestions: ChoreSuggestion[]; markSuggestionDone: (id: string) => void; snoozeSuggestion: (id: string, days: number) => void; dismissSuggestion: (id: string) => void; restoreSuggestion: (id: string) => void; addSuggestionToTodoist: (id: string) => void; editable: boolean }) {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
