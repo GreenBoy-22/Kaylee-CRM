@@ -4,7 +4,7 @@
 // month-to-month views, split across the Bills Account / Main Account
 // two-account model.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Plus, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, X, Pencil, Trash2, Repeat } from 'lucide-react';
 import {
   useBudgetData,
@@ -61,7 +61,7 @@ export default function Budget() {
   const [page, setPage] = useState<'overview' | 'commission'>('overview');
   const [view, setView] = useState<ViewMode>('month');
   const [monthAnchor, setMonthAnchor] = useState(new Date());
-  const [periodIndex, setPeriodIndex] = useState(0); // 0 = most recent period
+  const [periodIndex, setPeriodIndex] = useState<number | null>(null); // null = not yet resolved to "this week"
   const [accountFilter, setAccountFilter] = useState<'all' | BudgetAccount>('all');
   const [showAddForm, setShowAddForm] = useState(false);
   const [showPayForm, setShowPayForm] = useState(false);
@@ -101,7 +101,29 @@ export default function Budget() {
     return windows.reverse(); // newest first, so periodIndex=0 is most recent
   }, [commissionByMonth]);
 
-  const currentWindow = periodWindows[periodIndex];
+  // Index of the window that actually contains today's date - this is what
+  // "current week" means, not just index 0 (which can be a future window
+  // since periodWindows is generated up to 2 months ahead for navigation).
+  const currentWeekIndex = useMemo(() => {
+    const todayKey = toKey(new Date());
+    const idx = periodWindows.findIndex(
+      (w) => toKey(w.start) <= todayKey && todayKey <= toKey(w.end)
+    );
+    return idx === -1 ? 0 : idx;
+  }, [periodWindows]);
+
+  // Default the Pay Period view to the current week on first load, but
+  // don't override the user's own navigation once they've moved away from it.
+  const [hasInitializedPeriod, setHasInitializedPeriod] = useState(false);
+  useEffect(() => {
+    if (periodIndex === null && periodWindows.length > 0 && !hasInitializedPeriod) {
+      setPeriodIndex(currentWeekIndex);
+      setHasInitializedPeriod(true);
+    }
+  }, [periodIndex, periodWindows.length, hasInitializedPeriod, currentWeekIndex]);
+  const resolvedPeriodIndex = periodIndex ?? currentWeekIndex;
+
+  const currentWindow = periodWindows[resolvedPeriodIndex];
 
   const { rangeStart, rangeEnd, rangeLabel } = useMemo(() => {
     if (view === 'month') {
@@ -221,9 +243,9 @@ export default function Budget() {
               </>
             ) : (
               <>
-                <button className="qty-button" onClick={() => setPeriodIndex((i) => Math.min(i + 1, periodWindows.length - 1))} disabled={periodIndex >= periodWindows.length - 1}><ChevronLeft size={14} /></button>
+                <button className="qty-button" onClick={() => setPeriodIndex(Math.min(resolvedPeriodIndex + 1, periodWindows.length - 1))} disabled={resolvedPeriodIndex >= periodWindows.length - 1}><ChevronLeft size={14} /></button>
                 <strong>{rangeLabel}</strong>
-                <button className="qty-button" onClick={() => setPeriodIndex((i) => Math.max(i - 1, 0))} disabled={periodIndex <= 0}><ChevronRight size={14} /></button>
+                <button className="qty-button" onClick={() => setPeriodIndex(Math.max(resolvedPeriodIndex - 1, 0))} disabled={resolvedPeriodIndex <= 0}><ChevronRight size={14} /></button>
               </>
             )}
           </div>

@@ -36,8 +36,12 @@ function addMonths(d: Date, n: number): Date {
   return new Date(d.getFullYear(), d.getMonth() + n, 1);
 }
 
+function pad(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
 function toKey(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function isSameDay(a: Date, b: Date): boolean {
