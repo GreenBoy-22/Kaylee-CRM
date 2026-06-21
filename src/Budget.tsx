@@ -5,7 +5,7 @@
 // two-account model.
 
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, X, Pencil, Trash2, Repeat } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, X, Pencil, Trash2, Repeat, Check } from 'lucide-react';
 import {
   useBudgetData,
   expandRecurringRules,
@@ -58,7 +58,7 @@ export default function Budget() {
     addActualTransaction, updateActualTransaction, deleteActualTransaction,
     addPayPeriod, addRule, updateRule, upsertCommissionMonth,
   } = useBudgetData();
-  const [page, setPage] = useState<'overview' | 'commission'>('overview');
+  const [page, setPage] = useState<'overview' | 'commission' | 'event-budgets'>('overview');
   const [view, setView] = useState<ViewMode>('month');
   const [monthAnchor, setMonthAnchor] = useState(new Date());
   const [periodIndex, setPeriodIndex] = useState<number | null>(null); // null = not yet resolved to "this week"
@@ -223,9 +223,12 @@ export default function Budget() {
       <div className="toggle-wrap" style={{ marginBottom: 16 }}>
         <button className={page === 'overview' ? 'active' : ''} onClick={() => setPage('overview')}>Overview</button>
         <button className={page === 'commission' ? 'active' : ''} onClick={() => setPage('commission')}>Adam's Commission</button>
+        <button className={page === 'event-budgets' ? 'active' : ''} onClick={() => setPage('event-budgets')}>Event Budgets</button>
       </div>
 
-      {page === 'commission' ? (
+      {page === 'event-budgets' ? (
+        <EventBudgetsPanel rules={rules} isAdmin={isAdmin} onUpdateRule={updateRule} />
+      ) : page === 'commission' ? (
         <CommissionPanel commissionMonths={commissionMonths} isAdmin={isAdmin} onSave={upsertCommissionMonth} />
       ) : (
       <div className="panel">
@@ -988,6 +991,196 @@ function CommissionPanel({
                 <td style={{ textAlign: 'right', color: 'var(--green)' }}>{fmtMoney(c.after_tax_amount)}</td>
               </tr>
             ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+type EventCategory = 'holiday' | 'birthday' | 'anniversary' | 'pet' | 'vehicle';
+
+/**
+ * Pulls a "person" out of a rule name when one is reasonably extractable:
+ *   "Christmas Gift: Adam" -> "Adam"
+ *   "Kaylee's Birthday" -> "Kaylee"
+ *   "Lynn & Lamar's Anniversary" -> "Lynn & Lamar"
+ * Falls back to the full rule name as the "person" column when no clean
+ * extraction is possible (e.g. "Christmas Yard Decoration").
+ */
+function extractPersonAndEvent(name: string, category: EventCategory): { person: string; event: string } {
+  const giftMatch = name.match(/^Christmas Gift:\s*(.+)$/);
+  if (giftMatch) return { person: giftMatch[1], event: 'Christmas Gift' };
+
+  const possessiveMatch = name.match(/^(.+?)'s?\s+(Birthday|Anniversary|Half Birthday)$/i);
+  if (possessiveMatch) return { person: possessiveMatch[1], event: possessiveMatch[2] };
+
+  if (category === 'anniversary' || category === 'birthday') {
+    return { person: name, event: category === 'anniversary' ? 'Anniversary' : 'Birthday' };
+  }
+
+  return { person: '—', event: name };
+}
+
+function EventBudgetsPanel({
+  rules,
+  isAdmin,
+  onUpdateRule,
+}: {
+  rules: RecurringRule[];
+  isAdmin: boolean;
+  onUpdateRule: (id: string, patch: Partial<RecurringRule>) => Promise<void>;
+}) {
+  const [tab, setTab] = useState<'holiday' | 'birthday_anniversary' | 'pet' | 'vehicle'>('holiday');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [savingId, setSavingId] = useState<string | null>(null);
+
+  const categoryRules = useMemo(() => {
+    if (tab === 'holiday') return rules.filter((r) => r.category === 'holiday' && r.active);
+    if (tab === 'birthday_anniversary') return rules.filter((r) => (r.category === 'birthday' || r.category === 'anniversary') && r.active);
+    if (tab === 'pet') return rules.filter((r) => r.category === 'pet' && r.active);
+    return rules.filter((r) => r.category === 'vehicle' && r.active);
+  }, [rules, tab]);
+
+  const sortedRules = useMemo(
+    () => [...categoryRules].sort((a, b) => a.name.localeCompare(b.name)),
+    [categoryRules]
+  );
+
+  const annualTotal = sortedRules.reduce((sum, r) => sum + r.amount, 0);
+
+  // Reference-only ABC Fund comparison, shown on the relevant tabs.
+  // Holiday + Birthday + Anniversary combined, evenly split over 12 months.
+  const giftFundTotal = useMemo(() => {
+    return rules
+      .filter((r) => (r.category === 'holiday' || r.category === 'birthday' || r.category === 'anniversary') && r.active)
+      .reduce((sum, r) => sum + r.amount, 0);
+  }, [rules]);
+  const giftFundMonthly = giftFundTotal / 12;
+  const currentAbcFundRule = rules.find((r) => r.name === 'ABC Fund');
+
+  const startEdit = (rule: RecurringRule) => {
+    setEditingId(rule.id);
+    setEditValue(String(rule.amount));
+  };
+
+  const saveEdit = async (rule: RecurringRule) => {
+    const newAmount = parseFloat(editValue);
+    if (isNaN(newAmount) || newAmount < 0) return;
+    setSavingId(rule.id);
+    try {
+      await onUpdateRule(rule.id, { amount: newAmount });
+      setEditingId(null);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h2>Event Budgets</h2>
+        {!isAdmin && <span style={{ fontSize: 12, color: 'var(--muted)' }}>View only</span>}
+      </div>
+      <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: -8 }}>
+        Editing an amount here updates the same recurring rule the Budget overview uses — future occurrences will reflect the new amount.
+      </p>
+
+      <div className="toggle-wrap" style={{ marginBottom: 14 }}>
+        <button className={tab === 'holiday' ? 'active' : ''} onClick={() => setTab('holiday')}>Holiday</button>
+        <button className={tab === 'birthday_anniversary' ? 'active' : ''} onClick={() => setTab('birthday_anniversary')}>Birthday & Anniversary</button>
+        <button className={tab === 'pet' ? 'active' : ''} onClick={() => setTab('pet')}>Jules</button>
+        <button className={tab === 'vehicle' ? 'active' : ''} onClick={() => setTab('vehicle')}>Vehicles</button>
+      </div>
+
+      <div className="stats-row" style={{ marginBottom: 14 }}>
+        <div className="stat-card">
+          <div className="stat-label">Annual total (this tab)</div>
+          <div className="stat-val">{fmtMoney(annualTotal)}</div>
+        </div>
+        {(tab === 'holiday' || tab === 'birthday_anniversary') && (
+          <>
+            <div className="stat-card">
+              <div className="stat-label">Holiday + Birthday + Anniversary / year</div>
+              <div className="stat-val" style={{ fontSize: 18 }}>{fmtMoney(giftFundTotal)}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Even monthly split (reference)</div>
+              <div className="stat-val" style={{ fontSize: 18 }}>{fmtMoney(giftFundMonthly)}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Current ABC Fund</div>
+              <div className="stat-val" style={{ fontSize: 18 }}>
+                {currentAbcFundRule ? fmtMoney(currentAbcFundRule.amount) : 'Not set'}
+                <span style={{ fontSize: 11, color: 'var(--muted)', display: 'block', fontWeight: 400 }}>
+                  not auto-updated — for reference only
+                </span>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="table-card">
+        <table>
+          <thead>
+            <tr>
+              <th>Person</th>
+              <th>{tab === 'pet' || tab === 'vehicle' ? 'Item' : 'Event'}</th>
+              {tab !== 'pet' && tab !== 'vehicle' && <th>Full name</th>}
+              <th style={{ textAlign: 'right' }}>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedRules.length === 0 && (
+              <tr><td colSpan={4} style={{ color: 'var(--muted)' }}>Nothing in this category yet.</td></tr>
+            )}
+            {sortedRules.map((rule) => {
+              const { person, event } = extractPersonAndEvent(rule.name, rule.category as EventCategory);
+              const isEditing = editingId === rule.id;
+              return (
+                <tr key={rule.id}>
+                  {(tab === 'pet' || tab === 'vehicle') ? (
+                    <td colSpan={2}>{rule.name}</td>
+                  ) : (
+                    <>
+                      <td>{person}</td>
+                      <td><small>{event}</small></td>
+                      <td><small style={{ color: 'var(--muted)' }}>{rule.name}</small></td>
+                    </>
+                  )}
+                  <td style={{ textAlign: 'right' }}>
+                    {isEditing ? (
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          style={{ width: 90, textAlign: 'right' }}
+                          autoFocus
+                          onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(rule); if (e.key === 'Escape') setEditingId(null); }}
+                        />
+                        <button className="qty-button" onClick={() => saveEdit(rule)} disabled={savingId === rule.id} aria-label="Save">
+                          <Check size={12} color="var(--green)" />
+                        </button>
+                        <button className="qty-button" onClick={() => setEditingId(null)} aria-label="Cancel">
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <span
+                        onClick={() => isAdmin && startEdit(rule)}
+                        style={{ cursor: isAdmin ? 'pointer' : 'default', borderBottom: isAdmin ? '1px dashed var(--muted)' : 'none' }}
+                      >
+                        {fmtMoney(rule.amount)}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
