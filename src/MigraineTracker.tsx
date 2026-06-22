@@ -140,16 +140,16 @@ async function fetchEntries(): Promise<MigraineEntry[]> {
   return data as MigraineEntry[];
 }
 
-async function saveEntry(form: EntryForm, userId: string | null): Promise<boolean> {
-  if (!hasSupabase || !supabase) return false;
+async function saveEntry(form: EntryForm, userId: string | null): Promise<string | null> {
+  if (!hasSupabase || !supabase) return 'Supabase not configured.';
   const { error } = await supabase.from('migraine_log').insert({ ...form, logged_by: userId });
-  return !error;
+  return error ? error.message : null;
 }
 
-async function updateEntry(id: string, form: EntryForm): Promise<boolean> {
-  if (!hasSupabase || !supabase) return false;
+async function updateEntry(id: string, form: EntryForm): Promise<string | null> {
+  if (!hasSupabase || !supabase) return 'Supabase not configured.';
   const { error } = await supabase.from('migraine_log').update(form).eq('id', id);
-  return !error;
+  return error ? error.message : null;
 }
 
 async function deleteEntry(id: string): Promise<boolean> {
@@ -533,19 +533,24 @@ function LogForm({ onSaved, editEntry, onCancelEdit }: { onSaved: () => void; ed
     set('severity', wbScoreToSeverity(score));
   };
 
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const handleSave = async () => {
     setSaving(true);
+    setSaveError(null);
     let userId: string | null = null;
     if (hasSupabase && supabase) {
       const { data: s } = await supabase.auth.getSession();
       userId = s.session?.user?.id ?? null;
     }
-    const ok = editEntry ? await updateEntry(editEntry.id, form) : await saveEntry(form, userId);
+    const err = editEntry ? await updateEntry(editEntry.id, form) : await saveEntry(form, userId);
     setSaving(false);
-    if (ok) {
+    if (!err) {
       setSaved(true);
       if (!editEntry) setForm(blankForm());
       setTimeout(() => { setSaved(false); onSaved(); if (onCancelEdit) onCancelEdit(); }, 1200);
+    } else {
+      setSaveError(err);
     }
   };
 
@@ -739,6 +744,11 @@ function LogForm({ onSaved, editEntry, onCancelEdit }: { onSaved: () => void; ed
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
         {editEntry && <button type="button" className="btn ghost" onClick={onCancelEdit}><X size={15} /> Cancel</button>}
         <button type="button" className="btn ghost" onClick={() => setForm(blankForm())}><X size={15} /> Clear</button>
+        {saveError && (
+          <div style={{ padding: '10px 14px', background: 'var(--red-bg)', color: 'var(--red)', borderRadius: 10, fontSize: 13, marginBottom: 8 }}>
+            ⚠️ Save failed: {saveError}
+          </div>
+        )}
         <button type="button" className="btn primary" onClick={handleSave} disabled={saving} style={saved ? { background: 'var(--green)' } : {}}>
           <Save size={15} /> {saved ? 'Saved!' : saving ? 'Saving...' : editEntry ? 'Save Changes' : 'Save Entry'}
         </button>
