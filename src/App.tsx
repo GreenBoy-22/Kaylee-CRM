@@ -266,11 +266,6 @@ const seedTasks: TaskItem[] = [
   { id: 't3', title: "Approve Adam's Friday task plan", owner: 'Kaylee', mode: 'home', minutes: 5, priority: 'urgent', status: 'pending_approval', source: 'Adam' }
 ];
 
-const vehicles = [
-  { name: '2016 Toyota Corolla', miles: 134000, type: 'Gas', urgent: ['Spark plugs overdue', 'Transmission fluid unknown'], ok: ['Brakes completed 2025', 'Tire rotation at 133,900 mi'] },
-  { name: '2013 Nissan Leaf', miles: 82500, type: 'EV', urgent: ['12V auxiliary battery likely due', 'HV battery health check'], ok: ['Registration tracked'] }
-];
-
 const COMPACT_ROW_CSS = `
 .ct-panel { padding-bottom: 6px; }
 .ct-list { display: flex; flex-direction: column; }
@@ -2072,10 +2067,6 @@ function Inventory({ inventory, createItem, updateQuantity, editable }: { invent
     {editable && action !== 'none' && <section className={`panel action-panel ${action}`}><div className="panel-head"><h2>{action === 'manual' ? 'Manual Entry' : action === 'scanAdd' ? 'Scan to Add' : 'Scan to Use / Remove'}</h2><button className="btn ghost" onClick={() => setAction('none')}>Close</button></div>{action === 'manual' ? <div><div className="form-grid"><input placeholder="Item name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /><input placeholder="Brand" value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} /><input placeholder="Location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /><input placeholder="Category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /><input placeholder="Quantity" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /><input placeholder="Estimated value" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} /></div><div className="form-actions"><button className="btn primary" onClick={submit}><Save size={15} /> Save Item</button></div></div> : <div className="scan-row"><input placeholder="Scan or type barcode" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} /><button className={action === 'scanUse' ? 'btn warning' : 'btn primary'}>{action === 'scanUse' ? 'Use item' : 'Look up barcode'}</button></div>}</section>}
     <div className="table-card"><table><thead><tr><th>Item</th><th>Location</th><th>Category</th><th>Qty</th><th>Expires</th><th>Value</th></tr></thead><tbody>{inventory.map((item) => <tr key={item.id}><td><strong>{item.name}</strong><small>{item.brand || '—'}</small></td><td>{item.location}</td><td>{item.category}</td><td>{item.quantity} {editable && <button className="qty-button" onClick={() => updateQuantity(item.id, item.quantity - 1)}><Minus size={12} /></button>}</td><td>{item.expires || '—'}</td><td>${Number(item.value || 0).toFixed(2)}</td></tr>)}</tbody></table></div>
   </>;
-}
-
-function Vehicles() {
-  return <><Header title="Vehicles" sub="Maintenance tracking for Corolla and Leaf." /><div className="grid two">{vehicles.map((vehicle) => <section className="panel" key={vehicle.name}><h2>{vehicle.name}</h2><p>{vehicle.type} · {vehicle.miles.toLocaleString()} miles</p><h3>Urgent</h3>{vehicle.urgent.map((item) => <div className="brief-item urgent" key={item}>{item}</div>)}<h3>Okay</h3>{vehicle.ok.map((item) => <div className="brief-item good" key={item}>{item}</div>)}</section>)}</div></>;
 }
 
 function Suggestions({ choreSuggestions, markSuggestionDone, snoozeSuggestion, dismissSuggestion, restoreSuggestion, addSuggestionToTodoist, editable }: { choreSuggestions: ChoreSuggestion[]; markSuggestionDone: (id: string) => void; snoozeSuggestion: (id: string, days: number) => void; dismissSuggestion: (id: string) => void; restoreSuggestion: (id: string) => void; addSuggestionToTodoist: (id: string) => void; editable: boolean }) {
