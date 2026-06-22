@@ -85,6 +85,7 @@ type Student = {
   email?: string | null;
   missed_call_count: number;
   archived: boolean;
+  on_term_break?: boolean;
 };
 
 type Touchpoint = {
@@ -1045,6 +1046,10 @@ Kaylee`;
     await updateStudent(id, { archived: true, status: 'Archived' });
   }
 
+  async function unarchiveStudent(id: string) {
+    await updateStudent(id, { archived: false, status: 'Active' });
+  }
+
   async function createTouchpoint(input: Omit<Touchpoint, 'id' | 'next_call_prep' | 'constructive_note' | 'follow_up_email' | 'follow_up_text' | 'copied'>) {
     if (!isAdmin()) return setMessage('Touchpoint logs are admin-only.');
     const student = students.find((s) => s.id === input.student_id);
@@ -1557,7 +1562,7 @@ Kaylee`;
           {page === 'chores' && <Chores choreTasks={choreTasks} choreSuggestions={choreSuggestions} syncState={syncState} syncing={syncing} householdUsers={householdUsers} currentUserName={activeName} syncTodoistNow={syncTodoistNow} completeChore={completeChore} uncompleteChore={uncompleteChore} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} approveSuggestionForAdam={approveSuggestionForAdam} approveSuggestionForSelf={approveSuggestionForSelf} reassignChore={reassignChore} editable={canEdit('chores')} />}
           {page === 'vehicles' && <Vehicles />}
           {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
-          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
+          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
           {page === 'outreach' && activeRole === 'admin' && <Outreach drafts={drafts} students={students} generateCohortDrafts={generateCohortDrafts} updateDraft={updateDraft} markDraftSent={markDraftSent} deleteDraft={deleteDraft} />}
           {page === 'settings' && activeRole === 'admin' && <SettingsPage permissions={permissions} updatePermission={updatePermission} />}
         </main>
@@ -2208,13 +2213,14 @@ const touchpointTypes = [
 const riskLevels = ['Low', 'Medium', 'High', 'High Risk'];
 const studentStatuses = ['Active', 'Support', 'Ghost', 'Portal-only', 'Archived'];
 
-function Students({ students, touchpoints, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, createTouchpoint, copyText, ferpaWarnings, generateSingleDraft, drafts, setPage }: {
+function Students({ students, touchpoints, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, unarchiveStudent, createTouchpoint, copyText, ferpaWarnings, generateSingleDraft, drafts, setPage }: {
   students: Student[];
   touchpoints: Touchpoint[];
   importStudentsFromCsv: (text: string) => Promise<void>;
   createStudent: (student: Omit<Student, 'id' | 'copied' | 'archived'>) => void;
   updateStudent: (id: string, patch: Partial<Student>) => void;
   archiveStudent: (id: string) => void;
+  unarchiveStudent: (id: string) => void;
   createTouchpoint: (touchpoint: Omit<Touchpoint, 'id' | 'next_call_prep' | 'constructive_note' | 'follow_up_email' | 'follow_up_text' | 'copied'>) => void;
   copyText: (text: string, id?: string, table?: 'students' | 'student_touchpoints') => void;
   ferpaWarnings: (text: string) => string[];
@@ -2364,11 +2370,60 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
     <Stats items={[["Active", String(activeStudents.length)], ["Archived", String(archivedStudents.length)], ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived).length)], ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived).length)]]} />
     {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input placeholder="Course" value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email (for outreach drafts)" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
     <div className="students-crm-layout">
-      <section className="panel student-scroll-list"><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div><div className="student-search-row"><Search size={15} /><input type="text" placeholder="Search by name or ID" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search students" /></div>{visibleStudents.length === 0 && <div className="brief-item">{search ? 'No students match that search.' : 'No students in this view yet.'}</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} onClick={() => setSelectedId(student.id)}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>
-      {selected ? <section className="student-detail-pane">
+      <section className="panel student-scroll-list"><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div><div className="student-search-row"><Search size={15} /><input type="text" placeholder="Search by name or ID" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search students" /></div>{visibleStudents.length === 0 && <div className="brief-item">{search ? 'No students match that search.' : 'No students in this view yet.'}</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} style={student.on_term_break ? { opacity: 0.6, background: '#f5f5f8' } : {}} onClick={() => setSelectedId(student.id)}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}{student.on_term_break ? ' · ☕ Break' : ''}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>
+      {selected ? <section className="student-detail-pane" style={selected.on_term_break ? { filter: 'grayscale(0.6)', opacity: 0.75, background: '#f0f0f5' } : {}}>
         {/* TOP ZONE: header + health + quick facts + next call prep — always visible without scrolling */}
         <section className="panel student-top-zone">
-          <div className="panel-head"><div><h2>{selected.display_name}</h2><p>{selected.course || 'No course'} · {selected.status} · {selected.risk}</p></div><div className="actions"><select className="btn ghost" defaultValue="" onChange={(e) => { if (e.target.value) { generateSingleDraft(selected.id, e.target.value); e.target.value = ''; } }}><option value="" disabled>Draft email…</option><option value="check_in">Generic check-in</option><option value="ghost">Ghost outreach</option><option value="high_risk">High-risk plan</option><option value="course_ending">Course ending soon</option><option value="no_contact_14">No contact 14+ days</option><option value="win">Recognize a win</option></select>{drafts.filter((d) => d.student_id === selected.id && d.status === 'pending').length > 0 && <button className="btn ghost" onClick={() => setPage('outreach')}><Mail size={15} /> {drafts.filter((d) => d.student_id === selected.id && d.status === 'pending').length} pending</button>}<button className="btn ghost" onClick={startEditProfile}><Edit3 size={15} /> Edit</button>{!selected.archived && <button className="btn warning" onClick={() => archiveStudent(selected.id)}><Archive size={15} /> Archive</button>}</div></div>
+          {/* student-top-zone header */}
+          <div className="panel-head">
+            <div>
+              <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {selected.display_name}
+                {selected.on_term_break && (
+                  <span style={{ fontSize: 11, fontWeight: 600, background: '#e0e0e8', color: '#666', borderRadius: 999, padding: '2px 10px' }}>
+                    Term Break
+                  </span>
+                )}
+              </h2>
+              <p>{selected.course || 'No course'} · {selected.status} · {selected.risk}</p>
+            </div>
+            <div className="actions">
+              <select className="btn ghost" defaultValue="" onChange={(e) => { if (e.target.value) { generateSingleDraft(selected.id, e.target.value); e.target.value = ''; } }}>
+                <option value="" disabled>Draft email…</option>
+                <option value="check_in">Generic check-in</option>
+                <option value="ghost">Ghost outreach</option>
+                <option value="high_risk">High-risk plan</option>
+                <option value="course_ending">Course ending soon</option>
+                <option value="no_contact_14">No contact 14+ days</option>
+                <option value="win">Recognize a win</option>
+              </select>
+              {drafts.filter((d) => d.student_id === selected.id && d.status === 'pending').length > 0 && (
+                <button className="btn ghost" onClick={() => setPage('outreach')}>
+                  <Mail size={15} /> {drafts.filter((d) => d.student_id === selected.id && d.status === 'pending').length} pending
+                </button>
+              )}
+              <button
+                className={selected.on_term_break ? 'btn warning' : 'btn ghost'}
+                onClick={() => updateStudent(selected.id, { on_term_break: !selected.on_term_break })}
+                title={selected.on_term_break ? 'Click to mark as back in term' : 'Click to mark as on term break'}
+              >
+                {selected.on_term_break ? '↩ Back in Term' : '☕ Term Break'}
+              </button>
+              <button className="btn ghost" onClick={() => { startEditProfile(); setTimeout(() => document.getElementById('student-edit-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); }}>
+                <Edit3 size={15} /> Edit
+              </button>
+              {!selected.archived && (
+                <button className="btn warning" onClick={() => archiveStudent(selected.id)}>
+                  <Archive size={15} /> Archive
+                </button>
+              )}
+              {selected.archived && (
+                <button className="btn ghost" onClick={() => unarchiveStudent(selected.id)}>
+                  ↩ Unarchive
+                </button>
+              )}
+            </div>
+          </div>
           {activeWarnings.length > 0 && <FerpaWarning warnings={activeWarnings} />}
           <StudentHealthPanel student={selected} touchpoints={touchpoints} />
           <div className="quick-facts">
@@ -2413,7 +2468,7 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
           </div>
         </section>
 
-        {editingProfile && <section className="panel"><h2>Edit profile</h2><div className="form-grid"><input value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} /><div className="form-actions"><button className="btn primary" onClick={saveProfileEdit}><Save size={15} /> Save Profile</button></div></section>}
+        {editingProfile && <section className="panel" id="student-edit-form"><h2>Edit profile</h2><div className="form-grid"><input value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} /><div className="form-actions"><button className="btn primary" onClick={saveProfileEdit}><Save size={15} /> Save Profile</button></div></section>}
 
         {/* TWO-COLUMN ZONE: scrollable history on left, sticky touchpoint form on right */}
         <div className="student-work-area">
