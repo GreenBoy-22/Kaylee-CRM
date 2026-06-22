@@ -1,15 +1,14 @@
 // src/WorkCalendar.tsx
 //
-// Work-mode calendar: shows how busy each day is based on the number of
-// student calls scheduled (next_appointment_date from the Students module).
+// Work-mode calendar: shows daily call load from student next_appointment_date.
 //
-// Busy thresholds (calls per day):
-//   0–14   → low      (green)
+// Busy thresholds:
+//   0      → no color (white/default)
+//   1–14   → low    (green)
 //   15–24  → moderate (amber)
-//   25+    → high     (red)
+//   25+    → high   (red)
 //
-// No Google Calendar data is shown in Work mode — this is intentionally
-// call-load only so it stays FERPA-safe and work-focused.
+// Each day cell shows a large call count number front and center.
 
 import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Phone } from 'lucide-react';
@@ -21,24 +20,20 @@ export interface WorkCalendarStudent {
   archived: boolean;
 }
 
-type BusyLevel = 'low' | 'moderate' | 'high';
+type BusyLevel = 'none' | 'low' | 'moderate' | 'high';
 
 function callBusyLevel(count: number): BusyLevel {
+  if (count === 0) return 'none';
   if (count >= 25) return 'high';
   if (count >= 15) return 'moderate';
   return 'low';
 }
 
 const BUSY_LABEL: Record<BusyLevel, string> = {
+  none: 'No calls',
   low: 'Light day',
   moderate: 'Moderate day',
   high: 'Busy day',
-};
-
-const BUSY_THRESHOLD_LABEL: Record<BusyLevel, string> = {
-  low: '0–14 calls',
-  moderate: '15–24 calls',
-  high: '25+ calls',
 };
 
 function pad(n: number): string {
@@ -99,6 +94,28 @@ interface Props {
   students: WorkCalendarStudent[];
 }
 
+// Busy level → background color mapping (inline styles to guarantee rendering)
+const LEVEL_BG: Record<BusyLevel, string> = {
+  none: 'white',
+  low: 'var(--green-bg)',
+  moderate: 'var(--amber-bg)',
+  high: 'var(--red-bg)',
+};
+
+const LEVEL_TEXT: Record<BusyLevel, string> = {
+  none: 'var(--muted)',
+  low: 'var(--green)',
+  moderate: 'var(--amber)',
+  high: 'var(--red)',
+};
+
+const LEVEL_BORDER: Record<BusyLevel, string> = {
+  none: 'var(--border)',
+  low: 'var(--green)',
+  moderate: 'var(--amber)',
+  high: 'var(--red)',
+};
+
 export default function WorkCalendar({ students }: Props) {
   const [view, setView] = useState<ViewMode>('month');
   const [anchor, setAnchor] = useState<Date>(new Date());
@@ -151,7 +168,7 @@ export default function WorkCalendar({ students }: Props) {
   const selectedCount = selectedCalls.length;
   const selectedLevel = callBusyLevel(selectedCount);
 
-  // Stats for the current month
+  // Month stats
   const monthDays = buildMonthGrid(anchor).filter(
     (d) => d.getMonth() === anchor.getMonth()
   );
@@ -187,11 +204,11 @@ export default function WorkCalendar({ students }: Props) {
 
       {/* Month summary bar */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
-        <div className="gcal-today-busy-pill low">
+        <div className="gcal-today-busy-pill low" style={{ background: 'var(--green-bg)', color: 'var(--green)' }}>
           <Phone size={12} /> {monthCallTotal} calls this month
         </div>
         {monthHighDays > 0 && (
-          <div className="gcal-today-busy-pill high">
+          <div className="gcal-today-busy-pill high" style={{ background: 'var(--red-bg)', color: 'var(--red)' }}>
             {monthHighDays} high-load day{monthHighDays !== 1 ? 's' : ''}
           </div>
         )}
@@ -206,8 +223,7 @@ export default function WorkCalendar({ students }: Props) {
           <div className="gcal-month-grid">
             {gridDays.map((d) => {
               const key = toKey(d);
-              const calls = callsByDay.get(key) ?? [];
-              const count = calls.length;
+              const count = callsByDay.get(key)?.length ?? 0;
               const level = callBusyLevel(count);
               const inMonth = d.getMonth() === anchor.getMonth();
               const isToday = isSameDay(d, today);
@@ -217,22 +233,74 @@ export default function WorkCalendar({ students }: Props) {
                 <button
                   key={key}
                   type="button"
-                  className={[
-                    'gcal-day-cell',
-                    !inMonth ? 'outside-month' : '',
-                    count > 0 ? `busy-${level}` : 'busy-low',
-                    isToday ? 'is-today' : '',
-                    isSelected ? 'selected' : '',
-                  ].join(' ').trim()}
                   onClick={() => setSelectedKey(key)}
+                  style={{
+                    // inline styles guarantee the color shows regardless of CSS specificity
+                    background: isSelected ? 'var(--purple-bg)' : LEVEL_BG[level],
+                    borderColor: isSelected ? 'var(--purple)' : isToday ? 'var(--purple)' : LEVEL_BORDER[level],
+                    borderWidth: isToday || isSelected ? 2 : 1,
+                    opacity: inMonth ? 1 : 0.4,
+                    aspectRatio: '1',
+                    minHeight: 64,
+                    minWidth: 0,
+                    borderStyle: 'solid',
+                    borderRadius: 10,
+                    padding: 6,
+                    margin: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    position: 'relative',
+                    overflow: 'hidden',
+                    font: 'inherit',
+                    color: 'inherit',
+                    gap: 2,
+                  }}
                 >
-                  <span className="gcal-day-num">{d.getDate()}</span>
+                  {/* Day number — small, top left */}
+                  <span style={{
+                    position: 'absolute',
+                    top: 5,
+                    left: 7,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: isToday ? 'white' : 'var(--muted)',
+                    background: isToday ? 'var(--purple)' : 'transparent',
+                    borderRadius: isToday ? '50%' : 0,
+                    width: isToday ? 18 : 'auto',
+                    height: isToday ? 18 : 'auto',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    {d.getDate()}
+                  </span>
+
+                  {/* Big call count number */}
                   {count > 0 && (
-                    <span
-                      className="gcal-day-event-chip"
-                      style={{ display: 'flex', alignItems: 'center', gap: 3 }}
-                    >
-                      <Phone size={9} /> {count} call{count !== 1 ? 's' : ''}
+                    <span style={{
+                      fontSize: 26,
+                      fontWeight: 800,
+                      lineHeight: 1,
+                      color: LEVEL_TEXT[level],
+                    }}>
+                      {count}
+                    </span>
+                  )}
+
+                  {/* Subtle label under the number */}
+                  {count > 0 && (
+                    <span style={{
+                      fontSize: 9,
+                      fontWeight: 600,
+                      color: LEVEL_TEXT[level],
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      opacity: 0.8,
+                    }}>
+                      calls
                     </span>
                   )}
                 </button>
@@ -254,28 +322,65 @@ export default function WorkCalendar({ students }: Props) {
             return (
               <div
                 key={key}
-                className={[
-                  'gcal-week-day',
-                  count > 0 ? `busy-${level}` : 'busy-low',
-                  isToday ? 'is-today' : '',
-                  isSelected ? 'selected' : '',
-                ].join(' ').trim()}
                 onClick={() => setSelectedKey(key)}
+                style={{
+                  background: isSelected ? 'var(--purple-bg)' : LEVEL_BG[level],
+                  border: `${isToday || isSelected ? 2 : 1}px solid ${isSelected ? 'var(--purple)' : isToday ? 'var(--purple)' : LEVEL_BORDER[level]}`,
+                  borderRadius: 12,
+                  padding: 10,
+                  minHeight: 160,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                }}
               >
-                <div className="gcal-week-day-head">
+                {/* Day header */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div>
-                    <div className="gcal-week-day-label">{DOW[d.getDay()]}</div>
-                    <div className="gcal-week-day-num">{d.getDate()}</div>
+                    <div style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600 }}>
+                      {DOW[d.getDay()]}
+                    </div>
+                    <div style={{
+                      fontSize: 15,
+                      fontWeight: 700,
+                      color: isToday ? 'var(--purple-dark)' : 'var(--text)',
+                    }}>
+                      {d.getDate()}
+                    </div>
                   </div>
                   {count > 0 && (
-                    <span className={`gcal-busy-dot ${level}`} style={{ position: 'static' }} />
+                    <div style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: '50%',
+                      background: LEVEL_TEXT[level],
+                    }} />
                   )}
                 </div>
+
+                {/* Big call number */}
                 {count > 0 && (
-                  <span className="gcal-week-event-chip">
-                    <Phone size={10} style={{ verticalAlign: 'middle', marginRight: 3 }} />
-                    {count} call{count !== 1 ? 's' : ''} — {BUSY_LABEL[level]}
-                  </span>
+                  <div style={{ textAlign: 'center', marginTop: 'auto', marginBottom: 'auto' }}>
+                    <div style={{
+                      fontSize: 42,
+                      fontWeight: 800,
+                      lineHeight: 1,
+                      color: LEVEL_TEXT[level],
+                    }}>
+                      {count}
+                    </div>
+                    <div style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: LEVEL_TEXT[level],
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                      marginTop: 2,
+                    }}>
+                      {BUSY_LABEL[level]}
+                    </div>
+                  </div>
                 )}
               </div>
             );
@@ -285,12 +390,18 @@ export default function WorkCalendar({ students }: Props) {
 
       {/* Legend */}
       <div className="gcal-legend" style={{ marginTop: 12 }}>
-        {(['low', 'moderate', 'high'] as BusyLevel[]).map((lvl) => (
-          <span className="gcal-legend-item" key={lvl}>
-            <span className={`gcal-legend-dot ${lvl}`} />
-            {BUSY_LABEL[lvl]} ({BUSY_THRESHOLD_LABEL[lvl]})
-          </span>
-        ))}
+        <span className="gcal-legend-item">
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', display: 'inline-block' }} />
+          Light (1–14 calls)
+        </span>
+        <span className="gcal-legend-item">
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--amber)', display: 'inline-block' }} />
+          Moderate (15–24 calls)
+        </span>
+        <span className="gcal-legend-item">
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--red)', display: 'inline-block' }} />
+          Busy (25+ calls)
+        </span>
       </div>
 
       {/* Day detail */}
@@ -302,7 +413,10 @@ export default function WorkCalendar({ students }: Props) {
             })}
           </h3>
           {selectedCount > 0 && (
-            <span className={`gcal-today-busy-pill ${selectedLevel}`}>
+            <span
+              className="gcal-today-busy-pill"
+              style={{ background: LEVEL_BG[selectedLevel], color: LEVEL_TEXT[selectedLevel] }}
+            >
               <Phone size={12} /> {selectedCount} call{selectedCount !== 1 ? 's' : ''} — {BUSY_LABEL[selectedLevel]}
             </span>
           )}
