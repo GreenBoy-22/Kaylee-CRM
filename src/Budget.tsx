@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, X, Pencil, Trash2, Repeat, Check } from 'lucide-react';
 import { useLoansData, calculatePayoffProjection } from './useLoansData';
+import { supabase, hasSupabase } from './lib/supabase';
 import {
   useBudgetData,
   expandRecurringRules,
@@ -60,7 +61,20 @@ export default function Budget() {
     addPayPeriod, addRule, updateRule, upsertCommissionMonth,
   } = useBudgetData();
   const [page, setPage] = useState<'overview' | 'commission' | 'event-budgets' | 'loans'>('overview');
-  const { loans, loading: loansLoading } = useLoansData();
+  const { loans, history: loanHistory, loading: loansLoading, updateBalance: updateLoanBalance } = useLoansData();
+  const [loanCalendarEvents, setLoanCalendarEvents] = useState<{ title: string; start: string; allDay: boolean }[]>([]);
+
+  // Pull cached Google Calendar events for loan payment estimation
+  useEffect(() => {
+    if (!hasSupabase || !supabase) return;
+    (async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData.session?.user?.id;
+      if (!userId) return;
+      const { data } = await supabase.from('google_calendar_cache').select('events').eq('user_id', userId).maybeSingle();
+      if (data?.events) setLoanCalendarEvents(data.events);
+    })();
+  }, []);
   const [view, setView] = useState<ViewMode>('month');
   const [monthAnchor, setMonthAnchor] = useState(new Date());
   const [periodIndex, setPeriodIndex] = useState<number | null>(null); // null = not yet resolved to "this week"
@@ -230,7 +244,7 @@ export default function Budget() {
       </div>
 
       {page === 'loans' ? (
-        <LoansPanel loans={loans} loading={loansLoading} />
+        <LoansPanel loans={loans} history={loanHistory} loading={loansLoading} onUpdateBalance={updateLoanBalance} calendarEvents={loanCalendarEvents} />
       ) : page === 'event-budgets' ? (
         <EventBudgetsPanel rules={rules} isAdmin={isAdmin} onUpdateRule={updateRule} />
       ) : page === 'commission' ? (
@@ -1194,140 +1208,326 @@ function EventBudgetsPanel({
 }
 
 // ─── Loans Panel ─────────────────────────────────────────────────────────────
+//
+// Matches the original hub design:
+//   - Card per loan with color-coded left border by type
+//   - 4-stat mini-grid: interest rate, monthly payment, months to payoff, payoff date
+//   - Estimated remaining interest + total remaining payments line
+//   - Progress bar (% paid off vs origination balance)
+//   - "Update balance" inline form (confirm-before-save)
+//   - Calendar-aware estimated balance ticking down between real updates
+//   - Avalanche strategy tip when multiple loans exist
 
-function LoansPanel({ loans, loading }: { loans: any[]; loading: boolean }) {
-  if (loading) return <div className="panel"><p style={{ color: 'var(--muted)' }}>Loading loans...</p></div>;
+import type { Loan, BalanceHistoryEntry } from './useLoansData';
+import { calculatePayoffProjection, calculateEstimatedCurrentBalance } from './useLoansData';
+
+const LOAN_TYPE_COLOR: Record<string, string> = {
+  student:  'var(--purple)',
+  personal: '#1a73e8',   // blue like SoFi brand
+  auto:     'var(--green)',
+  mortgage: 'var(--amber)',
+  other:    'var(--muted)',
+};
+
+const LOAN_TYPE_LABEL: Record<string, string> = {
+  student: 'Student Loan', personal: 'Personal Loan',
+  auto: 'Auto Loan', mortgage: 'Mortgage', other: 'Loan',
+};
+
+function fmtDate(iso: string | null): string {
+  if (!iso) return '—';
+  return new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function fmtMonthYear(iso: string | null): string {
+  if (!iso) return '—';
+  return new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+
+interface UpdateBalanceFormProps {
+  loan: Loan;
+  onSave: (balance: number, date: string, notes: string) => Promise<void>;
+  onCancel: () => void;
+}
+
+function UpdateBalanceForm({ loan, onSave, onCancel }: UpdateBalanceFormProps) {
+  const [balance, setBalance] = useState(String(loan.current_balance));
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+
+  const parsed = parseFloat(balance.replace(/[^0-9.]/g, ''));
+  const isValid = !isNaN(parsed) && parsed >= 0;
+  const diff = isValid ? parsed - loan.current_balance : 0;
+
+  async function handleSave() {
+    if (!isValid || !confirmed) return;
+    setSaving(true);
+    try {
+      await onSave(parsed, date, notes);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 14, padding: '14px 16px', background: 'var(--purple-bg)', borderRadius: 12, border: '1px solid var(--border)' }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: 'var(--purple-dark)' }}>Update Balance</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+        <div>
+          <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>New balance (from statement)</label>
+          <input
+            type="text"
+            value={balance}
+            onChange={e => setBalance(e.target.value)}
+            style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 14, fontWeight: 600 }}
+            placeholder="e.g. 25992.91"
+          />
+        </div>
+        <div>
+          <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Statement date</label>
+          <input
+            type="date"
+            value={date}
+            onChange={e => setDate(e.target.value)}
+            style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 14 }}
+          />
+        </div>
+      </div>
+      <input
+        type="text"
+        value={notes}
+        onChange={e => setNotes(e.target.value)}
+        placeholder="Notes (optional) — e.g. 'June statement'"
+        style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, marginBottom: 10 }}
+      />
+      {isValid && (
+        <div style={{ fontSize: 13, color: diff < 0 ? 'var(--green)' : diff > 0 ? 'var(--red)' : 'var(--muted)', marginBottom: 10 }}>
+          {diff < 0 ? `↓ Balance decreased by ${fmtMoney(Math.abs(diff))}` : diff > 0 ? `↑ Balance increased by ${fmtMoney(diff)}` : 'Balance unchanged'}
+        </div>
+      )}
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 12, cursor: 'pointer' }}>
+        <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />
+        I've confirmed this balance from my statement
+      </label>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          onClick={handleSave}
+          disabled={!isValid || !confirmed || saving}
+          style={{
+            padding: '8px 16px', borderRadius: 9, border: 'none', cursor: !isValid || !confirmed || saving ? 'not-allowed' : 'pointer',
+            background: !isValid || !confirmed || saving ? 'var(--border)' : 'var(--purple)', color: 'white', fontWeight: 600, fontSize: 13
+          }}
+        >
+          {saving ? 'Saving...' : 'Save balance'}
+        </button>
+        <button onClick={onCancel} style={{ padding: '8px 14px', borderRadius: 9, border: '1px solid var(--border)', background: 'white', cursor: 'pointer', fontSize: 13 }}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface LoanCardProps {
+  loan: Loan;
+  history: BalanceHistoryEntry[];
+  calendarEvents: { title: string; start: string; allDay: boolean }[];
+  onUpdateBalance: (loanId: string, balance: number, date: string, notes: string) => Promise<void>;
+}
+
+function LoanCard({ loan, history, calendarEvents, onUpdateBalance }: LoanCardProps) {
+  const [showUpdateForm, setShowUpdateForm] = useState(false);
+
+  const proj = calculatePayoffProjection(loan);
+  const estimate = calculateEstimatedCurrentBalance(loan, calendarEvents);
+  const loanHistory = history.filter(h => h.loan_id === loan.id).sort((a, b) => b.recorded_date.localeCompare(a.recorded_date));
+  const lastPayment = loanHistory[0] ?? null;
+
+  const color = LOAN_TYPE_COLOR[loan.loan_type] || 'var(--muted)';
+  const pct = proj.percentPaidOff;
+
+  // Months to payoff display: "19 mo (1.6 yr)"
+  const monthsLabel = proj.monthsToPayoff !== null
+    ? `${proj.monthsToPayoff} mo (${(proj.monthsToPayoff / 12).toFixed(1)} yr)`
+    : 'Never at this rate';
+
+  // Show estimated balance if it's different from current (payments happened since last update)
+  const showEstimate = estimate.isStale && estimate.estimatedBalance !== loan.current_balance;
+
+  return (
+    <div style={{
+      background: 'white', border: `1px solid var(--border)`, borderRadius: 16,
+      overflow: 'hidden', borderLeft: `5px solid ${color}`
+    }}>
+      {/* Header */}
+      <div style={{ padding: '16px 18px 12px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 700 }}>{loan.name}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+              {LOAN_TYPE_LABEL[loan.loan_type] || 'Loan'}{loan.lender ? ` · ${loan.lender}` : ''}
+            </div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)' }}>{fmtMoney(loan.current_balance)}</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>as of {fmtDate(loan.balance_updated_at)}</div>
+            {showEstimate && (
+              <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>
+                ~{fmtMoney(estimate.estimatedBalance)} est. now
+                <span style={{ color: 'var(--muted)' }}> ({estimate.paymentsSinceUpdate} payment{estimate.paymentsSinceUpdate !== 1 ? 's' : ''} since)</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 4-stat grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 1, background: 'var(--border)' }}>
+        {[
+          { label: 'Interest rate', value: `${loan.interest_rate}%` },
+          { label: 'Monthly payment', value: fmtMoney(loan.monthly_payment) },
+          { label: 'Months to payoff', value: monthsLabel },
+          { label: 'Payoff date', value: fmtMonthYear(proj.payoffDate) },
+        ].map(({ label, value }) => (
+          <div key={label} style={{ background: 'white', padding: '12px 14px' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{label}</div>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Summary line + progress bar */}
+      <div style={{ padding: '12px 18px 14px' }}>
+        {proj.totalInterestRemaining !== null && proj.totalPaidRemaining !== null && (
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+            Estimated remaining interest: <strong style={{ color: 'var(--red)' }}>{fmtMoney(proj.totalInterestRemaining)}</strong>
+            {' · '}total remaining payments: <strong>{fmtMoney(proj.totalPaidRemaining)}</strong>
+          </div>
+        )}
+
+        {pct !== null && (
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ height: 8, background: 'var(--border)', borderRadius: 999, overflow: 'hidden', marginBottom: 4 }}>
+              <div style={{
+                height: '100%', width: `${pct}%`,
+                background: pct >= 75 ? 'var(--green)' : pct >= 40 ? '#1a73e8' : 'var(--red)',
+                borderRadius: 999, transition: 'width 0.4s',
+              }} />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              {pct.toFixed(0)}% paid off{loan.origination_balance ? ` of ${fmtMoney(loan.origination_balance)} original` : ''}
+            </div>
+          </div>
+        )}
+
+        {/* Last payment info */}
+        {lastPayment && (
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+            Last balance logged: {fmtMoney(lastPayment.balance)} on {fmtDate(lastPayment.recorded_date)}
+            {lastPayment.notes ? ` · ${lastPayment.notes}` : ''}
+          </div>
+        )}
+
+        {/* Update balance button / form */}
+        {!showUpdateForm ? (
+          <button
+            onClick={() => setShowUpdateForm(true)}
+            style={{
+              padding: '7px 14px', borderRadius: 9, border: '1px solid var(--border)',
+              background: 'white', cursor: 'pointer', fontSize: 13, fontWeight: 500,
+              display: 'inline-flex', alignItems: 'center', gap: 6
+            }}
+          >
+            ↻ Update balance
+          </button>
+        ) : (
+          <UpdateBalanceForm
+            loan={loan}
+            onSave={async (balance, date, notes) => {
+              await onUpdateBalance(loan.id, balance, date, notes);
+              setShowUpdateForm(false);
+            }}
+            onCancel={() => setShowUpdateForm(false)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LoansPanel({ loans, history, loading, onUpdateBalance, calendarEvents }: {
+  loans: Loan[];
+  history: BalanceHistoryEntry[];
+  loading: boolean;
+  onUpdateBalance: (loanId: string, balance: number, date: string, notes: string) => Promise<void>;
+  calendarEvents: { title: string; start: string; allDay: boolean }[];
+}) {
+  if (loading) {
+    return <div className="panel"><p style={{ color: 'var(--muted)' }}>Loading loans...</p></div>;
+  }
 
   if (loans.length === 0) {
     return (
       <div className="panel">
         <h2>Loans</h2>
-        <div className="brief-item">No active loans found. Add loans to the <code>loans</code> table in Supabase to track them here.</div>
+        <div className="brief-item">
+          No active loans found. Add your loans to the <code>loans</code> table in Supabase to track payoff here.
+        </div>
       </div>
     );
   }
 
-  const totalBalance = loans.reduce((sum: number, l: any) => sum + l.current_balance, 0);
-  const totalMonthly = loans.reduce((sum: number, l: any) => sum + l.monthly_payment, 0);
-
-  const TYPE_LABELS: Record<string, string> = {
-    student: 'Student', personal: 'Personal', auto: 'Auto', mortgage: 'Mortgage', other: 'Other'
-  };
-
-  const TYPE_COLORS: Record<string, string> = {
-    student: 'var(--purple)', personal: 'var(--red)', auto: 'var(--green)',
-    mortgage: 'var(--amber)', other: 'var(--muted)'
-  };
+  const totalBalance = loans.reduce((s, l) => s + l.current_balance, 0);
+  const totalMonthly = loans.reduce((s, l) => s + l.monthly_payment, 0);
+  const sorted = [...loans].sort((a, b) => b.interest_rate - a.interest_rate);
+  const highestRate = sorted[0];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div className="stats-row">
-        <div className="stat-card">
-          <div className="stat-label">Total Owed</div>
+      {/* Page header matches screenshot */}
+      <div style={{ marginBottom: 4 }}>
+        <h2 style={{ margin: '0 0 4px' }}>Loans</h2>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>
+          Balances update when you log a real statement number. Between updates, the estimate counts actual payment dates from
+          your calendar and applies payment minus interest for each one — log the real number whenever you get a new statement to keep it accurate.
+        </p>
+      </div>
+
+      {/* Summary stats */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <div className="stat-card" style={{ flex: '1 1 160px' }}>
+          <div className="stat-label">Total debt</div>
           <div className="stat-val" style={{ color: 'var(--red)' }}>{fmtMoney(totalBalance)}</div>
-          <small>{loans.length} active loan{loans.length !== 1 ? 's' : ''}</small>
         </div>
-        <div className="stat-card">
-          <div className="stat-label">Monthly Payments</div>
+        <div className="stat-card" style={{ flex: '1 1 160px' }}>
+          <div className="stat-label">Total monthly payments</div>
           <div className="stat-val">{fmtMoney(totalMonthly)}</div>
-          <small>combined minimum</small>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Highest Rate</div>
-          <div className="stat-val" style={{ color: 'var(--amber)' }}>
-            {Math.max(...loans.map((l: any) => l.interest_rate)).toFixed(2)}%
-          </div>
-          <small>APR</small>
         </div>
       </div>
 
-      {loans.map((loan: any) => {
-        const proj = calculatePayoffProjection(loan);
-        const pct = proj.percentPaidOff;
-        const barColor = pct !== null && pct >= 75 ? 'var(--green)' : pct !== null && pct >= 40 ? 'var(--amber)' : 'var(--red)';
+      {/* Loan cards */}
+      {loans.map(loan => (
+        <LoanCard
+          key={loan.id}
+          loan={loan}
+          history={history}
+          calendarEvents={calendarEvents}
+          onUpdateBalance={onUpdateBalance}
+        />
+      ))}
 
-        return (
-          <div key={loan.id} className="panel" style={{ borderLeft: `4px solid ${TYPE_COLORS[loan.loan_type] || 'var(--muted)'}` }}>
-            <div className="panel-head">
-              <div>
-                <h2 style={{ margin: 0 }}>{loan.name}</h2>
-                <p style={{ margin: '2px 0 0', color: 'var(--muted)', fontSize: 13 }}>
-                  {TYPE_LABELS[loan.loan_type] || 'Other'}{loan.lender ? ` · ${loan.lender}` : ''} · {loan.interest_rate}% APR
-                </p>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--red)' }}>{fmtMoney(loan.current_balance)}</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)' }}>current balance</div>
-              </div>
-            </div>
-
-            {pct !== null && (
-              <div style={{ margin: '10px 0 6px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
-                  <span>{pct.toFixed(1)}% paid off</span>
-                  {loan.origination_balance && <span>Started at {fmtMoney(loan.origination_balance)}</span>}
-                </div>
-                <div style={{ height: 8, background: 'var(--border)', borderRadius: 999, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${pct}%`, background: barColor, borderRadius: 999 }} />
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10, marginTop: 12 }}>
-              <div className="brief-item" style={{ margin: 0 }}>
-                <strong>Monthly payment</strong>
-                <p style={{ margin: '2px 0 0' }}>{fmtMoney(loan.monthly_payment)}</p>
-              </div>
-              {proj.monthsToPayoff !== null && (
-                <div className="brief-item" style={{ margin: 0 }}>
-                  <strong>Payoff date</strong>
-                  <p style={{ margin: '2px 0 0' }}>
-                    {proj.payoffDate
-                      ? new Date(proj.payoffDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
-                      : '—'}
-                    <span style={{ fontSize: 11, color: 'var(--muted)', display: 'block' }}>{proj.monthsToPayoff} months</span>
-                  </p>
-                </div>
-              )}
-              {proj.totalInterestRemaining !== null && (
-                <div className="brief-item" style={{ margin: 0 }}>
-                  <strong>Interest remaining</strong>
-                  <p style={{ margin: '2px 0 0', color: 'var(--red)' }}>{fmtMoney(proj.totalInterestRemaining)}</p>
-                </div>
-              )}
-              <div className="brief-item" style={{ margin: 0 }}>
-                <strong>Last updated</strong>
-                <p style={{ margin: '2px 0 0', fontSize: 12 }}>
-                  {new Date(loan.balance_updated_at + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                </p>
-              </div>
-            </div>
-
-            {proj.monthsToPayoff === null && (
-              <div className="brief-item" style={{ marginTop: 10, background: 'var(--red-bg)', color: 'var(--red)' }}>
-                ⚠️ Monthly payment doesn't cover interest — balance is growing. Increase payment above {fmtMoney(loan.current_balance * loan.interest_rate / 100 / 12)}/mo to start making progress.
-              </div>
-            )}
-
-            {loan.notes && (
-              <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8, marginBottom: 0 }}>{loan.notes}</p>
-            )}
-          </div>
-        );
-      })}
-
-      {loans.length > 1 && (() => {
-        const sorted = [...loans].sort((a: any, b: any) => b.interest_rate - a.interest_rate);
-        const highest = sorted[0];
-        return (
-          <div className="panel" style={{ background: 'var(--purple-bg)', borderColor: 'var(--purple)', borderLeft: '4px solid var(--purple)' }}>
-            <h3 style={{ margin: '0 0 6px', color: 'var(--purple-dark)', fontSize: 14 }}>💡 Avalanche strategy</h3>
-            <p style={{ margin: 0, fontSize: 13 }}>
-              Put any extra payments toward <strong>{highest.name}</strong> ({highest.interest_rate}% APR) first — it costs the most in interest. Once it's gone, roll that payment into the next highest-rate loan.
-            </p>
-          </div>
-        );
-      })()}
+      {/* Avalanche tip */}
+      {loans.length > 1 && (
+        <div className="panel" style={{ background: 'var(--purple-bg)', borderColor: 'var(--purple)', borderLeft: '4px solid var(--purple)' }}>
+          <h3 style={{ margin: '0 0 6px', color: 'var(--purple-dark)', fontSize: 14 }}>💡 Avalanche strategy</h3>
+          <p style={{ margin: 0, fontSize: 13 }}>
+            Put any extra payments toward <strong>{highestRate.name}</strong> ({highestRate.interest_rate}% APR) first — it costs the most in interest each month.
+            Once it's gone, roll that {fmtMoney(highestRate.monthly_payment)}/mo payment into the next highest-rate loan.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
