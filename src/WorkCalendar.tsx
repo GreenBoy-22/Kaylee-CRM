@@ -17,6 +17,7 @@ export interface WorkCalendarStudent {
   id: string;
   display_name: string;
   next_appointment_date: string | null; // YYYY-MM-DD
+  next_call_at?: string | null;         // full ISO datetime from touchpoint log
   archived: boolean;
 }
 
@@ -123,15 +124,30 @@ export default function WorkCalendar({ students }: Props) {
 
   const today = new Date();
 
-  // Build a map: dateKey -> list of students with a call that day
+  // Build a map: dateKey -> list of students with a call that day.
+  // Uses BOTH next_appointment_date (set on the profile) and next_call_at
+  // (set when logging a touchpoint). A student can appear on multiple days
+  // if both fields are set to different dates.
   const callsByDay = useMemo(() => {
     const map = new Map<string, WorkCalendarStudent[]>();
-    for (const student of students) {
-      if (student.archived || !student.next_appointment_date) continue;
-      const key = student.next_appointment_date.slice(0, 10);
+    const addToDay = (key: string, student: WorkCalendarStudent) => {
       const arr = map.get(key) ?? [];
-      arr.push(student);
+      // Avoid double-counting the same student on the same day
+      if (!arr.find((s) => s.id === student.id)) arr.push(student);
       map.set(key, arr);
+    };
+    for (const student of students) {
+      if (student.archived) continue;
+      if (student.next_appointment_date) {
+        addToDay(student.next_appointment_date.slice(0, 10), student);
+      }
+      if (student.next_call_at) {
+        const callKey = student.next_call_at.slice(0, 10);
+        // Only add if different from next_appointment_date (already added above)
+        if (callKey !== student.next_appointment_date?.slice(0, 10)) {
+          addToDay(callKey, student);
+        }
+      }
     }
     return map;
   }, [students]);
