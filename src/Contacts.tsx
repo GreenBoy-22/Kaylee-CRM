@@ -3,13 +3,17 @@
 // Contacts tab — reads from Google People API using the same OAuth token
 // stored by the google-calendar-auth flow. Requires contacts.readonly scope.
 // Displays all contacts grouped by first letter, with search and label filter.
+// Expanded cards show all available fields (phones, emails, addresses,
+// birthdays, anniversaries, important dates, notes) — empty fields are hidden.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Users, Search, Phone, Mail, RefreshCw, ExternalLink } from 'lucide-react';
+import { Users, Search, Phone, Mail, RefreshCw, ExternalLink, MapPin, Cake, Calendar, FileText, Star } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
-type ContactPhone = { value: string; type?: string };
-type ContactEmail = { value: string; type?: string };
+type ContactPhone   = { value: string; type?: string };
+type ContactEmail   = { value: string; type?: string };
+type ContactAddress = { formatted: string; type?: string };
+type ContactDate    = { label: string; month: number; day: number; year?: number };
 
 type Contact = {
   resourceName: string;
@@ -18,15 +22,65 @@ type Contact = {
   familyName?: string;
   phones: ContactPhone[];
   emails: ContactEmail[];
+  addresses: ContactAddress[];
+  birthday?: ContactDate | null;
+  importantDates: ContactDate[];
+  notes: string[];
+  organization?: string | null;
+  jobTitle?: string | null;
   labels: string[];
   photoUrl?: string | null;
 };
 
 type LoadState = 'idle' | 'loading' | 'loaded' | 'error' | 'no_auth';
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function formatDate(d: ContactDate): string {
+  const month = MONTH_NAMES[(d.month - 1) % 12] ?? String(d.month);
+  return d.year ? `${month} ${d.day}, ${d.year}` : `${month} ${d.day}`;
+}
+
+function formatPhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 10) return `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+  if (digits.length === 11 && digits[0] === '1') return `+1 (${digits.slice(1,4)}) ${digits.slice(4,7)}-${digits.slice(7)}`;
+  return raw;
+}
+
+function initials(contact: Contact): string {
+  const g = contact.givenName?.[0] ?? '';
+  const f = contact.familyName?.[0] ?? '';
+  return (g + f).toUpperCase() || contact.displayName[0].toUpperCase();
+}
+
+function avatarColor(name: string): string {
+  const colors = ['#7C3AED','#2563EB','#059669','#D97706','#DC2626','#0891B2','#65A30D','#9333EA'];
+  let hash = 0;
+  for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff;
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function parseDate(raw: any): ContactDate | null {
+  if (!raw) return null;
+  const month = raw.month;
+  const day   = raw.day;
+  if (!month || !day) return null;
+  return { label: '', month, day, year: raw.year ?? undefined };
+}
+
+// ── API fetchers ───────────────────────────────────────────────────────────
+
 async function fetchGoogleContacts(accessToken: string): Promise<Contact[]> {
+  const fields = [
+    'names','emailAddresses','phoneNumbers','memberships','photos',
+    'addresses','birthdays','events','biographies','organizations',
+  ].join(',');
+
   const params = new URLSearchParams({
-    personFields: 'names,emailAddresses,phoneNumbers,memberships,photos',
+    personFields: fields,
     pageSize: '1000',
     sortOrder: 'FIRST_NAME_ASCENDING',
   });
@@ -57,6 +111,34 @@ async function fetchGoogleContacts(accessToken: string): Promise<Contact[]> {
         type: em.formattedType ?? em.type,
       }));
 
+      const addresses: ContactAddress[] = (p.addresses ?? []).map((a: any) => ({
+        formatted: a.formattedValue ?? [a.streetAddress, a.city, a.region, a.postalCode, a.country].filter(Boolean).join(', '),
+        type: a.formattedType ?? a.type,
+      })).filter((a: ContactAddress) => a.formatted);
+
+      // Birthday — Google stores in birthdays array, primary one is canonical
+      const rawBirthday = p.birthdays?.find((b: any) => b.metadata?.primary) ?? p.birthdays?.[0];
+      const birthday = rawBirthday ? parseDate(rawBirthday.date) : null;
+
+      // Events (anniversaries, other important dates)
+      const importantDates: ContactDate[] = (p.events ?? [])
+        .map((ev: any): ContactDate | null => {
+          const parsed = parseDate(ev.date);
+          if (!parsed) return null;
+          return { ...parsed, label: ev.formattedType ?? ev.type ?? 'Event' };
+        })
+        .filter(Boolean) as ContactDate[];
+
+      // Notes / biographies
+      const notes: string[] = (p.biographies ?? [])
+        .map((b: any) => (b.value ?? '').trim())
+        .filter(Boolean);
+
+      // Organization
+      const primaryOrg = p.organizations?.find((o: any) => o.metadata?.primary) ?? p.organizations?.[0];
+      const organization = primaryOrg?.name ?? null;
+      const jobTitle     = primaryOrg?.title ?? null;
+
       const labels: string[] = (p.memberships ?? [])
         .filter((m: any) => m.contactGroupMembership)
         .map((m: any) => m.contactGroupMembership.contactGroupResourceName ?? '')
@@ -71,6 +153,12 @@ async function fetchGoogleContacts(accessToken: string): Promise<Contact[]> {
         familyName: primaryName.familyName,
         phones,
         emails,
+        addresses,
+        birthday,
+        importantDates,
+        notes,
+        organization,
+        jobTitle,
         labels,
         photoUrl: photo?.url ?? null,
       };
@@ -92,41 +180,38 @@ async function fetchContactGroups(accessToken: string): Promise<Map<string, stri
   return map;
 }
 
-function formatPhone(raw: string): string {
-  const digits = raw.replace(/\D/g, '');
-  if (digits.length === 10) {
-    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-  }
-  if (digits.length === 11 && digits[0] === '1') {
-    return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
-  }
-  return raw;
+// ── Detail row component ──────────────────────────────────────────────────
+
+function DetailRow({ icon, children, href, type }: {
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  href?: string;
+  type?: string;
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13 }}>
+      <span style={{ color: 'var(--muted)', flexShrink: 0, marginTop: 1 }}>{icon}</span>
+      <span style={{ flex: 1 }}>
+        {href
+          ? <a href={href} style={{ color: 'var(--text)', textDecoration: 'none' }}>{children}</a>
+          : <span style={{ color: 'var(--text)' }}>{children}</span>
+        }
+      </span>
+      {type && <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0 }}>{type}</span>}
+    </div>
+  );
 }
 
-function initials(contact: Contact): string {
-  const g = contact.givenName?.[0] ?? '';
-  const f = contact.familyName?.[0] ?? '';
-  return (g + f).toUpperCase() || contact.displayName[0].toUpperCase();
-}
-
-function avatarColor(name: string): string {
-  const colors = [
-    '#7C3AED', '#2563EB', '#059669', '#D97706',
-    '#DC2626', '#7C3AED', '#0891B2', '#65A30D',
-  ];
-  let hash = 0;
-  for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff;
-  return colors[Math.abs(hash) % colors.length];
-}
+// ── Main component ─────────────────────────────────────────────────────────
 
 export default function Contacts() {
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [groupMap, setGroupMap] = useState<Map<string, string>>(new Map());
-  const [loadState, setLoadState] = useState<LoadState>('idle');
-  const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  const [contacts, setContacts]     = useState<Contact[]>([]);
+  const [groupMap, setGroupMap]     = useState<Map<string, string>>(new Map());
+  const [loadState, setLoadState]   = useState<LoadState>('idle');
+  const [error, setError]           = useState<string | null>(null);
+  const [search, setSearch]         = useState('');
   const [selectedLabel, setSelectedLabel] = useState<string>('all');
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expanded, setExpanded]     = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!supabase) { setLoadState('no_auth'); return; }
@@ -134,15 +219,10 @@ export default function Contacts() {
     setError(null);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
-      // We need the Google OAuth access token, not the Supabase JWT.
-      // It's stored in google_calendar_cache alongside the calendar data.
-      const userId = sessionData.session?.user?.id;
-      if (!userId) { setLoadState('no_auth'); return; }
-
+      const userId     = sessionData.session?.user?.id;
       const supabaseJwt = sessionData.session?.access_token;
-      if (!supabaseJwt) { setLoadState('no_auth'); return; }
+      if (!userId || !supabaseJwt) { setLoadState('no_auth'); return; }
 
-      // Fetch the Google access token from our edge function
       const resp = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/google-contacts-token`,
         { headers: { Authorization: `Bearer ${supabaseJwt}` } }
@@ -150,9 +230,8 @@ export default function Contacts() {
 
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({}));
-        if (body?.error === 'not_connected') {
-          setLoadState('no_auth');
-          return;
+        if (body?.error === 'not_connected' || body?.error === 'no_contacts_scope') {
+          setLoadState('no_auth'); return;
         }
         throw new Error(body?.error ?? `Token fetch failed: ${resp.status}`);
       }
@@ -181,9 +260,11 @@ export default function Contacts() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Unique user-created label names (skip system groups like "myContacts", "starred")
   const labelOptions = useMemo(() => {
-    const systemPrefixes = ['contactGroups/myContacts', 'contactGroups/starred', 'contactGroups/all', 'contactGroups/friends', 'contactGroups/family', 'contactGroups/coworkers'];
+    const systemPrefixes = [
+      'contactGroups/myContacts','contactGroups/starred','contactGroups/all',
+      'contactGroups/friends','contactGroups/family','contactGroups/coworkers',
+    ];
     const seen = new Set<string>();
     const opts: { key: string; label: string }[] = [];
     for (const c of contacts) {
@@ -204,13 +285,14 @@ export default function Contacts() {
       if (!q) return true;
       return (
         c.displayName.toLowerCase().includes(q) ||
-        c.phones.some(p => p.value.replace(/\D/g, '').includes(q.replace(/\D/g, ''))) ||
-        c.emails.some(e => e.value.toLowerCase().includes(q))
+        (c.organization ?? '').toLowerCase().includes(q) ||
+        c.phones.some(p => p.value.replace(/\D/g,'').includes(q.replace(/\D/g,''))) ||
+        c.emails.some(e => e.value.toLowerCase().includes(q)) ||
+        c.addresses.some(a => a.formatted.toLowerCase().includes(q))
       );
     });
   }, [contacts, search, selectedLabel]);
 
-  // Group alphabetically
   const grouped = useMemo(() => {
     const map = new Map<string, Contact[]>();
     for (const c of filtered) {
@@ -222,7 +304,8 @@ export default function Contacts() {
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [filtered]);
 
-  // ── Loading / error states ──────────────────────────────────────────
+  // ── States ──────────────────────────────────────────────────────────
+
   if (loadState === 'idle' || loadState === 'loading') {
     return (
       <section className="panel">
@@ -239,9 +322,7 @@ export default function Contacts() {
       <section className="panel">
         <div style={{ textAlign: 'center', padding: '32px 16px' }}>
           <Users size={28} style={{ marginBottom: 10, color: 'var(--muted)' }} />
-          <p style={{ margin: '0 0 8px' }}>
-            Connect your Google account to see your contacts here.
-          </p>
+          <p style={{ margin: '0 0 8px' }}>Connect your Google account to see your contacts here.</p>
           <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 16px' }}>
             Go to <strong>Settings → Reconnect Google Account</strong> and approve the Contacts permission.
           </p>
@@ -261,52 +342,39 @@ export default function Contacts() {
     );
   }
 
-  // ── Main UI ────────────────────────────────────────────────────────
+  // ── Main UI ──────────────────────────────────────────────────────────
+
   return (
     <>
-      {/* Header */}
       <div className="page-header">
         <div>
           <h1>Contacts</h1>
           <p>Your Google Contacts — {contacts.length} total</p>
         </div>
         <div className="actions">
-          <a
-            href="https://contacts.google.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn ghost"
-          >
+          <a href="https://contacts.google.com" target="_blank" rel="noopener noreferrer" className="btn ghost">
             <ExternalLink size={14} /> Open Google Contacts
           </a>
-          <button className="btn ghost" onClick={load}>
-            <RefreshCw size={14} /> Refresh
-          </button>
+          <button className="btn ghost" onClick={load}><RefreshCw size={14} /> Refresh</button>
         </div>
       </div>
 
-      {/* Search + label filter */}
+      {/* Search + filter */}
       <section className="panel" style={{ paddingBottom: 12 }}>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ position: 'relative', flex: 1, minWidth: 180 }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)' }} />
             <input
-              placeholder="Search name, phone, or email…"
+              placeholder="Search name, phone, email, address…"
               value={search}
               onChange={e => setSearch(e.target.value)}
               style={{ paddingLeft: 32, width: '100%' }}
             />
           </div>
           {labelOptions.length > 0 && (
-            <select
-              value={selectedLabel}
-              onChange={e => setSelectedLabel(e.target.value)}
-              style={{ minWidth: 140 }}
-            >
+            <select value={selectedLabel} onChange={e => setSelectedLabel(e.target.value)} style={{ minWidth: 140 }}>
               <option value="all">All contacts</option>
-              {labelOptions.map(o => (
-                <option key={o.key} value={o.key}>{o.label}</option>
-              ))}
+              {labelOptions.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
             </select>
           )}
         </div>
@@ -317,102 +385,78 @@ export default function Contacts() {
         )}
       </section>
 
-      {/* Contact list */}
       {grouped.length === 0 && (
-        <section className="panel">
-          <div className="brief-item">No contacts match your search.</div>
-        </section>
+        <section className="panel"><div className="brief-item">No contacts match your search.</div></section>
       )}
 
       {grouped.map(([letter, group]) => (
         <section className="panel" key={letter} style={{ paddingBottom: 4 }}>
-          <div style={{
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.08em',
-            color: 'var(--muted)',
-            textTransform: 'uppercase',
-            marginBottom: 6,
-          }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 6 }}>
             {letter}
           </div>
+
           {group.map(contact => {
             const isOpen = expanded === contact.resourceName;
-            const color = avatarColor(contact.displayName);
+            const color  = avatarColor(contact.displayName);
+            const hasExtra = contact.addresses.length > 0 || contact.birthday || contact.importantDates.length > 0 || contact.notes.length > 0 || contact.organization || contact.jobTitle;
+
             return (
               <div key={contact.resourceName}>
+                {/* Row */}
                 <button
                   onClick={() => setExpanded(isOpen ? null : contact.resourceName)}
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    width: '100%',
-                    background: 'none',
-                    border: 'none',
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    width: '100%', background: 'none', border: 'none',
                     padding: '8px 4px',
-                    borderBottom: '1px solid var(--border, rgba(0,0,0,0.07))',
-                    cursor: 'pointer',
-                    textAlign: 'left',
+                    borderBottom: isOpen ? 'none' : '1px solid var(--border, rgba(0,0,0,0.07))',
+                    cursor: 'pointer', textAlign: 'left',
                   }}
                 >
                   {/* Avatar */}
                   {contact.photoUrl ? (
-                    <img
-                      src={contact.photoUrl}
-                      alt={contact.displayName}
-                      style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0, objectFit: 'cover' }}
-                    />
+                    <img src={contact.photoUrl} alt={contact.displayName}
+                      style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0, objectFit: 'cover' }} />
                   ) : (
                     <div style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: '50%',
-                      background: color,
-                      color: '#fff',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 13,
-                      fontWeight: 700,
-                      flexShrink: 0,
+                      width: 36, height: 36, borderRadius: '50%', background: color,
+                      color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 13, fontWeight: 700, flexShrink: 0,
                     }}>
                       {initials(contact)}
                     </div>
                   )}
 
-                  {/* Name + preview */}
+                  {/* Name + subtitle */}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)' }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
                       {contact.displayName}
+                      {contact.birthday && (
+                        <span title={`Birthday: ${formatDate(contact.birthday)}`} style={{ color: 'var(--muted)' }}>
+                          <Cake size={12} />
+                        </span>
+                      )}
                     </div>
-                    {!isOpen && (contact.phones[0] || contact.emails[0]) && (
+                    {!isOpen && (
                       <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>
-                        {contact.phones[0]
-                          ? formatPhone(contact.phones[0].value)
-                          : contact.emails[0]?.value}
+                        {contact.jobTitle && contact.organization
+                          ? `${contact.jobTitle} · ${contact.organization}`
+                          : contact.organization ?? contact.jobTitle
+                          ?? (contact.phones[0] ? formatPhone(contact.phones[0].value) : contact.emails[0]?.value ?? '')}
                       </div>
                     )}
                   </div>
 
                   {/* Quick action icons */}
                   {contact.phones[0] && (
-                    <a
-                      href={`tel:${contact.phones[0].value}`}
-                      onClick={e => e.stopPropagation()}
-                      style={{ color: 'var(--muted)', padding: 4 }}
-                      title={`Call ${formatPhone(contact.phones[0].value)}`}
-                    >
+                    <a href={`tel:${contact.phones[0].value}`} onClick={e => e.stopPropagation()}
+                      style={{ color: 'var(--muted)', padding: 4 }} title={`Call ${formatPhone(contact.phones[0].value)}`}>
                       <Phone size={15} />
                     </a>
                   )}
                   {contact.emails[0] && (
-                    <a
-                      href={`mailto:${contact.emails[0].value}`}
-                      onClick={e => e.stopPropagation()}
-                      style={{ color: 'var(--muted)', padding: 4 }}
-                      title={`Email ${contact.emails[0].value}`}
-                    >
+                    <a href={`mailto:${contact.emails[0].value}`} onClick={e => e.stopPropagation()}
+                      style={{ color: 'var(--muted)', padding: 4 }} title={`Email ${contact.emails[0].value}`}>
                       <Mail size={15} />
                     </a>
                   )}
@@ -421,32 +465,64 @@ export default function Contacts() {
                 {/* Expanded detail */}
                 {isOpen && (
                   <div style={{
-                    padding: '10px 52px 14px',
+                    padding: '10px 4px 14px 52px',
                     borderBottom: '1px solid var(--border, rgba(0,0,0,0.07))',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 6,
+                    display: 'flex', flexDirection: 'column', gap: 7,
                   }}>
+                    {/* Job / org */}
+                    {(contact.jobTitle || contact.organization) && (
+                      <DetailRow icon={<Star size={13} />}>
+                        {[contact.jobTitle, contact.organization].filter(Boolean).join(' · ')}
+                      </DetailRow>
+                    )}
+
+                    {/* Phones */}
                     {contact.phones.map((ph, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                        <Phone size={13} style={{ color: 'var(--muted)', flexShrink: 0 }} />
-                        <a href={`tel:${ph.value}`} style={{ color: 'var(--text)', textDecoration: 'none' }}>
-                          {formatPhone(ph.value)}
-                        </a>
-                        {ph.type && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{ph.type}</span>}
-                      </div>
+                      <DetailRow key={i} icon={<Phone size={13} />} href={`tel:${ph.value}`} type={ph.type}>
+                        {formatPhone(ph.value)}
+                      </DetailRow>
                     ))}
+
+                    {/* Emails */}
                     {contact.emails.map((em, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                        <Mail size={13} style={{ color: 'var(--muted)', flexShrink: 0 }} />
-                        <a href={`mailto:${em.value}`} style={{ color: 'var(--text)', textDecoration: 'none' }}>
-                          {em.value}
-                        </a>
-                        {em.type && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{em.type}</span>}
-                      </div>
+                      <DetailRow key={i} icon={<Mail size={13} />} href={`mailto:${em.value}`} type={em.type}>
+                        {em.value}
+                      </DetailRow>
                     ))}
-                    {contact.phones.length === 0 && contact.emails.length === 0 && (
-                      <span style={{ fontSize: 12, color: 'var(--muted)' }}>No phone or email on file.</span>
+
+                    {/* Addresses */}
+                    {contact.addresses.map((a, i) => (
+                      <DetailRow key={i} icon={<MapPin size={13} />}
+                        href={`https://maps.google.com/?q=${encodeURIComponent(a.formatted)}`}
+                        type={a.type}>
+                        {a.formatted}
+                      </DetailRow>
+                    ))}
+
+                    {/* Birthday */}
+                    {contact.birthday && (
+                      <DetailRow icon={<Cake size={13} />} type="Birthday">
+                        {formatDate(contact.birthday)}
+                      </DetailRow>
+                    )}
+
+                    {/* Important dates / anniversaries */}
+                    {contact.importantDates.map((d, i) => (
+                      <DetailRow key={i} icon={<Calendar size={13} />} type={d.label}>
+                        {formatDate(d)}
+                      </DetailRow>
+                    ))}
+
+                    {/* Notes */}
+                    {contact.notes.map((note, i) => (
+                      <DetailRow key={i} icon={<FileText size={13} />}>
+                        <span style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{note}</span>
+                      </DetailRow>
+                    ))}
+
+                    {/* Fallback when truly empty */}
+                    {!hasExtra && contact.phones.length === 0 && contact.emails.length === 0 && (
+                      <span style={{ fontSize: 12, color: 'var(--muted)' }}>No details on file.</span>
                     )}
                   </div>
                 )}
