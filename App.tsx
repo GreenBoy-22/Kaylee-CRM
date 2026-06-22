@@ -2039,8 +2039,22 @@ function computeTackleToday(choreTasks: ChoreTask[]): ChoreTask[] {
 }
 
 function Briefing({ compact = false }: { compact?: boolean }) {
-  const list = compact ? briefing.slice(0, 2) : briefing;
-  return <section className="panel"><h2>Daily Briefing</h2>{list.map((item) => <div className="brief-item" key={item}>{item}</div>)}</section>;
+  const { loading, lines } = useDailyBriefing();
+  const list = compact ? lines.slice(0, 3) : lines;
+  const severityColor: Record<string, string> = {
+    urgent: 'var(--red)', warning: 'var(--amber)', info: 'var(--purple)'
+  };
+  return (
+    <section className="panel">
+      <h2>Daily Briefing</h2>
+      {loading && <div className="brief-item">Loading...</div>}
+      {!loading && list.map((item) => (
+        <div className="brief-item" key={item.id} style={{ borderLeft: `3px solid ${severityColor[item.severity]}` }}>
+          {item.text}
+        </div>
+      ))}
+    </section>
+  );
 }
 
 function Inventory({ inventory, createItem, updateQuantity, editable }: { inventory: InventoryItem[]; createItem: (item: Omit<InventoryItem, 'id'>) => void; updateQuantity: (id: string, quantity: number) => void; editable: boolean }) {
