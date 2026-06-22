@@ -652,7 +652,7 @@ function App() {
     // ── MOMENTUM FLAG ──
     let momentumLine = '';
     if (isLowMomentum) momentumLine = 'Momentum is low — what would one small win look like this week?';
-    if (isHighMomentum) momentumLine = 'Momentum is high — what's fueling it? How do we protect it?';
+    if (isHighMomentum) momentumLine = "Momentum is high — what's fueling it? How do we protect it?";
 
     // ── GROW QUESTIONS (4 short bullets) ──
     const growGoal = `Goal: What do you want to accomplish in ${courseText} before we talk again?`;
