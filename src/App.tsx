@@ -4,19 +4,15 @@ import {
   Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart
+  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
-import GoogleCalendarToday from './GoogleCalendarToday';
-import Budget from './Budget';
-import Vehicles from './Vehicles';
-import Jules from './Jules';
-import { useDailyBriefing } from './useDailyBriefing';
+import WorkCalendar from './WorkCalendar';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'suggestions' | 'students' | 'outreach' | 'settings';
+type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'suggestions' | 'students' | 'outreach' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -207,7 +203,6 @@ const homeNav: readonly NavEntry[] = [
   ['inventory', 'Inventory', Inbox],
   ['chores', 'Chores & Tasks', ListTodo],
   ['vehicles', 'Vehicles', Car],
-  ['jules', 'Jules', Heart],
   ['suggestions', 'Home Suggestions', Home]
 ];
 
@@ -228,7 +223,6 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'inventory', module_name: 'inventory', label: 'Inventory', default_access: 'edit' },
   { page: 'chores', module_name: 'chores', label: 'Chores & Tasks', default_access: 'edit' },
   { page: 'vehicles', module_name: 'vehicles', label: 'Vehicles', default_access: 'view' },
-  { page: 'jules', module_name: 'jules', label: 'Jules', default_access: 'edit' },
   { page: 'suggestions', module_name: 'home_suggestions', label: 'Home Suggestions', default_access: 'edit' },
   { page: 'budget', module_name: 'budget', label: 'Budget', default_access: 'view' },
   { page: 'students', module_name: 'students', label: 'Students', default_access: 'hidden' },
@@ -262,6 +256,10 @@ const seedTasks: TaskItem[] = [
   { id: 't3', title: "Approve Adam's Friday task plan", owner: 'Kaylee', mode: 'home', minutes: 5, priority: 'urgent', status: 'pending_approval', source: 'Adam' }
 ];
 
+const vehicles = [
+  { name: '2016 Toyota Corolla', miles: 134000, type: 'Gas', urgent: ['Spark plugs overdue', 'Transmission fluid unknown'], ok: ['Brakes completed 2025', 'Tire rotation at 133,900 mi'] },
+  { name: '2013 Nissan Leaf', miles: 82500, type: 'EV', urgent: ['12V auxiliary battery likely due', 'HV battery health check'], ok: ['Registration tracked'] }
+];
 
 const COMPACT_ROW_CSS = `
 .ct-panel { padding-bottom: 6px; }
@@ -442,6 +440,12 @@ const COMPACT_ROW_CSS = `
 }
 `;
 
+const briefing = [
+  'Today focuses on approval, quick wins, and expiring inventory.',
+  'Adam should stay at 2-3 tasks max; no Sunday tasks should be generated.',
+  'Work mode keeps student records FERPA-safe: first name/nickname only, GROW notes only, clipboard copy only.',
+  'Budget page is scaffolded next; calendar cashflow is the source of truth.'
+];
 
 function getRoleFromEmail(email = ''): Role {
   const lowered = email.toLowerCase();
@@ -1549,12 +1553,14 @@ Kaylee`;
           {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} choreTasks={choreTasks} householdUsers={householdUsers} role={activeRole} setPage={setPage} />}
           {page === 'today' && <Today tasks={tasks.filter((task) => activeRole === 'admin' || task.mode === 'home')} choreTasks={choreTasks} householdUsers={householdUsers} completeTask={completeTask} completeChore={completeChore} editable={canEdit('today') && canEdit('chores')} />}
           {page === 'briefing' && <Briefing />}
-          {page === 'calendar' && <GoogleCalendar />}
-          {page === 'budget' && <Budget />}
+          {page === 'calendar' && (mode === 'home' || activeRole === 'limited'
+            ? <GoogleCalendar />
+            : <WorkCalendar students={students} />
+          )}
+          {page === 'budget' && <Placeholder title="Budget" sub={activeRole === 'limited' ? 'Kaylee controls whether this is visible/editable for Adam.' : 'Calendar-based cashflow page scaffold.'} />}
           {page === 'inventory' && <Inventory inventory={inventory} createItem={createInventoryItem} updateQuantity={updateInventoryQuantity} editable={canEdit('inventory')} />}
           {page === 'chores' && <Chores choreTasks={choreTasks} choreSuggestions={choreSuggestions} syncState={syncState} syncing={syncing} householdUsers={householdUsers} currentUserName={activeName} syncTodoistNow={syncTodoistNow} completeChore={completeChore} uncompleteChore={uncompleteChore} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} approveSuggestionForAdam={approveSuggestionForAdam} approveSuggestionForSelf={approveSuggestionForSelf} reassignChore={reassignChore} editable={canEdit('chores')} />}
           {page === 'vehicles' && <Vehicles />}
-          {page === 'jules' && <Jules />}
           {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
           {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
           {page === 'outreach' && activeRole === 'admin' && <Outreach drafts={drafts} students={students} generateCohortDrafts={generateCohortDrafts} updateDraft={updateDraft} markDraftSent={markDraftSent} deleteDraft={deleteDraft} />}
@@ -1827,7 +1833,6 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, 
   return <>
     <Header title={role === 'limited' ? 'Adam home dashboard' : mode === 'home' ? 'Home command center' : 'Work command center'} sub={role === 'limited' ? 'Home-only view. Kaylee controls which sections are editable.' : mode === 'home' ? 'Tasks, approvals, inventory, vehicles, and tenant-safe home care.' : 'FERPA-safe student workflow, GROW notes, and daily planning.'} />
     <Stats items={mode === 'home' ? [['Open tasks', String(tasks.filter((task) => task.status !== 'completed' && task.mode === 'home').length), 'home'], ['Adam pending', String(pending), 'approval needed'], ['Inventory', String(inventory.length), `${expiring} expiring`], ['Vehicle alerts', '4', 'critical/due']] : [['Active students', String(activeStudents.length), 'FERPA-safe'], ['Need copy', String(students.filter((s) => !s.copied).length), 'Salesforce'], ['FERPA', 'On', 'clipboard only'], ['Calls today', String(callsToday.length), 'manual now']]} />
-    {mode === 'home' && <GoogleCalendarToday />}
     <div className="grid two"><Today tasks={tasks.filter((task) => mode === 'work' ? task.mode === 'work' : task.mode === 'home').slice(0, 3)} choreTasks={mode === 'home' ? choreTasks : []} householdUsers={householdUsers} completeTask={() => undefined} completeChore={() => undefined} editable={false} compact /><Briefing compact /></div>
   </>;
 }
@@ -2034,20 +2039,8 @@ function computeTackleToday(choreTasks: ChoreTask[]): ChoreTask[] {
 }
 
 function Briefing({ compact = false }: { compact?: boolean }) {
-  const { loading, lines } = useDailyBriefing();
-  const list = compact ? lines.slice(0, 3) : lines;
-  const severityColor: Record<string, string> = { urgent: 'var(--red)', warning: 'var(--amber)', info: 'var(--purple)' };
-  return (
-    <section className="panel">
-      <h2>Daily Briefing</h2>
-      {loading && <div className="brief-item">Loading...</div>}
-      {!loading && list.map((item) => (
-        <div className="brief-item" key={item.id} style={{ borderLeft: `3px solid ${severityColor[item.severity]}` }}>
-          {item.text}
-        </div>
-      ))}
-    </section>
-  );
+  const list = compact ? briefing.slice(0, 2) : briefing;
+  return <section className="panel"><h2>Daily Briefing</h2>{list.map((item) => <div className="brief-item" key={item}>{item}</div>)}</section>;
 }
 
 function Inventory({ inventory, createItem, updateQuantity, editable }: { inventory: InventoryItem[]; createItem: (item: Omit<InventoryItem, 'id'>) => void; updateQuantity: (id: string, quantity: number) => void; editable: boolean }) {
@@ -2068,6 +2061,9 @@ function Inventory({ inventory, createItem, updateQuantity, editable }: { invent
   </>;
 }
 
+function Vehicles() {
+  return <><Header title="Vehicles" sub="Maintenance tracking for Corolla and Leaf." /><div className="grid two">{vehicles.map((vehicle) => <section className="panel" key={vehicle.name}><h2>{vehicle.name}</h2><p>{vehicle.type} · {vehicle.miles.toLocaleString()} miles</p><h3>Urgent</h3>{vehicle.urgent.map((item) => <div className="brief-item urgent" key={item}>{item}</div>)}<h3>Okay</h3>{vehicle.ok.map((item) => <div className="brief-item good" key={item}>{item}</div>)}</section>)}</div></>;
+}
 
 function Suggestions({ choreSuggestions, markSuggestionDone, snoozeSuggestion, dismissSuggestion, restoreSuggestion, addSuggestionToTodoist, editable }: { choreSuggestions: ChoreSuggestion[]; markSuggestionDone: (id: string) => void; snoozeSuggestion: (id: string, days: number) => void; dismissSuggestion: (id: string) => void; restoreSuggestion: (id: string) => void; addSuggestionToTodoist: (id: string) => void; editable: boolean }) {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');

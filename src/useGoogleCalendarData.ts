@@ -76,12 +76,31 @@ export function busyLevelFromHours(hours: number): BusyLevel {
 }
 
 /**
- * Groups events by the local calendar date they fall on (using each event's
- * own start date, not UTC slicing, so day boundaries feel right to the user).
+ * Returns all date keys an event occupies.
+ * - Timed events: just the start date.
+ * - All-day events: every day from start up to (but not including) end,
+ *   because Google Calendar all-day events use an exclusive end date
+ *   (e.g. a 3-day event Jun 19–21 has end = "2026-06-22").
+ *   We cap expansion at 366 days to guard against malformed data.
  */
-function eventDateKey(event: GCalEvent): string {
-  const d = new Date(event.start);
-  return dateKey(d);
+function eventDateKeys(event: GCalEvent): string[] {
+  if (!event.allDay) {
+    return [dateKey(new Date(event.start))];
+  }
+  const keys: string[] = [];
+  // All-day start/end arrive as "YYYY-MM-DD"; parse at midnight local time.
+  const start = new Date(event.start + (event.start.length === 10 ? 'T00:00:00' : ''));
+  const end = new Date(event.end + (event.end.length === 10 ? 'T00:00:00' : ''));
+  const cursor = new Date(start);
+  let guard = 0;
+  while (cursor < end && guard < 366) {
+    keys.push(dateKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+    guard++;
+  }
+  // Fallback: always include at least the start day.
+  if (keys.length === 0) keys.push(dateKey(start));
+  return keys;
 }
 
 function choreDateKey(chore: GCalChore): string | null {
@@ -117,12 +136,14 @@ export function summarizeByDay(
   };
 
   for (const event of events) {
-    const key = eventDateKey(event);
-    const entry = ensure(key);
-    entry.events.push(event);
-    // All-day events are reminders, not scheduled time - excluded from busy math.
-    if (!event.allDay) {
-      entry.busyHours += hoursBetween(event.start, event.end);
+    const keys = eventDateKeys(event);
+    for (const key of keys) {
+      const entry = ensure(key);
+      entry.events.push(event);
+      // All-day events are reminders, not scheduled time - excluded from busy math.
+      if (!event.allDay) {
+        entry.busyHours += hoursBetween(event.start, event.end);
+      }
     }
   }
 

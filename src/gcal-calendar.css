@@ -247,10 +247,6 @@
   border-width: 2px;
 }
 
-.gcal-day-cell.busy-low { background: var(--green-bg); }
-.gcal-day-cell.busy-medium { background: var(--amber-bg); }
-.gcal-day-cell.busy-high { background: var(--red-bg); }
-
 .gcal-day-cell.selected {
   background: var(--purple-bg);
   border-color: var(--purple);
@@ -331,10 +327,6 @@
   border-color: var(--purple);
   border-width: 2px;
 }
-
-.gcal-week-day.busy-low { background: var(--green-bg); }
-.gcal-week-day.busy-medium { background: var(--amber-bg); }
-.gcal-week-day.busy-high { background: var(--red-bg); }
 
 .gcal-week-day.selected {
   background: var(--purple-bg);
@@ -420,7 +412,14 @@
 
 .gcal-legend-dot.low { background: var(--green); }
 .gcal-legend-dot.medium { background: var(--amber); }
+.gcal-legend-dot.moderate { background: var(--amber); }
 .gcal-legend-dot.high { background: var(--red); }
+
+/* ---- Work calendar busy aliases (uses 'moderate' instead of 'medium') ---- */
+.gcal-day-cell.busy-moderate { background: var(--amber-bg); }
+.gcal-week-day.busy-moderate { background: var(--amber-bg); }
+.gcal-today-busy-pill.moderate { background: var(--amber-bg); color: var(--amber); }
+.gcal-busy-dot.moderate { background: var(--amber); }
 
 @media (max-width: 900px) {
   .gcal-week-grid {
