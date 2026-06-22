@@ -904,8 +904,13 @@ export default function MigraineTracker() {
   };
 
   const handleDelete = async (id: string) => {
-    await deleteEntry(id);
-    await load();
+    // Optimistically remove from local state immediately so the UI responds
+    // regardless of whether Supabase is connected or in demo mode.
+    setEntries((prev) => prev.filter((e) => e.id !== id));
+    // If Supabase is live, also delete from the database.
+    if (hasSupabase && supabase) {
+      await deleteEntry(id);
+    }
   };
 
   const handleCalendarDateClick = (date: string) => {
