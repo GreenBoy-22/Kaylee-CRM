@@ -234,28 +234,73 @@ function HeadZoneMap({ selected, onChange }: { selected: PainZone[]; onChange: (
           {/* Front-facing head SVG */}
           <svg width="200" height="220" viewBox="0 0 200 220" style={{ position: 'absolute', top: 0, left: 0 }}>
             {/* Neck */}
-            <rect x="82" y="172" width="36" height="32" rx="8" fill="#f0f0f0" stroke="#ccc" strokeWidth="1.5" />
-            {/* Head shape */}
-            <ellipse cx="100" cy="100" rx="72" ry="82" fill="#f8f7f5" stroke="#ccc" strokeWidth="1.8" />
+            <rect x="80" y="175" width="40" height="36" rx="10" fill="#e8c9a0" stroke="#c8a070" strokeWidth="1.5" />
+            {/* Shirt collar peek */}
+            <path d="M62 210 Q80 196 100 200 Q120 196 138 210" fill="#5a9e7a" stroke="#3d7a5a" strokeWidth="1.2" />
+
+            {/* Head — slightly round, fuller face */}
+            <ellipse cx="100" cy="98" rx="74" ry="80" fill="#e8c9a0" stroke="#c8a070" strokeWidth="2" />
+
             {/* Ears */}
-            <ellipse cx="27" cy="108" rx="9" ry="14" fill="#f0f0f0" stroke="#ccc" strokeWidth="1.5" />
-            <ellipse cx="173" cy="108" rx="9" ry="14" fill="#f0f0f0" stroke="#ccc" strokeWidth="1.5" />
-            {/* Eyes */}
-            <ellipse cx="78" cy="105" rx="13" ry="9" fill="white" stroke="#bbb" strokeWidth="1.2" />
-            <ellipse cx="122" cy="105" rx="13" ry="9" fill="white" stroke="#bbb" strokeWidth="1.2" />
-            <circle cx="78" cy="105" r="5" fill="#888" />
-            <circle cx="122" cy="105" r="5" fill="#888" />
-            <circle cx="80" cy="103" r="2" fill="white" />
-            <circle cx="124" cy="103" r="2" fill="white" />
-            {/* Eyebrows */}
-            <path d="M67 93 Q78 88 89 93" stroke="#aaa" strokeWidth="1.8" fill="none" strokeLinecap="round" />
-            <path d="M111 93 Q122 88 133 93" stroke="#aaa" strokeWidth="1.8" fill="none" strokeLinecap="round" />
-            {/* Nose */}
-            <path d="M97 112 Q93 128 88 132 Q96 136 100 136 Q104 136 112 132 Q107 128 103 112" stroke="#bbb" strokeWidth="1.3" fill="none" />
-            {/* Mouth */}
-            <path d="M84 150 Q100 160 116 150" stroke="#bbb" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-            {/* Hair */}
-            <path d="M30 88 Q32 30 100 22 Q168 30 170 88" fill="#d4c4a8" stroke="#c4b090" strokeWidth="1.2" />
+            <ellipse cx="26" cy="106" rx="10" ry="15" fill="#e0bc94" stroke="#c8a070" strokeWidth="1.5" />
+            <ellipse cx="174" cy="106" rx="10" ry="15" fill="#e0bc94" stroke="#c8a070" strokeWidth="1.5" />
+
+            {/* ── Dark hair ── thick, wavy on top, slight widow's peak ── */}
+            <path d="M28 82 Q30 24 100 18 Q170 24 172 82 Q155 55 140 52 Q120 34 100 32 Q80 34 60 52 Q45 55 28 82Z" fill="#2a1f1a" />
+            {/* Hair texture / volume */}
+            <path d="M44 60 Q52 38 72 32" stroke="#3d2d26" strokeWidth="2" fill="none" strokeLinecap="round" />
+            <path d="M156 60 Q148 38 128 32" stroke="#3d2d26" strokeWidth="2" fill="none" strokeLinecap="round" />
+            <path d="M100 18 Q96 28 100 32 Q104 28 100 18" fill="#2a1f1a" />
+
+            {/* ── Eyebrows — thick, dark, slightly arched ── */}
+            <path d="M64 88 Q76 82 90 86" stroke="#2a1f1a" strokeWidth="3.5" fill="none" strokeLinecap="round" />
+            <path d="M110 86 Q124 82 136 88" stroke="#2a1f1a" strokeWidth="3.5" fill="none" strokeLinecap="round" />
+
+            {/* ── Eyes — friendly, slightly heavy-lidded ── */}
+            {/* Eye whites */}
+            <ellipse cx="77" cy="104" rx="13" ry="9" fill="white" stroke="#c8a070" strokeWidth="1" />
+            <ellipse cx="123" cy="104" rx="13" ry="9" fill="white" stroke="#c8a070" strokeWidth="1" />
+            {/* Irises */}
+            <circle cx="77" cy="104" r="6" fill="#5a3e28" />
+            <circle cx="123" cy="104" r="6" fill="#5a3e28" />
+            {/* Pupils */}
+            <circle cx="77" cy="104" r="3.5" fill="#1a1210" />
+            <circle cx="123" cy="104" r="3.5" fill="#1a1210" />
+            {/* Eye shine */}
+            <circle cx="79" cy="102" r="1.5" fill="white" />
+            <circle cx="125" cy="102" r="1.5" fill="white" />
+            {/* Upper eyelids */}
+            <path d="M64 98 Q77 93 90 98" stroke="#b89060" strokeWidth="1.5" fill="none" />
+            <path d="M110 98 Q123 93 136 98" stroke="#b89060" strokeWidth="1.5" fill="none" />
+
+            {/* ── Nose — wider, friendly ── */}
+            <path d="M100 112 L96 128 Q90 133 88 136 Q94 140 100 140 Q106 140 112 136 Q110 133 104 128 Z" fill="#d8b48a" stroke="#c8a070" strokeWidth="1" />
+            {/* Nose bridge */}
+            <path d="M95 112 Q97 118 96 126" stroke="#c8a070" strokeWidth="1" fill="none" />
+            <path d="M105 112 Q103 118 104 126" stroke="#c8a070" strokeWidth="1" fill="none" />
+
+            {/* ── Cheeks — slight color for warmth ── */}
+            <ellipse cx="62" cy="128" rx="14" ry="10" fill="#d4806080" />
+            <ellipse cx="138" cy="128" rx="14" ry="10" fill="#d4806080" />
+
+            {/* ── Mustache — dark, full ── */}
+            <path d="M84 148 Q90 144 100 146 Q110 144 116 148 Q110 154 100 152 Q90 154 84 148Z" fill="#2a1f1a" />
+
+            {/* ── Smile — big friendly grin ── */}
+            <path d="M80 155 Q100 172 120 155" stroke="#8a5030" strokeWidth="2" fill="none" strokeLinecap="round" />
+            {/* Teeth */}
+            <path d="M84 156 Q100 168 116 156 Q110 163 100 164 Q90 163 84 156Z" fill="white" stroke="#ddd" strokeWidth="0.8" />
+
+            {/* ── Beard — dark, full sides + chin ── */}
+            {/* Left side */}
+            <path d="M28 108 Q32 120 38 135 Q46 155 60 162 Q74 170 84 168 Q90 166 84 156 Q76 150 74 140 Q68 128 64 118 Q52 110 38 106Z" fill="#2a1f1a" opacity="0.85" />
+            {/* Right side */}
+            <path d="M172 108 Q168 120 162 135 Q154 155 140 162 Q126 170 116 168 Q110 166 116 156 Q124 150 126 140 Q132 128 136 118 Q148 110 162 106Z" fill="#2a1f1a" opacity="0.85" />
+            {/* Chin beard connecting */}
+            <path d="M84 168 Q100 178 116 168 Q112 175 100 177 Q88 175 84 168Z" fill="#2a1f1a" opacity="0.85" />
+            {/* Beard texture lines */}
+            <path d="M46 118 Q50 128 52 140" stroke="#3d2d26" strokeWidth="1.2" fill="none" strokeLinecap="round" />
+            <path d="M154 118 Q150 128 148 140" stroke="#3d2d26" strokeWidth="1.2" fill="none" strokeLinecap="round" />
           </svg>
 
           {/* Clickable zones overlaid */}
