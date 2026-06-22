@@ -4,13 +4,21 @@ import {
   Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash
+  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
+import GoogleCalendar from './GoogleCalendar';
+import GoogleCalendarToday from './GoogleCalendarToday';
+import Budget from './Budget';
+import Vehicles from './Vehicles';
+import Jules from './Jules';
+import { useDailyBriefing } from './useDailyBriefing';
+import MigraineTracker from './MigraineTracker';
+import WorkCalendar from './WorkCalendar';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'suggestions' | 'students' | 'outreach' | 'settings';
+type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'students' | 'outreach' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -202,6 +210,8 @@ const homeNav: readonly NavEntry[] = [
   ['inventory', 'Inventory', Inbox],
   ['chores', 'Chores & Tasks', ListTodo],
   ['vehicles', 'Vehicles', Car],
+  ['jules', 'Jules', Heart],
+  ['migraine', 'Migraine Tracker', Brain],
   ['suggestions', 'Home Suggestions', Home]
 ];
 
@@ -222,6 +232,8 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'inventory', module_name: 'inventory', label: 'Inventory', default_access: 'edit' },
   { page: 'chores', module_name: 'chores', label: 'Chores & Tasks', default_access: 'edit' },
   { page: 'vehicles', module_name: 'vehicles', label: 'Vehicles', default_access: 'view' },
+  { page: 'jules', module_name: 'jules', label: 'Jules', default_access: 'edit' },
+  { page: 'migraine', module_name: 'migraine', label: 'Migraine Tracker', default_access: 'edit' },
   { page: 'suggestions', module_name: 'home_suggestions', label: 'Home Suggestions', default_access: 'edit' },
   { page: 'budget', module_name: 'budget', label: 'Budget', default_access: 'view' },
   { page: 'students', module_name: 'students', label: 'Students', default_access: 'hidden' },
@@ -255,10 +267,6 @@ const seedTasks: TaskItem[] = [
   { id: 't3', title: "Approve Adam's Friday task plan", owner: 'Kaylee', mode: 'home', minutes: 5, priority: 'urgent', status: 'pending_approval', source: 'Adam' }
 ];
 
-const vehicles = [
-  { name: '2016 Toyota Corolla', miles: 134000, type: 'Gas', urgent: ['Spark plugs overdue', 'Transmission fluid unknown'], ok: ['Brakes completed 2025', 'Tire rotation at 133,900 mi'] },
-  { name: '2013 Nissan Leaf', miles: 82500, type: 'EV', urgent: ['12V auxiliary battery likely due', 'HV battery health check'], ok: ['Registration tracked'] }
-];
 
 const COMPACT_ROW_CSS = `
 .ct-panel { padding-bottom: 6px; }
@@ -465,6 +473,16 @@ function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [mode, setMode] = useState<Mode>('home');
+
+  // ── Dark mode ──
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    try { return localStorage.getItem('kh-dark-mode') === 'true'; } catch { return false; }
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+    try { localStorage.setItem('kh-dark-mode', String(darkMode)); } catch {}
+  }, [darkMode]);
   const [page, setPage] = useState<Page>('dashboard');
   const [inventory, setInventory] = useState<InventoryItem[]>(seedInventory);
   const [students, setStudents] = useState<Student[]>(seedStudents);
@@ -624,62 +642,62 @@ function App() {
     student?: Student | null,
     pastTouchpoints?: Touchpoint[]
   ) {
+    const lower = note.toLowerCase();
     const courseText = course ? course : (student?.course || 'their current course');
     const m = (momentum || student?.momentum || '').toLowerCase();
     const missedCount = Number(student?.missed_call_count || 0);
     const courseEnd = student?.course_end_date || '';
+    const gradGoal = student?.graduation_goal_date || '';
+    const lastActivity = student?.last_academic_activity_date || '';
 
-    const recent = (pastTouchpoints || []).slice(0, 2);
-    const lastNote = recent[0];
+    // Pull recent touchpoint history (most recent 3, excluding this note)
+    const recent = (pastTouchpoints || []).slice(0, 3);
+    const recentSummary = recent.map((t) => `${t.touchpoint_date} (${t.touchpoint_type}): ${(t.note || '').slice(0, 140)}`).filter(Boolean);
 
-    // Theme detection
+    // Theme detection from current + past notes
     const allText = [note, ...recent.map((t) => t.note || '')].join(' ').toLowerCase();
+    const hasAssessment = /\b(assessment|oa\b|pa\b|exam|test|proctored)/.test(allText);
+    const hasZyBooks = /\bzy ?books?|labs?\b/.test(allText);
     const hasBlocked = /\b(block|stuck|behind|struggl|overwhelm|hard time|confus|fail)/.test(allText);
+    const hasLife = /\b(work|job|family|kid|sick|health|move|moving|loss|funeral|childcare)/.test(allText);
     const hasGhost = missedCount >= 2 || /\b(no answer|voicemail|no reply|no response|haven.?t heard)/.test(allText);
     const isLowMomentum = m.includes('low');
     const isHighMomentum = m.includes('high') && !m.includes('low');
-    const hasAssessment = /\b(assessment|oa\b|pa\b|exam|test|proctored)/.test(allText);
 
-    // ── OPEN ──
-    let open = lastNote
-      ? `Did you follow through on what you said you'd do last time (${lastNote.touchpoint_date})?`
-      : 'What have you accomplished since we last spoke?';
-    if (hasGhost) open = "I've been trying to reach you — I'm glad you're here. How are you doing?";
+    // ===== Talking points: things to definitely curate / dig into =====
+    const talkingPoints: string[] = [];
+    talkingPoints.push(`Open with a specific reference to last contact${recent[0] ? ` (${recent[0].touchpoint_date}, ${recent[0].touchpoint_type})` : ''} so the student knows you remember.`);
+    if (hasAssessment) talkingPoints.push(`Curate from past notes any assessment chatter — confirm which OA/PA is up next in ${courseText} and whether they have a scheduled date.`);
+    if (hasZyBooks) talkingPoints.push(`Follow up on ZyBooks participation and labs — ask which module they are on and what percent complete.`);
+    if (hasBlocked) talkingPoints.push(`Past notes show a blocker theme — gently surface it: "Last time you mentioned ___; how is that piece going now?"`);
+    if (hasLife) talkingPoints.push(`Past notes flagged a life circumstance — acknowledge it briefly without prying, then ask how it is affecting study time this week.`);
+    if (courseEnd) talkingPoints.push(`Course end date is ${courseEnd} — calculate weeks remaining out loud and confirm pacing is realistic.`);
+    if (gradGoal) talkingPoints.push(`Graduation goal is ${gradGoal} — tie this week's action back to that target.`);
+    if (lastActivity) talkingPoints.push(`Most recent academic activity was ${lastActivity} — ask what they have done in the course since then.`);
+    if (isLowMomentum) talkingPoints.push(`Momentum is low — ask what one small win this week would look like. Avoid overwhelming with multiple goals.`);
+    if (isHighMomentum) talkingPoints.push(`Momentum is high — celebrate it explicitly and ask what is fueling the rhythm so you can help protect it.`);
+    if (hasGhost) talkingPoints.push(`Multiple missed touches — lead with "I have been trying to reach you because I care about your progress, not to chase you." Then confirm best contact method and time.`);
+    if (recentSummary.length) talkingPoints.push(`Recent notes for cross-reference: ${recentSummary.join(' | ')}`);
 
-    // ── COURSE END ──
-    const courseEndLine = courseEnd ? `Course ends ${courseEnd} — check on pacing.` : '';
+    const next_call_prep = '• ' + talkingPoints.join('\n• ');
 
-    // ── MOMENTUM FLAG ──
-    let momentumLine = '';
-    if (isLowMomentum) momentumLine = 'Momentum is low — what would one small win look like this week?';
-    if (isHighMomentum) momentumLine = "Momentum is high — what's fueling it? How do we protect it?";
+    // ===== Coaching questions for Kaylee (specific, GROW-aligned) =====
+    const coachQuestions: string[] = [];
+    coachQuestions.push(`Goal — "What do you most want to walk away from today's call with?"`);
+    coachQuestions.push(`Reality — "On a scale of 1-10, where are you with ${courseText} this week, and what makes it that number?"`);
+    if (hasBlocked || isLowMomentum) {
+      coachQuestions.push(`Reality — "What is the one thing that has been hardest to make progress on lately?"`);
+      coachQuestions.push(`Options — "What have you already tried, and what is one thing you haven't tried yet?"`);
+    } else {
+      coachQuestions.push(`Options — "What are two or three different ways you could get to your next milestone?"`);
+    }
+    if (hasAssessment) coachQuestions.push(`Options — "If we mapped your study time backward from your assessment date, what does each week need to look like?"`);
+    if (hasLife) coachQuestions.push(`Reality — "How is your study time fitting around what is going on outside of school right now?"`);
+    coachQuestions.push(`Will — "By our next call, what is the ONE specific thing you will have completed, and what day?"`);
+    coachQuestions.push(`Will — "What could get in the way of that, and what is your plan if it does?"`);
+    coachQuestions.push(`Self-check for Kaylee: did I ask before I offered? Did I end with a commitment in the student's own words?`);
 
-    // ── GROW QUESTIONS (4 short bullets) ──
-    const growGoal = `Goal: What do you want to accomplish in ${courseText} before we talk again?`;
-    const growReality = hasBlocked
-      ? `Reality: What's the #1 thing getting in your way right now?`
-      : `Reality: On a scale of 1–10, how are you tracking toward your goal — and why that number?`;
-    const growOptions = hasAssessment
-      ? `Options: What's your study plan between now and your next assessment?`
-      : `Options: What's one thing you could do differently this week to move forward?`;
-    const growWill = `Will: What's the ONE thing you'll complete before our next call, and by what day?`;
-
-    // Build next_call_prep as scannable lines
-    const lines: string[] = [];
-    lines.push(`📌 Open: ${open}`);
-    if (courseEndLine) lines.push(`📅 ${courseEndLine}`);
-    if (momentumLine) lines.push(`⚡ ${momentumLine}`);
-    lines.push('');
-    lines.push('GROW questions:');
-    lines.push(`G — ${growGoal}`);
-    lines.push(`R — ${growReality}`);
-    lines.push(`O — ${growOptions}`);
-    lines.push(`W — ${growWill}`);
-
-    const next_call_prep = lines.join('\n');
-
-    // constructive_note is now a one-line self-reminder
-    const constructive_note = 'Ask before advising. End with a commitment in their words, not yours.';
+    const constructive_note = '• ' + coachQuestions.join('\n• ');
 
     const follow_up_email = `Hi {first_name},
 
@@ -1530,6 +1548,14 @@ Kaylee`;
           <button className={mode === 'work' ? 'active' : ''} disabled={activeRole !== 'admin'} onClick={() => { setMode('work'); setPage('dashboard'); }}><Users size={15} /> Work</button>
         </div>
         <div className="top-actions">
+          <button
+            className="btn ghost"
+            onClick={() => setDarkMode((d) => !d)}
+            title={darkMode ? 'Light mode' : 'Dark mode'}
+            style={{ padding: '7px 10px' }}
+          >
+            {darkMode ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
           <span className={`role-pill ${activeRole}`}>{activeName} · {activeRole === 'admin' ? 'Admin' : 'Limited'}</span>
           <button className="btn ghost" onClick={signOut}><LogOut size={15} /> Sign out</button>
         </div>
@@ -1556,11 +1582,16 @@ Kaylee`;
           {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} choreTasks={choreTasks} householdUsers={householdUsers} role={activeRole} setPage={setPage} />}
           {page === 'today' && <Today tasks={tasks.filter((task) => activeRole === 'admin' || task.mode === 'home')} choreTasks={choreTasks} householdUsers={householdUsers} completeTask={completeTask} completeChore={completeChore} editable={canEdit('today') && canEdit('chores')} />}
           {page === 'briefing' && <Briefing />}
-          {page === 'calendar' && <Placeholder title="Calendar" sub="Google Calendar integration will connect here after auth basics are stable." />}
-          {page === 'budget' && <Placeholder title="Budget" sub={activeRole === 'limited' ? 'Kaylee controls whether this is visible/editable for Adam.' : 'Calendar-based cashflow page scaffold.'} />}
+          {page === 'calendar' && (mode === 'home' || activeRole === 'limited'
+            ? <GoogleCalendar />
+            : <WorkCalendar students={students} />
+          )}
+          {page === 'budget' && <Budget />}
           {page === 'inventory' && <Inventory inventory={inventory} createItem={createInventoryItem} updateQuantity={updateInventoryQuantity} editable={canEdit('inventory')} />}
           {page === 'chores' && <Chores choreTasks={choreTasks} choreSuggestions={choreSuggestions} syncState={syncState} syncing={syncing} householdUsers={householdUsers} currentUserName={activeName} syncTodoistNow={syncTodoistNow} completeChore={completeChore} uncompleteChore={uncompleteChore} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} approveSuggestionForAdam={approveSuggestionForAdam} approveSuggestionForSelf={approveSuggestionForSelf} reassignChore={reassignChore} editable={canEdit('chores')} />}
           {page === 'vehicles' && <Vehicles />}
+          {page === 'jules' && <Jules />}
+          {page === 'migraine' && <MigraineTracker />}
           {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
           {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
           {page === 'outreach' && activeRole === 'admin' && <Outreach drafts={drafts} students={students} generateCohortDrafts={generateCohortDrafts} updateDraft={updateDraft} markDraftSent={markDraftSent} deleteDraft={deleteDraft} />}
@@ -1832,6 +1863,7 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, 
 
   return <>
     <Header title={role === 'limited' ? 'Adam home dashboard' : mode === 'home' ? 'Home command center' : 'Work command center'} sub={role === 'limited' ? 'Home-only view. Kaylee controls which sections are editable.' : mode === 'home' ? 'Tasks, approvals, inventory, vehicles, and tenant-safe home care.' : 'FERPA-safe student workflow, GROW notes, and daily planning.'} />
+    {mode === 'home' && <GoogleCalendarToday />}
     <Stats items={mode === 'home' ? [['Open tasks', String(tasks.filter((task) => task.status !== 'completed' && task.mode === 'home').length), 'home'], ['Adam pending', String(pending), 'approval needed'], ['Inventory', String(inventory.length), `${expiring} expiring`], ['Vehicle alerts', '4', 'critical/due']] : [['Active students', String(activeStudents.length), 'FERPA-safe'], ['Need copy', String(students.filter((s) => !s.copied).length), 'Salesforce'], ['FERPA', 'On', 'clipboard only'], ['Calls today', String(callsToday.length), 'manual now']]} />
     <div className="grid two"><Today tasks={tasks.filter((task) => mode === 'work' ? task.mode === 'work' : task.mode === 'home').slice(0, 3)} choreTasks={mode === 'home' ? choreTasks : []} householdUsers={householdUsers} completeTask={() => undefined} completeChore={() => undefined} editable={false} compact /><Briefing compact /></div>
   </>;
@@ -2039,20 +2071,8 @@ function computeTackleToday(choreTasks: ChoreTask[]): ChoreTask[] {
 }
 
 function Briefing({ compact = false }: { compact?: boolean }) {
-  const { loading, lines } = useDailyBriefing();
-  const list = compact ? lines.slice(0, 3) : lines;
-  const severityColor: Record<string, string> = { urgent: 'var(--red)', warning: 'var(--amber)', info: 'var(--purple)' };
-  return (
-    <section className="panel">
-      <h2>Daily Briefing</h2>
-      {loading && <div className="brief-item">Loading...</div>}
-      {!loading && list.map((item) => (
-        <div className="brief-item" key={item.id} style={{ borderLeft: `3px solid ${severityColor[item.severity]}` }}>
-          {item.text}
-        </div>
-      ))}
-    </section>
-  );
+  const list = compact ? briefing.slice(0, 2) : briefing;
+  return <section className="panel"><h2>Daily Briefing</h2>{list.map((item) => <div className="brief-item" key={item}>{item}</div>)}</section>;
 }
 
 function Inventory({ inventory, createItem, updateQuantity, editable }: { inventory: InventoryItem[]; createItem: (item: Omit<InventoryItem, 'id'>) => void; updateQuantity: (id: string, quantity: number) => void; editable: boolean }) {
@@ -2073,9 +2093,6 @@ function Inventory({ inventory, createItem, updateQuantity, editable }: { invent
   </>;
 }
 
-function Vehicles() {
-  return <><Header title="Vehicles" sub="Maintenance tracking for Corolla and Leaf." /><div className="grid two">{vehicles.map((vehicle) => <section className="panel" key={vehicle.name}><h2>{vehicle.name}</h2><p>{vehicle.type} · {vehicle.miles.toLocaleString()} miles</p><h3>Urgent</h3>{vehicle.urgent.map((item) => <div className="brief-item urgent" key={item}>{item}</div>)}<h3>Okay</h3>{vehicle.ok.map((item) => <div className="brief-item good" key={item}>{item}</div>)}</section>)}</div></>;
-}
 
 function Suggestions({ choreSuggestions, markSuggestionDone, snoozeSuggestion, dismissSuggestion, restoreSuggestion, addSuggestionToTodoist, editable }: { choreSuggestions: ChoreSuggestion[]; markSuggestionDone: (id: string) => void; snoozeSuggestion: (id: string, days: number) => void; dismissSuggestion: (id: string) => void; restoreSuggestion: (id: string) => void; addSuggestionToTodoist: (id: string) => void; editable: boolean }) {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -2405,7 +2422,6 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
               <button
                 className={selected.on_term_break ? 'btn warning' : 'btn ghost'}
                 onClick={() => updateStudent(selected.id, { on_term_break: !selected.on_term_break })}
-                title={selected.on_term_break ? 'Click to mark as back in term' : 'Click to mark as on term break'}
               >
                 {selected.on_term_break ? '↩ Back in Term' : '☕ Term Break'}
               </button>
