@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, X, Pencil, Trash2, Repeat, Check } from 'lucide-react';
-import { useLoansData, calculatePayoffProjection } from './useLoansData';
+import { useLoansData, calculatePayoffProjection, calculateEstimatedCurrentBalance, type Loan, type BalanceHistoryEntry } from './useLoansData';
 import { supabase, hasSupabase } from './lib/supabase';
 import {
   useBudgetData,
@@ -1218,8 +1218,6 @@ function EventBudgetsPanel({
 //   - Calendar-aware estimated balance ticking down between real updates
 //   - Avalanche strategy tip when multiple loans exist
 
-import type { Loan, BalanceHistoryEntry } from './useLoansData';
-import { calculatePayoffProjection, calculateEstimatedCurrentBalance } from './useLoansData';
 
 const LOAN_TYPE_COLOR: Record<string, string> = {
   student:  'var(--purple)',
