@@ -75,6 +75,20 @@ function buildWeekGrid(anchor: Date): Date[] {
   return days;
 }
 
+
+// Inline background colors for busy levels — CSS classes lose to base
+// .gcal-day-cell { background: white } specificity, so we use inline styles.
+const BUSY_BG: Record<string, string> = {
+  low:    'var(--green-bg)',
+  medium: 'var(--amber-bg)',
+  high:   'var(--red-bg)',
+};
+const BUSY_BORDER: Record<string, string> = {
+  low:    'var(--green)',
+  medium: 'var(--amber)',
+  high:   'var(--red)',
+};
+
 export default function GoogleCalendar() {
   const { loading, refreshing, data, daySummaries, syncedAt, refresh, connect, dateKeyOf } =
     useGoogleCalendarData({ daysForward: 60, daysBack: 35 });
@@ -200,11 +214,27 @@ export default function GoogleCalendar() {
                   className={[
                     'gcal-day-cell',
                     !inMonth ? 'outside-month' : '',
-                    `busy-${summary ? summary.busyLevel : 'low'}`,
                     isToday ? 'is-today' : '',
                     isSelected ? 'selected' : '',
                   ].join(' ').trim()}
                   onClick={() => setSelectedKey(key)}
+                  style={{
+                    background: isSelected
+                      ? 'var(--purple-bg)'
+                      : summary && summary.busyLevel !== 'low'
+                        ? BUSY_BG[summary.busyLevel]
+                        : summary && summary.busyLevel === 'low' && summary.busyHours > 0
+                          ? BUSY_BG['low']
+                          : 'white',
+                    borderColor: isSelected
+                      ? 'var(--purple)'
+                      : isToday
+                        ? 'var(--purple)'
+                        : summary && summary.busyHours > 0
+                          ? BUSY_BORDER[summary.busyLevel]
+                          : undefined,
+                    opacity: inMonth ? 1 : 0.4,
+                  }}
                 >
                   <span className="gcal-day-num">{d.getDate()}</span>
                   {visibleChips.map((e) => (
@@ -239,20 +269,30 @@ export default function GoogleCalendar() {
                 key={key}
                 className={[
                   'gcal-week-day',
-                  `busy-${summary ? summary.busyLevel : 'low'}`,
                   isToday ? 'is-today' : '',
                   isSelected ? 'selected' : '',
                 ].join(' ').trim()}
                 onClick={() => setSelectedKey(key)}
+                style={{
+                  background: isSelected
+                    ? 'var(--purple-bg)'
+                    : summary && summary.busyHours > 0
+                      ? BUSY_BG[summary.busyLevel]
+                      : 'white',
+                  borderColor: isSelected
+                    ? 'var(--purple)'
+                    : isToday
+                      ? 'var(--purple)'
+                      : summary && summary.busyHours > 0
+                        ? BUSY_BORDER[summary.busyLevel]
+                        : undefined,
+                }}
               >
                 <div className="gcal-week-day-head">
                   <div>
                     <div className="gcal-week-day-label">{DOW[d.getDay()]}</div>
                     <div className="gcal-week-day-num">{d.getDate()}</div>
                   </div>
-                  {summary && summary.busyHours > 0 && (
-                    <span className={`gcal-busy-dot ${summary.busyLevel}`} style={{ position: 'static' }} />
-                  )}
                 </div>
                 {sortedEvents.map((e) => (
                   <span
