@@ -4,7 +4,7 @@ import {
   Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain
+  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
@@ -471,6 +471,16 @@ function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [mode, setMode] = useState<Mode>('home');
+
+  // ── Dark mode ──
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    try { return localStorage.getItem('kh-dark-mode') === 'true'; } catch { return false; }
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+    try { localStorage.setItem('kh-dark-mode', String(darkMode)); } catch {}
+  }, [darkMode]);
   const [page, setPage] = useState<Page>('dashboard');
   const [inventory, setInventory] = useState<InventoryItem[]>(seedInventory);
   const [students, setStudents] = useState<Student[]>(seedStudents);
@@ -1532,6 +1542,14 @@ Kaylee`;
           <button className={mode === 'work' ? 'active' : ''} disabled={activeRole !== 'admin'} onClick={() => { setMode('work'); setPage('dashboard'); }}><Users size={15} /> Work</button>
         </div>
         <div className="top-actions">
+          <button
+            className="btn ghost"
+            onClick={() => setDarkMode((d) => !d)}
+            title={darkMode ? 'Light mode' : 'Dark mode'}
+            style={{ padding: '7px 10px' }}
+          >
+            {darkMode ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
           <span className={`role-pill ${activeRole}`}>{activeName} · {activeRole === 'admin' ? 'Admin' : 'Limited'}</span>
           <button className="btn ghost" onClick={signOut}><LogOut size={15} /> Sign out</button>
         </div>
