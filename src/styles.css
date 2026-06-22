@@ -13,7 +13,83 @@
   --text: #222;
   --muted: #666;
   --border: #ddd;
+  /* Semantic surface tokens used for dark mode overrides */
+  --surface-1: #f7f7fa;
+  --surface-2: #f0f0f4;
+  --surface-3: #f5f5f7;
+  --input-bg: #ffffff;
+  --shadow-sm: rgba(0,0,0,0.08);
 }
+
+/* ── Dark mode ── applied via data-theme="dark" on <html> ── */
+[data-theme="dark"] {
+  --purple: #7B72D4;
+  --purple-bg: #1e1a3a;
+  --purple-dark: #a89ee8;
+  --green: #2db891;
+  --green-bg: #0d2620;
+  --red: #e05c5c;
+  --red-bg: #2a1010;
+  --amber: #d4900a;
+  --amber-bg: #2a1e06;
+  --bg: #0f0f12;
+  --card: #1a1a22;
+  --text: #e8e8f0;
+  --muted: #8888a8;
+  --border: #2e2e3e;
+  --surface-1: #22222e;
+  --surface-2: #1e1e28;
+  --surface-3: #1c1c26;
+  --input-bg: #1e1e2a;
+  --shadow-sm: rgba(0,0,0,0.4);
+}
+
+/* Dark mode overrides for hardcoded colors */
+[data-theme="dark"] body { background: var(--bg); color: var(--text); }
+[data-theme="dark"] .login-card { background: var(--card); }
+[data-theme="dark"] .login-hint { background: var(--surface-1); }
+[data-theme="dark"] .toggle-wrap { background: var(--surface-2); }
+[data-theme="dark"] .toggle-wrap button.active { background: var(--card); color: var(--text); box-shadow: 0 1px 4px var(--shadow-sm); }
+[data-theme="dark"] .role-pill { background: var(--surface-2); }
+[data-theme="dark"] .side-note,
+[data-theme="dark"] .sync-note { background: var(--surface-3); }
+[data-theme="dark"] .btn.ghost { background: var(--surface-1); border-color: var(--border); color: var(--text); }
+[data-theme="dark"] .task-card { background: var(--surface-1); }
+[data-theme="dark"] .check { background: var(--surface-2); border-color: var(--border); }
+[data-theme="dark"] .check.disabled { background: var(--surface-3); }
+[data-theme="dark"] .brief-item { background: var(--surface-1); }
+[data-theme="dark"] input,
+[data-theme="dark"] textarea { background: var(--input-bg); color: var(--text); border-color: var(--border); }
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder { color: var(--muted); }
+[data-theme="dark"] .qty-button { background: var(--surface-1); border-color: var(--border); }
+[data-theme="dark"] .readonly-pill,
+[data-theme="dark"] .copy-pill { background: var(--surface-2); }
+[data-theme="dark"] .permission-row { background: var(--surface-1); }
+[data-theme="dark"] select { background: var(--input-bg); color: var(--text); border-color: var(--border); }
+[data-theme="dark"] th { background: var(--surface-1); }
+[data-theme="dark"] td { border-color: var(--border); }
+[data-theme="dark"] .gcal-day-cell { background: var(--surface-1); }
+[data-theme="dark"] .gcal-week-day { background: var(--surface-1); }
+[data-theme="dark"] .gcal-nav-btn { background: var(--surface-1); border-color: var(--border); }
+[data-theme="dark"] .gcal-today-btn { background: var(--surface-1); border-color: var(--border); color: var(--text); }
+[data-theme="dark"] .gcal-view-toggle { background: var(--surface-2); border-color: var(--border); }
+[data-theme="dark"] .gcal-view-toggle button.active { background: var(--card); color: var(--text); }
+[data-theme="dark"] .gcal-today-item { background: var(--surface-1); }
+[data-theme="dark"] .gcal-today-empty { background: var(--surface-1); }
+[data-theme="dark"] .gcal-day-cell.busy-low { background: #0d2620; }
+[data-theme="dark"] .gcal-day-cell.busy-medium { background: #2a1e06; }
+[data-theme="dark"] .gcal-day-cell.busy-high { background: #2a1010; }
+[data-theme="dark"] .gcal-week-day.busy-low { background: #0d2620; }
+[data-theme="dark"] .gcal-week-day.busy-medium { background: #2a1e06; }
+[data-theme="dark"] .gcal-week-day.busy-high { background: #2a1010; }
+[data-theme="dark"] .gcal-day-cell.selected,
+[data-theme="dark"] .gcal-week-day.selected { background: var(--purple-bg); }
+[data-theme="dark"] .stat-card,
+[data-theme="dark"] .panel,
+[data-theme="dark"] .table-card,
+[data-theme="dark"] .day-card { background: var(--card); border-color: var(--border); }
+[data-theme="dark"] .login-screen { background: linear-gradient(140deg, #1a1632, #0f0f12, #0d2620); }
 * { box-sizing: border-box; }
 body { margin: 0; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
 button, input, textarea { font: inherit; }
