@@ -36,12 +36,8 @@ function addMonths(d: Date, n: number): Date {
   return new Date(d.getFullYear(), d.getMonth() + n, 1);
 }
 
-function pad(n: number): string {
-  return String(n).padStart(2, '0');
-}
-
 function toKey(d: Date): string {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return d.toISOString().slice(0, 10);
 }
 
 function isSameDay(a: Date, b: Date): boolean {
@@ -311,7 +307,7 @@ export default function GoogleCalendar() {
             <div className="gcal-today-item-time">{event.allDay ? 'All day' : formatTime(event.start)}</div>
             <div className="gcal-today-item-body">
               <div className="gcal-today-item-title">{event.title}</div>
-              {event.calendarName && <div className="gcal-today-item-loc">{event.calendarName}{event.location ? ` · ${event.location}` : ''}</div>}
+              {event.calendarName && <div className="gcal-today-item-loc">{event.calendarName}{event.location ? ` \u00b7 ${event.location}` : ''}</div>}
               {!event.calendarName && event.location && <div className="gcal-today-item-loc">{event.location}</div>}
             </div>
             <ExternalLink size={13} style={{ color: 'var(--muted)', flexShrink: 0, marginTop: 2 }} />

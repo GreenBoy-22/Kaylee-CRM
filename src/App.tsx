@@ -1,17 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import {
-  Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards, Brain,
+  Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash
+  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
+import GoogleCalendar from './GoogleCalendar';
+import GoogleCalendarToday from './GoogleCalendarToday';
+import Budget from './Budget';
+import Vehicles from './Vehicles';
+import Jules from './Jules';
+import { useDailyBriefing } from './useDailyBriefing';
 import MigraineTracker from './MigraineTracker';
+import WorkCalendar from './WorkCalendar';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'suggestions' | 'migraine' | 'students' | 'outreach' | 'settings';
+type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'students' | 'outreach' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -202,6 +209,7 @@ const homeNav: readonly NavEntry[] = [
   ['inventory', 'Inventory', Inbox],
   ['chores', 'Chores & Tasks', ListTodo],
   ['vehicles', 'Vehicles', Car],
+  ['jules', 'Jules', Heart],
   ['migraine', 'Migraine Tracker', Brain],
   ['suggestions', 'Home Suggestions', Home]
 ];
@@ -220,10 +228,11 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'today', module_name: 'today_tasks', label: 'Today’s Tasks', default_access: 'edit' },
   { page: 'briefing', module_name: 'daily_briefing', label: 'Daily Briefing', default_access: 'view' },
   { page: 'calendar', module_name: 'calendar', label: 'Calendar', default_access: 'edit' },
-  { page: 'migraine', module_name: 'migraine', label: 'Migraine Tracker', default_access: 'edit' },
   { page: 'inventory', module_name: 'inventory', label: 'Inventory', default_access: 'edit' },
   { page: 'chores', module_name: 'chores', label: 'Chores & Tasks', default_access: 'edit' },
   { page: 'vehicles', module_name: 'vehicles', label: 'Vehicles', default_access: 'view' },
+  { page: 'jules', module_name: 'jules', label: 'Jules', default_access: 'edit' },
+  { page: 'migraine', module_name: 'migraine', label: 'Migraine Tracker', default_access: 'edit' },
   { page: 'suggestions', module_name: 'home_suggestions', label: 'Home Suggestions', default_access: 'edit' },
   { page: 'budget', module_name: 'budget', label: 'Budget', default_access: 'view' },
   { page: 'students', module_name: 'students', label: 'Students', default_access: 'hidden' },
@@ -467,16 +476,6 @@ function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [mode, setMode] = useState<Mode>('home');
-
-  // ── Dark mode ──
-  const [darkMode, setDarkMode] = useState<boolean>(() => {
-    try { return localStorage.getItem('kh-dark-mode') === 'true'; } catch { return false; }
-  });
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
-    try { localStorage.setItem('kh-dark-mode', String(darkMode)); } catch {}
-  }, [darkMode]);
   const [page, setPage] = useState<Page>('dashboard');
   const [inventory, setInventory] = useState<InventoryItem[]>(seedInventory);
   const [students, setStudents] = useState<Student[]>(seedStudents);
@@ -1538,15 +1537,6 @@ Kaylee`;
           <button className={mode === 'work' ? 'active' : ''} disabled={activeRole !== 'admin'} onClick={() => { setMode('work'); setPage('dashboard'); }}><Users size={15} /> Work</button>
         </div>
         <div className="top-actions">
-          <button
-            className="btn ghost"
-            onClick={() => setDarkMode((d) => !d)}
-            aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-            title={darkMode ? 'Light mode' : 'Dark mode'}
-            style={{ padding: '7px 10px' }}
-          >
-            {darkMode ? <Sun size={15} /> : <Moon size={15} />}
-          </button>
           <span className={`role-pill ${activeRole}`}>{activeName} · {activeRole === 'admin' ? 'Admin' : 'Limited'}</span>
           <button className="btn ghost" onClick={signOut}><LogOut size={15} /> Sign out</button>
         </div>
@@ -1573,11 +1563,15 @@ Kaylee`;
           {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} choreTasks={choreTasks} householdUsers={householdUsers} role={activeRole} setPage={setPage} />}
           {page === 'today' && <Today tasks={tasks.filter((task) => activeRole === 'admin' || task.mode === 'home')} choreTasks={choreTasks} householdUsers={householdUsers} completeTask={completeTask} completeChore={completeChore} editable={canEdit('today') && canEdit('chores')} />}
           {page === 'briefing' && <Briefing />}
-          {page === 'calendar' && <Placeholder title="Calendar" sub="Google Calendar integration will connect here after auth basics are stable." />}
-          {page === 'budget' && <Placeholder title="Budget" sub={activeRole === 'limited' ? 'Kaylee controls whether this is visible/editable for Adam.' : 'Calendar-based cashflow page scaffold.'} />}
+          {page === 'calendar' && (mode === 'home' || activeRole === 'limited'
+            ? <GoogleCalendar />
+            : <WorkCalendar students={students} />
+          )}
+          {page === 'budget' && <Budget />}
           {page === 'inventory' && <Inventory inventory={inventory} createItem={createInventoryItem} updateQuantity={updateInventoryQuantity} editable={canEdit('inventory')} />}
           {page === 'chores' && <Chores choreTasks={choreTasks} choreSuggestions={choreSuggestions} syncState={syncState} syncing={syncing} householdUsers={householdUsers} currentUserName={activeName} syncTodoistNow={syncTodoistNow} completeChore={completeChore} uncompleteChore={uncompleteChore} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} approveSuggestionForAdam={approveSuggestionForAdam} approveSuggestionForSelf={approveSuggestionForSelf} reassignChore={reassignChore} editable={canEdit('chores')} />}
           {page === 'vehicles' && <Vehicles />}
+          {page === 'jules' && <Jules />}
           {page === 'migraine' && <MigraineTracker />}
           {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
           {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
@@ -1851,6 +1845,7 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, 
   return <>
     <Header title={role === 'limited' ? 'Adam home dashboard' : mode === 'home' ? 'Home command center' : 'Work command center'} sub={role === 'limited' ? 'Home-only view. Kaylee controls which sections are editable.' : mode === 'home' ? 'Tasks, approvals, inventory, vehicles, and tenant-safe home care.' : 'FERPA-safe student workflow, GROW notes, and daily planning.'} />
     <Stats items={mode === 'home' ? [['Open tasks', String(tasks.filter((task) => task.status !== 'completed' && task.mode === 'home').length), 'home'], ['Adam pending', String(pending), 'approval needed'], ['Inventory', String(inventory.length), `${expiring} expiring`], ['Vehicle alerts', '4', 'critical/due']] : [['Active students', String(activeStudents.length), 'FERPA-safe'], ['Need copy', String(students.filter((s) => !s.copied).length), 'Salesforce'], ['FERPA', 'On', 'clipboard only'], ['Calls today', String(callsToday.length), 'manual now']]} />
+    {mode === 'home' && <GoogleCalendarToday />}
     <div className="grid two"><Today tasks={tasks.filter((task) => mode === 'work' ? task.mode === 'work' : task.mode === 'home').slice(0, 3)} choreTasks={mode === 'home' ? choreTasks : []} householdUsers={householdUsers} completeTask={() => undefined} completeChore={() => undefined} editable={false} compact /><Briefing compact /></div>
   </>;
 }

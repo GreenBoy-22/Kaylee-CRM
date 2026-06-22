@@ -20,8 +20,6 @@ import {
   type RecurringRule,
   type CommissionMonth,
 } from './useBudgetData';
-import { useLoansData, calculatePayoffProjection, calculateEstimatedCurrentBalance, type Loan } from './useLoansData';
-import { supabase } from './lib/supabase';
 
 type ViewMode = 'period' | 'month';
 
@@ -44,10 +42,6 @@ function toKey(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-function fmtDate(dateStr: string): string {
-  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
 function startOfMonth(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), 1);
 }
@@ -64,7 +58,7 @@ export default function Budget() {
     addActualTransaction, updateActualTransaction, deleteActualTransaction,
     addPayPeriod, addRule, updateRule, upsertCommissionMonth,
   } = useBudgetData();
-  const [page, setPage] = useState<'overview' | 'commission' | 'event-budgets' | 'loans'>('overview');
+  const [page, setPage] = useState<'overview' | 'commission' | 'event-budgets'>('overview');
   const [view, setView] = useState<ViewMode>('month');
   const [monthAnchor, setMonthAnchor] = useState(new Date());
   const [periodIndex, setPeriodIndex] = useState<number | null>(null); // null = not yet resolved to "this week"
@@ -230,12 +224,9 @@ export default function Budget() {
         <button className={page === 'overview' ? 'active' : ''} onClick={() => setPage('overview')}>Overview</button>
         <button className={page === 'commission' ? 'active' : ''} onClick={() => setPage('commission')}>Adam's Commission</button>
         <button className={page === 'event-budgets' ? 'active' : ''} onClick={() => setPage('event-budgets')}>Event Budgets</button>
-        <button className={page === 'loans' ? 'active' : ''} onClick={() => setPage('loans')}>Loans</button>
       </div>
 
-      {page === 'loans' ? (
-        <LoansPanel />
-      ) : page === 'event-budgets' ? (
+      {page === 'event-budgets' ? (
         <EventBudgetsPanel rules={rules} isAdmin={isAdmin} onUpdateRule={updateRule} />
       ) : page === 'commission' ? (
         <CommissionPanel commissionMonths={commissionMonths} isAdmin={isAdmin} onSave={upsertCommissionMonth} />
@@ -1193,266 +1184,6 @@ function EventBudgetsPanel({
           </tbody>
         </table>
       </div>
-    </div>
-  );
-}
-
-const LOAN_TYPE_LABELS: Record<Loan['loan_type'], string> = {
-  student: 'Student Loan', personal: 'Personal Loan', auto: 'Auto Loan', mortgage: 'Mortgage', other: 'Loan',
-};
-
-function LoansPanel() {
-  const { loading, loans, history, isAdmin, updateBalance, updateLoan } = useLoansData();
-  const [editingBalanceId, setEditingBalanceId] = useState<string | null>(null);
-  const [editingRateId, setEditingRateId] = useState<string | null>(null);
-  const [calendarEvents, setCalendarEvents] = useState<{ title: string; start: string; allDay: boolean }[]>([]);
-
-  useEffect(() => {
-    (async () => {
-      if (!supabase) return;
-      const { data: sessionData } = await supabase.auth.getSession();
-      const userId = sessionData.session?.user?.id;
-      if (!userId) return;
-      const { data } = await supabase.from('google_calendar_cache').select('events').eq('user_id', userId).maybeSingle();
-      if (data && (data as any).events) {
-        setCalendarEvents((data as any).events as { title: string; start: string; allDay: boolean }[]);
-      }
-    })();
-  }, []);
-
-  if (loading) {
-    return <div className="panel"><h2>Loans</h2><p>Loading...</p></div>;
-  }
-
-  if (loans.length === 0) {
-    return <div className="panel"><h2>Loans</h2><p style={{ color: 'var(--muted)' }}>No loans tracked yet.</p></div>;
-  }
-
-  const totalBalance = loans.reduce((s, l) => s + l.current_balance, 0);
-  const totalMonthly = loans.reduce((s, l) => s + l.monthly_payment, 0);
-
-  return (
-    <div className="panel">
-      <div className="panel-head"><h2>Loans</h2></div>
-      <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: -8, marginBottom: 14 }}>
-        Balances update when you log a real statement number. Between updates, the estimate counts actual payment
-        dates from your calendar and applies payment minus interest for each one — log the real number whenever you get a new statement to keep it accurate.
-      </p>
-
-      <div className="stats-row" style={{ marginBottom: 16 }}>
-        <div className="stat-card">
-          <div className="stat-label">Total debt</div>
-          <div className="stat-val" style={{ color: 'var(--red)' }}>{fmtMoney(totalBalance)}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Total monthly payments</div>
-          <div className="stat-val">{fmtMoney(totalMonthly)}</div>
-        </div>
-      </div>
-
-      {loans.map((loan) => {
-        const estimate = calculateEstimatedCurrentBalance(loan, calendarEvents);
-        // Projection uses the estimated balance when stale, so payoff math
-        // stays current between manual updates - but the logged balance
-        // itself is never overwritten by this, only displayed alongside it.
-        const projectionLoan = estimate.isStale ? { ...loan, current_balance: estimate.estimatedBalance } : loan;
-        const projection = calculatePayoffProjection(projectionLoan);
-        const loanHistory = history.filter((h) => h.loan_id === loan.id).slice(-6);
-
-        return (
-          <div key={loan.id} className="brief-item" style={{ marginBottom: 16, borderLeft: '3px solid var(--purple)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 15 }}>{loan.name}</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{LOAN_TYPE_LABELS[loan.loan_type]}{loan.lender ? ` · ${loan.lender}` : ''}</div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                {estimate.isStale ? (
-                  <>
-                    <div style={{ fontSize: 18, fontWeight: 700 }}>
-                      {fmtMoney(estimate.estimatedBalance)}
-                      <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--amber)', border: '1px solid var(--amber)', borderRadius: 4, padding: '1px 5px', marginLeft: 6, verticalAlign: 'middle' }}>
-                        ESTIMATE
-                      </span>
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                      Last logged {fmtMoney(loan.current_balance)} on {fmtDate(loan.balance_updated_at)}
-                      {' · '}{estimate.paymentsSinceUpdate} payment{estimate.paymentsSinceUpdate === 1 ? '' : 's'} since
-                      {!estimate.usedCalendarData && ' (estimated by month, no calendar match found)'}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ fontSize: 18, fontWeight: 700 }}>{fmtMoney(loan.current_balance)}</div>
-                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>as of {fmtDate(loan.balance_updated_at)}</div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <div className="stats-row" style={{ marginBottom: 10 }}>
-              <div className="stat-card">
-                <div className="stat-label">Interest rate</div>
-                {isAdmin && editingRateId === loan.id ? (
-                  <InlineNumberEdit
-                    initial={loan.interest_rate}
-                    suffix="%"
-                    onSave={async (val) => { await updateLoan(loan.id, { interest_rate: val }); setEditingRateId(null); }}
-                    onCancel={() => setEditingRateId(null)}
-                  />
-                ) : (
-                  <div
-                    className="stat-val"
-                    style={{ fontSize: 16, cursor: isAdmin ? 'pointer' : 'default', borderBottom: isAdmin ? '1px dashed var(--muted)' : 'none', display: 'inline-block' }}
-                    onClick={() => isAdmin && setEditingRateId(loan.id)}
-                  >
-                    {loan.interest_rate}%
-                  </div>
-                )}
-              </div>
-              <div className="stat-card">
-                <div className="stat-label">Monthly payment</div>
-                <div className="stat-val" style={{ fontSize: 16 }}>{fmtMoney(loan.monthly_payment)}</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-label">Months to payoff</div>
-                <div className="stat-val" style={{ fontSize: 16 }}>
-                  {projection.monthsToPayoff != null ? `${projection.monthsToPayoff} mo (${(projection.monthsToPayoff / 12).toFixed(1)} yr)` : 'N/A'}
-                </div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-label">Payoff date</div>
-                <div className="stat-val" style={{ fontSize: 16 }}>{projection.payoffDate ? fmtDate(projection.payoffDate) : 'N/A'}</div>
-              </div>
-            </div>
-
-            {projection.monthsToPayoff == null && (
-              <p style={{ fontSize: 12, color: 'var(--red)', marginTop: -4, marginBottom: 10 }}>
-                Current payment doesn't cover monthly interest — balance will grow at this payment level.
-              </p>
-            )}
-
-            {projection.totalInterestRemaining != null && (
-              <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 10 }}>
-                Estimated remaining interest: <strong style={{ color: 'var(--text)' }}>{fmtMoney(projection.totalInterestRemaining)}</strong>
-                {' · '}total remaining payments: <strong style={{ color: 'var(--text)' }}>{fmtMoney(projection.totalPaidRemaining!)}</strong>
-              </p>
-            )}
-
-            {projection.percentPaidOff != null && (
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ height: 8, background: '#f0f0f4', borderRadius: 4, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${projection.percentPaidOff}%`, background: 'var(--green)' }} />
-                </div>
-                <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 3 }}>{projection.percentPaidOff.toFixed(0)}% paid off of {fmtMoney(loan.origination_balance!)} original</div>
-              </div>
-            )}
-
-            {isAdmin && (
-              <div>
-                {editingBalanceId === loan.id ? (
-                  <UpdateBalanceForm
-                    onSave={async (balance, date) => { await updateBalance(loan.id, balance, date); setEditingBalanceId(null); }}
-                    onCancel={() => setEditingBalanceId(null)}
-                  />
-                ) : (
-                  <button className="btn ghost" style={{ fontSize: 12 }} onClick={() => setEditingBalanceId(loan.id)}>Update balance</button>
-                )}
-              </div>
-            )}
-
-            {loanHistory.length > 1 && (
-              <div className="table-card" style={{ marginTop: 10 }}>
-                <table>
-                  <thead><tr><th>Date</th><th style={{ textAlign: 'right' }}>Balance</th></tr></thead>
-                  <tbody>
-                    {loanHistory.slice().reverse().map((h) => (
-                      <tr key={h.id}><td>{fmtDate(h.recorded_date)}</td><td style={{ textAlign: 'right' }}>{fmtMoney(h.balance)}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function InlineNumberEdit({
-  initial,
-  suffix,
-  onSave,
-  onCancel,
-}: {
-  initial: number;
-  suffix?: string;
-  onSave: (value: number) => Promise<void>;
-  onCancel: () => void;
-}) {
-  const [value, setValue] = useState(String(initial));
-  const [saving, setSaving] = useState(false);
-
-  const handleSave = async () => {
-    const num = parseFloat(value);
-    if (isNaN(num)) return;
-    setSaving(true);
-    try {
-      await onSave(num);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-      <input
-        type="number"
-        step="0.01"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        style={{ width: 70 }}
-        autoFocus
-        onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') onCancel(); }}
-      />
-      {suffix}
-      <button className="qty-button" onClick={handleSave} disabled={saving} aria-label="Save"><Check size={11} color="var(--green)" /></button>
-      <button className="qty-button" onClick={onCancel} aria-label="Cancel"><X size={11} /></button>
-    </div>
-  );
-}
-
-function UpdateBalanceForm({
-  onSave,
-  onCancel,
-}: {
-  onSave: (balance: number, date: string) => Promise<void>;
-  onCancel: () => void;
-}) {
-  const [balance, setBalance] = useState('');
-  const [date, setDate] = useState(() => toKey(new Date()));
-  const [saving, setSaving] = useState(false);
-
-  const handleSave = async () => {
-    const num = parseFloat(balance);
-    if (isNaN(num) || num < 0) return;
-    setSaving(true);
-    try {
-      await onSave(num, date);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-      <input placeholder="New balance" type="number" step="0.01" value={balance} onChange={(e) => setBalance(e.target.value)} style={{ width: 120 }} autoFocus />
-      <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      <button className="btn primary" style={{ fontSize: 12, padding: '6px 10px' }} onClick={handleSave} disabled={saving || !balance}>
-        {saving ? 'Saving...' : 'Save'}
-      </button>
-      <button className="btn ghost" style={{ fontSize: 12, padding: '6px 10px' }} onClick={onCancel}>Cancel</button>
     </div>
   );
 }
