@@ -221,18 +221,12 @@ export default function GoogleCalendar() {
                   style={{
                     background: isSelected
                       ? 'var(--purple-bg)'
-                      : summary && summary.busyLevel !== 'low'
-                        ? BUSY_BG[summary.busyLevel]
-                        : summary && summary.busyLevel === 'low' && summary.busyHours > 0
-                          ? BUSY_BG['low']
-                          : 'white',
+                      : BUSY_BG[summary?.busyLevel ?? 'low'],
                     borderColor: isSelected
                       ? 'var(--purple)'
                       : isToday
                         ? 'var(--purple)'
-                        : summary && summary.busyHours > 0
-                          ? BUSY_BORDER[summary.busyLevel]
-                          : undefined,
+                        : BUSY_BORDER[summary?.busyLevel ?? 'low'],
                     opacity: inMonth ? 1 : 0.4,
                   }}
                 >
@@ -276,16 +270,12 @@ export default function GoogleCalendar() {
                 style={{
                   background: isSelected
                     ? 'var(--purple-bg)'
-                    : summary && summary.busyHours > 0
-                      ? BUSY_BG[summary.busyLevel]
-                      : 'white',
+                    : BUSY_BG[summary?.busyLevel ?? 'low'],
                   borderColor: isSelected
                     ? 'var(--purple)'
                     : isToday
                       ? 'var(--purple)'
-                      : summary && summary.busyHours > 0
-                        ? BUSY_BORDER[summary.busyLevel]
-                        : undefined,
+                      : BUSY_BORDER[summary?.busyLevel ?? 'low'],
                 }}
               >
                 <div className="gcal-week-day-head">
