@@ -33,6 +33,8 @@ interface MigraineEntry {
   medications: string; possible_triggers: string;
   prodrome_notes: string; aura_notes: string;
   headache_notes: string; postdrome_notes: string;
+  missed_work: boolean;
+  missed_work_notes: string;
   notes: string; logged_by: string | null;
 }
 
@@ -120,6 +122,7 @@ function blankForm(): EntryForm {
     stress_level: null, energy_level: null,
     medications: '', possible_triggers: '',
     prodrome_notes: '', aura_notes: '', headache_notes: '', postdrome_notes: '', notes: '',
+    missed_work: false, missed_work_notes: '',
   };
 }
 
@@ -153,11 +156,11 @@ async function deleteEntry(id: string): Promise<boolean> {
 // ─── Demo data ────────────────────────────────────────────────────────────────
 
 const DEMO_ENTRIES: MigraineEntry[] = [
-  { id: 'd1', entry_date: '2026-06-18', severity: 'moderate', wong_baker_score: 6, pain_zones: ['right_temple','forehead'], pain_types: ['throbbing','pressure'], onset_time: '09:00', duration_hours: 6, nausea: 2, vomiting: 0, light_sensitivity: 3, noise_sensitivity: 2, aura: 1, dizziness: 1, neck_pain: 2, fatigue: 2, water_oz: 48, caffeine_cups: 1, sleep_hours: 6, sleep_quality: 'poor', stress_level: 7, energy_level: 3, medications: 'Ibuprofen 400mg', possible_triggers: 'Poor sleep, stress', prodrome_notes: 'Felt off the night before', aura_notes: '', headache_notes: 'Throbbing right side', postdrome_notes: 'Very tired after', notes: '', logged_by: null },
-  { id: 'd2', entry_date: '2026-06-12', severity: 'mild', wong_baker_score: 4, pain_zones: ['forehead','behind_eyes'], pain_types: ['dull'], onset_time: '14:00', duration_hours: 3, nausea: 1, vomiting: 0, light_sensitivity: 1, noise_sensitivity: 1, aura: 0, dizziness: 0, neck_pain: 1, fatigue: 1, water_oz: 64, caffeine_cups: 2, sleep_hours: 7, sleep_quality: 'fair', stress_level: 5, energy_level: 5, medications: 'Tylenol', possible_triggers: 'Too much screen time', prodrome_notes: '', aura_notes: '', headache_notes: 'Dull, both sides', postdrome_notes: '', notes: '', logged_by: null },
-  { id: 'd3', entry_date: '2026-06-05', severity: 'strong', wong_baker_score: 8, pain_zones: ['right_temple','top_of_head','neck_pain' as PainZone], pain_types: ['throbbing','sharp'], onset_time: '07:00', duration_hours: 12, nausea: 3, vomiting: 1, light_sensitivity: 3, noise_sensitivity: 3, aura: 2, dizziness: 2, neck_pain: 3, fatigue: 3, water_oz: 32, caffeine_cups: 0, sleep_hours: 5, sleep_quality: 'poor', stress_level: 9, energy_level: 2, medications: 'Sumatriptan 50mg', possible_triggers: 'Lack of sleep, skipped meals', prodrome_notes: 'Craving sweets the day before', aura_notes: 'Zigzag lines in vision', headache_notes: "Severe throbbing, right side, couldn't function", postdrome_notes: 'Slept most of next day', notes: '', logged_by: null },
-  { id: 'd4', entry_date: '2026-05-28', severity: 'very_mild', wong_baker_score: 2, pain_zones: ['forehead'], pain_types: ['dull'], onset_time: '16:00', duration_hours: 2, nausea: 0, vomiting: 0, light_sensitivity: 1, noise_sensitivity: 0, aura: 0, dizziness: 0, neck_pain: 0, fatigue: 1, water_oz: 80, caffeine_cups: 1, sleep_hours: 8, sleep_quality: 'good', stress_level: 3, energy_level: 7, medications: '', possible_triggers: 'Weather change', prodrome_notes: '', aura_notes: '', headache_notes: 'Very minor, went away on its own', postdrome_notes: '', notes: '', logged_by: null },
-  { id: 'd5', entry_date: '2026-05-14', severity: 'severe', wong_baker_score: 8, pain_zones: ['full_head','jaw_neck'], pain_types: ['throbbing','shooting'], onset_time: '08:00', duration_hours: 18, nausea: 3, vomiting: 2, light_sensitivity: 3, noise_sensitivity: 3, aura: 3, dizziness: 3, neck_pain: 3, fatigue: 3, water_oz: 24, caffeine_cups: 0, sleep_hours: 4, sleep_quality: 'poor', stress_level: 10, energy_level: 1, medications: 'Sumatriptan 100mg, Zofran', possible_triggers: 'Hormonal shift, extreme stress, dehydration', prodrome_notes: 'Mood crash 2 days prior', aura_notes: 'Full blind spot, tingling left arm', headache_notes: 'Worst in months, ER-level pain', postdrome_notes: 'Brain fog for 2 days', notes: '', logged_by: null },
+  { id: 'd1', entry_date: '2026-06-18', severity: 'moderate', wong_baker_score: 6, pain_zones: ['right_temple','forehead'], pain_types: ['throbbing','pressure'], onset_time: '09:00', duration_hours: 6, nausea: 2, vomiting: 0, light_sensitivity: 3, noise_sensitivity: 2, aura: 1, dizziness: 1, neck_pain: 2, fatigue: 2, water_oz: 48, caffeine_cups: 1, sleep_hours: 6, sleep_quality: 'poor', stress_level: 7, energy_level: 3, medications: 'Ibuprofen 400mg', possible_triggers: 'Poor sleep, stress', prodrome_notes: 'Felt off the night before', aura_notes: '', headache_notes: 'Throbbing right side', postdrome_notes: 'Very tired after', notes: '', missed_work: false, missed_work_notes: '', logged_by: null },
+  { id: 'd2', entry_date: '2026-06-12', severity: 'mild', wong_baker_score: 4, pain_zones: ['forehead','behind_eyes'], pain_types: ['dull'], onset_time: '14:00', duration_hours: 3, nausea: 1, vomiting: 0, light_sensitivity: 1, noise_sensitivity: 1, aura: 0, dizziness: 0, neck_pain: 1, fatigue: 1, water_oz: 64, caffeine_cups: 2, sleep_hours: 7, sleep_quality: 'fair', stress_level: 5, energy_level: 5, medications: 'Tylenol', possible_triggers: 'Too much screen time', prodrome_notes: '', aura_notes: '', headache_notes: 'Dull, both sides', postdrome_notes: '', notes: '', missed_work: false, missed_work_notes: '', logged_by: null },
+  { id: 'd3', entry_date: '2026-06-05', severity: 'strong', wong_baker_score: 8, pain_zones: ['right_temple','top_of_head','neck_pain' as PainZone], pain_types: ['throbbing','sharp'], onset_time: '07:00', duration_hours: 12, nausea: 3, vomiting: 1, light_sensitivity: 3, noise_sensitivity: 3, aura: 2, dizziness: 2, neck_pain: 3, fatigue: 3, water_oz: 32, caffeine_cups: 0, sleep_hours: 5, sleep_quality: 'poor', stress_level: 9, energy_level: 2, medications: 'Sumatriptan 50mg', possible_triggers: 'Lack of sleep, skipped meals', prodrome_notes: 'Craving sweets the day before', aura_notes: 'Zigzag lines in vision', headache_notes: "Severe throbbing, right side, couldn't function", postdrome_notes: 'Slept most of next day', notes: '', missed_work: true, missed_work_notes: 'Called out — could not function', logged_by: null },
+  { id: 'd4', entry_date: '2026-05-28', severity: 'very_mild', wong_baker_score: 2, pain_zones: ['forehead'], pain_types: ['dull'], onset_time: '16:00', duration_hours: 2, nausea: 0, vomiting: 0, light_sensitivity: 1, noise_sensitivity: 0, aura: 0, dizziness: 0, neck_pain: 0, fatigue: 1, water_oz: 80, caffeine_cups: 1, sleep_hours: 8, sleep_quality: 'good', stress_level: 3, energy_level: 7, medications: '', possible_triggers: 'Weather change', prodrome_notes: '', aura_notes: '', headache_notes: 'Very minor, went away on its own', postdrome_notes: '', notes: '', missed_work: false, missed_work_notes: '', logged_by: null },
+  { id: 'd5', entry_date: '2026-05-14', severity: 'severe', wong_baker_score: 8, pain_zones: ['full_head','jaw_neck'], pain_types: ['throbbing','shooting'], onset_time: '08:00', duration_hours: 18, nausea: 3, vomiting: 2, light_sensitivity: 3, noise_sensitivity: 3, aura: 3, dizziness: 3, neck_pain: 3, fatigue: 3, water_oz: 24, caffeine_cups: 0, sleep_hours: 4, sleep_quality: 'poor', stress_level: 10, energy_level: 1, medications: 'Sumatriptan 100mg, Zofran', possible_triggers: 'Hormonal shift, extreme stress, dehydration', prodrome_notes: 'Mood crash 2 days prior', aura_notes: 'Full blind spot, tingling left arm', headache_notes: 'Worst in months, ER-level pain', postdrome_notes: 'Brain fog for 2 days', notes: '', missed_work: true, missed_work_notes: 'Missed full day — severe pain', logged_by: null },
 ];
 
 // ─── Wong-Baker Face SVG ──────────────────────────────────────────────────────
@@ -683,6 +686,45 @@ function LogForm({ onSaved, editEntry, onCancelEdit }: { onSaved: () => void; ed
         )}
       </div>
 
+      {/* Missed work */}
+      <div className="panel" style={{ borderLeft: '4px solid var(--amber)', background: 'var(--amber-bg)' }}>
+        <h3 style={{ margin: '0 0 12px', fontSize: 14 }}>Work Impact</h3>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: form.missed_work ? 12 : 0 }}>
+          {[
+            { val: false, label: '✅ No — worked normally' },
+            { val: true,  label: '❌ Yes — missed work or left early' },
+          ].map(({ val, label }) => (
+            <button
+              key={String(val)}
+              type="button"
+              onClick={() => set('missed_work', val)}
+              style={{
+                padding: '9px 16px', borderRadius: 10, fontSize: 13, cursor: 'pointer',
+                border: `2px solid ${form.missed_work === val ? 'var(--amber)' : 'var(--border)'}`,
+                background: form.missed_work === val ? 'white' : 'transparent',
+                fontWeight: form.missed_work === val ? 700 : 400,
+                color: form.missed_work === val ? 'var(--amber)' : 'var(--text)',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {form.missed_work && (
+          <div style={{ marginTop: 10 }}>
+            <label style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+              What happened? (optional)
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. Called out sick, left after lunch, worked from bed..."
+              value={form.missed_work_notes}
+              onChange={(e) => set('missed_work_notes', e.target.value)}
+            />
+          </div>
+        )}
+      </div>
+
       {/* Save */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
         {editEntry && <button type="button" className="btn ghost" onClick={onCancelEdit}><X size={15} /> Cancel</button>}
@@ -759,6 +801,7 @@ function HistoryList({ entries, highlightDate, onEdit, onDelete }: {
                         WB: {e.wong_baker_score}/10
                       </span>
                     )}
+                    {e.missed_work && <span style={{ color: 'var(--amber)', fontWeight: 600 }}>❌ Missed work</span>}
                     {e.duration_hours ? <span>⏱ {e.duration_hours}h</span> : null}
                     {e.medications ? <span>💊 {e.medications.slice(0, 36)}{e.medications.length > 36 ? '…' : ''}</span> : null}
                   </div>
@@ -852,6 +895,15 @@ function HistoryList({ entries, highlightDate, onEdit, onDelete }: {
                     </div>
                   )}
                 </div>
+                {e.missed_work && (
+                  <div style={{ marginTop: 10, padding: '8px 10px', background: 'var(--amber-bg)', borderRadius: 8, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 16 }}>❌</span>
+                    <div>
+                      <strong style={{ color: 'var(--amber)' }}>Missed work</strong>
+                      {e.missed_work_notes && <span style={{ color: 'var(--text)' }}> — {e.missed_work_notes}</span>}
+                    </div>
+                  </div>
+                )}
                 {e.possible_triggers && (
                   <div style={{ marginTop: 10, padding: '8px 10px', background: 'var(--amber-bg)', borderRadius: 8, fontSize: 12 }}>
                     <strong style={{ color: 'var(--amber)' }}>Possible triggers:</strong> {e.possible_triggers}
