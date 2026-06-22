@@ -6,6 +6,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, X, Pencil, Trash2, Repeat, Check } from 'lucide-react';
+import { useLoansData, calculatePayoffProjection } from './useLoansData';
 import {
   useBudgetData,
   expandRecurringRules,
@@ -58,7 +59,8 @@ export default function Budget() {
     addActualTransaction, updateActualTransaction, deleteActualTransaction,
     addPayPeriod, addRule, updateRule, upsertCommissionMonth,
   } = useBudgetData();
-  const [page, setPage] = useState<'overview' | 'commission' | 'event-budgets'>('overview');
+  const [page, setPage] = useState<'overview' | 'commission' | 'event-budgets' | 'loans'>('overview');
+  const { loans, loading: loansLoading } = useLoansData();
   const [view, setView] = useState<ViewMode>('month');
   const [monthAnchor, setMonthAnchor] = useState(new Date());
   const [periodIndex, setPeriodIndex] = useState<number | null>(null); // null = not yet resolved to "this week"
@@ -224,9 +226,12 @@ export default function Budget() {
         <button className={page === 'overview' ? 'active' : ''} onClick={() => setPage('overview')}>Overview</button>
         <button className={page === 'commission' ? 'active' : ''} onClick={() => setPage('commission')}>Adam's Commission</button>
         <button className={page === 'event-budgets' ? 'active' : ''} onClick={() => setPage('event-budgets')}>Event Budgets</button>
+        <button className={page === 'loans' ? 'active' : ''} onClick={() => setPage('loans')}>Loans</button>
       </div>
 
-      {page === 'event-budgets' ? (
+      {page === 'loans' ? (
+        <LoansPanel loans={loans} loading={loansLoading} />
+      ) : page === 'event-budgets' ? (
         <EventBudgetsPanel rules={rules} isAdmin={isAdmin} onUpdateRule={updateRule} />
       ) : page === 'commission' ? (
         <CommissionPanel commissionMonths={commissionMonths} isAdmin={isAdmin} onSave={upsertCommissionMonth} />
@@ -1184,6 +1189,145 @@ function EventBudgetsPanel({
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// ─── Loans Panel ─────────────────────────────────────────────────────────────
+
+function LoansPanel({ loans, loading }: { loans: any[]; loading: boolean }) {
+  if (loading) return <div className="panel"><p style={{ color: 'var(--muted)' }}>Loading loans...</p></div>;
+
+  if (loans.length === 0) {
+    return (
+      <div className="panel">
+        <h2>Loans</h2>
+        <div className="brief-item">No active loans found. Add loans to the <code>loans</code> table in Supabase to track them here.</div>
+      </div>
+    );
+  }
+
+  const totalBalance = loans.reduce((sum: number, l: any) => sum + l.current_balance, 0);
+  const totalMonthly = loans.reduce((sum: number, l: any) => sum + l.monthly_payment, 0);
+
+  const TYPE_LABELS: Record<string, string> = {
+    student: 'Student', personal: 'Personal', auto: 'Auto', mortgage: 'Mortgage', other: 'Other'
+  };
+
+  const TYPE_COLORS: Record<string, string> = {
+    student: 'var(--purple)', personal: 'var(--red)', auto: 'var(--green)',
+    mortgage: 'var(--amber)', other: 'var(--muted)'
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="stats-row">
+        <div className="stat-card">
+          <div className="stat-label">Total Owed</div>
+          <div className="stat-val" style={{ color: 'var(--red)' }}>{fmtMoney(totalBalance)}</div>
+          <small>{loans.length} active loan{loans.length !== 1 ? 's' : ''}</small>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Monthly Payments</div>
+          <div className="stat-val">{fmtMoney(totalMonthly)}</div>
+          <small>combined minimum</small>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Highest Rate</div>
+          <div className="stat-val" style={{ color: 'var(--amber)' }}>
+            {Math.max(...loans.map((l: any) => l.interest_rate)).toFixed(2)}%
+          </div>
+          <small>APR</small>
+        </div>
+      </div>
+
+      {loans.map((loan: any) => {
+        const proj = calculatePayoffProjection(loan);
+        const pct = proj.percentPaidOff;
+        const barColor = pct !== null && pct >= 75 ? 'var(--green)' : pct !== null && pct >= 40 ? 'var(--amber)' : 'var(--red)';
+
+        return (
+          <div key={loan.id} className="panel" style={{ borderLeft: `4px solid ${TYPE_COLORS[loan.loan_type] || 'var(--muted)'}` }}>
+            <div className="panel-head">
+              <div>
+                <h2 style={{ margin: 0 }}>{loan.name}</h2>
+                <p style={{ margin: '2px 0 0', color: 'var(--muted)', fontSize: 13 }}>
+                  {TYPE_LABELS[loan.loan_type] || 'Other'}{loan.lender ? ` · ${loan.lender}` : ''} · {loan.interest_rate}% APR
+                </p>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--red)' }}>{fmtMoney(loan.current_balance)}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>current balance</div>
+              </div>
+            </div>
+
+            {pct !== null && (
+              <div style={{ margin: '10px 0 6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
+                  <span>{pct.toFixed(1)}% paid off</span>
+                  {loan.origination_balance && <span>Started at {fmtMoney(loan.origination_balance)}</span>}
+                </div>
+                <div style={{ height: 8, background: 'var(--border)', borderRadius: 999, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${pct}%`, background: barColor, borderRadius: 999 }} />
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10, marginTop: 12 }}>
+              <div className="brief-item" style={{ margin: 0 }}>
+                <strong>Monthly payment</strong>
+                <p style={{ margin: '2px 0 0' }}>{fmtMoney(loan.monthly_payment)}</p>
+              </div>
+              {proj.monthsToPayoff !== null && (
+                <div className="brief-item" style={{ margin: 0 }}>
+                  <strong>Payoff date</strong>
+                  <p style={{ margin: '2px 0 0' }}>
+                    {proj.payoffDate
+                      ? new Date(proj.payoffDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+                      : '—'}
+                    <span style={{ fontSize: 11, color: 'var(--muted)', display: 'block' }}>{proj.monthsToPayoff} months</span>
+                  </p>
+                </div>
+              )}
+              {proj.totalInterestRemaining !== null && (
+                <div className="brief-item" style={{ margin: 0 }}>
+                  <strong>Interest remaining</strong>
+                  <p style={{ margin: '2px 0 0', color: 'var(--red)' }}>{fmtMoney(proj.totalInterestRemaining)}</p>
+                </div>
+              )}
+              <div className="brief-item" style={{ margin: 0 }}>
+                <strong>Last updated</strong>
+                <p style={{ margin: '2px 0 0', fontSize: 12 }}>
+                  {new Date(loan.balance_updated_at + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                </p>
+              </div>
+            </div>
+
+            {proj.monthsToPayoff === null && (
+              <div className="brief-item" style={{ marginTop: 10, background: 'var(--red-bg)', color: 'var(--red)' }}>
+                ⚠️ Monthly payment doesn't cover interest — balance is growing. Increase payment above {fmtMoney(loan.current_balance * loan.interest_rate / 100 / 12)}/mo to start making progress.
+              </div>
+            )}
+
+            {loan.notes && (
+              <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8, marginBottom: 0 }}>{loan.notes}</p>
+            )}
+          </div>
+        );
+      })}
+
+      {loans.length > 1 && (() => {
+        const sorted = [...loans].sort((a: any, b: any) => b.interest_rate - a.interest_rate);
+        const highest = sorted[0];
+        return (
+          <div className="panel" style={{ background: 'var(--purple-bg)', borderColor: 'var(--purple)', borderLeft: '4px solid var(--purple)' }}>
+            <h3 style={{ margin: '0 0 6px', color: 'var(--purple-dark)', fontSize: 14 }}>💡 Avalanche strategy</h3>
+            <p style={{ margin: 0, fontSize: 13 }}>
+              Put any extra payments toward <strong>{highest.name}</strong> ({highest.interest_rate}% APR) first — it costs the most in interest. Once it's gone, roll that payment into the next highest-rate loan.
+            </p>
+          </div>
+        );
+      })()}
     </div>
   );
 }

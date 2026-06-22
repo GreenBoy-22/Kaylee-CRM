@@ -37,7 +37,13 @@ function addMonths(d: Date, n: number): Date {
 }
 
 function toKey(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  // Use local date parts — toISOString() converts to UTC which can
+  // shift the date for users in timezones behind UTC (e.g. US Eastern),
+  // causing grid keys to not match daySummaries keys from useGoogleCalendarData.
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 function isSameDay(a: Date, b: Date): boolean {
