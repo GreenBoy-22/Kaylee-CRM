@@ -14,11 +14,12 @@ import Vehicles from './Vehicles';
 import Jules from './Jules';
 import { useDailyBriefing } from './useDailyBriefing';
 import MigraineTracker from './MigraineTracker';
+import Contacts from './Contacts';
 import WorkCalendar from './WorkCalendar';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'students' | 'outreach' | 'settings';
+type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'students' | 'outreach' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -212,7 +213,8 @@ const homeNav: readonly NavEntry[] = [
   ['vehicles', 'Vehicles', Car],
   ['jules', 'Jules', Heart],
   ['migraine', 'Migraine Tracker', Brain],
-  ['suggestions', 'Home Suggestions', Home]
+  ['suggestions', 'Home Suggestions', Home],
+  ['contacts', 'Contacts', Users]
 ];
 
 const workNav: readonly NavEntry[] = [
@@ -1592,6 +1594,8 @@ Kaylee`;
           {page === 'vehicles' && <Vehicles />}
           {page === 'jules' && <Jules />}
           {page === 'migraine' && <MigraineTracker />}
+          {page === 'contacts' && <Contacts />
+          }
           {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
           {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
           {page === 'outreach' && activeRole === 'admin' && <Outreach drafts={drafts} students={students} generateCohortDrafts={generateCohortDrafts} updateDraft={updateDraft} markDraftSent={markDraftSent} deleteDraft={deleteDraft} />}
@@ -2608,7 +2612,20 @@ function SettingsPage({ permissions, updatePermission }: { permissions: ModulePe
     return permissions.find((permission) => permission.module_name === module_name)?.access_level || 'hidden';
   }
 
-  return <><Header title="Settings" sub="Control Adam's Home-side access as the app grows." /><section className="panel"><h2>Adam section access</h2><p className="settings-intro">Adam never sees Work mode or Students. For Home sections, choose Hidden, View Only, or Edit. This avoids confusing combinations like edit without view.</p><div className="permission-list">{moduleMeta.filter((item) => item.page !== 'students').map((item) => {
+  async function reconnectGoogle() {
+    if (!supabase) return;
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) return;
+    const resp = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/google-calendar-auth`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const { url } = await resp.json();
+    if (url) window.location.href = url;
+  }
+
+  return <><Header title="Settings" sub="Control Adam's Home-side access as the app grows." /><section className="panel"><h2>Google Connection</h2><p className="settings-intro">Reconnect Google to pick up new permissions (like Contacts). You'll see Google's consent screen and be returned here automatically.</p><button className="btn primary" onClick={reconnectGoogle}>Reconnect Google Account</button></section><section className="panel"><h2>Adam section access</h2><p className="settings-intro">Adam never sees Work mode or Students. For Home sections, choose Hidden, View Only, or Edit. This avoids confusing combinations like edit without view.</p><div className="permission-list">{moduleMeta.filter((item) => item.page !== 'students').map((item) => {
     const current = accessFor(item.module_name);
     return <div className="permission-row" key={item.module_name}><div><strong>{item.label}</strong><p>{current === 'hidden' ? 'Hidden from Adam' : current === 'view' ? 'Visible · View-only' : 'Visible · Editable'}</p></div><label className="switch-row"><Eye size={15} /> Adam Access <select value={current} onChange={(e) => updatePermission(item.module_name, e.target.value as AccessLevel)}><option value="hidden">Hidden</option><option value="view">View Only</option><option value="edit">Edit</option></select></label></div>;
   })}</div></section><section className="panel"><h2>Access rules</h2><div className="brief-item"><strong>Kaylee:</strong> admin, full Home + Work access.</div><div className="brief-item"><strong>Adam:</strong> Home only. Hidden means no sidebar item. View Only means no add/save/edit buttons. Edit means full access.</div><div className="brief-item"><strong>Students:</strong> always admin-only and FERPA-safe.</div></section></>;
