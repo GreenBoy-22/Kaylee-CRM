@@ -109,10 +109,28 @@ export default function Jules() {
           <div className="stat-card">
             <div className="stat-label">Vet</div>
             <div className="stat-val" style={{ fontSize: 14 }}>{pet.vet_name}<br />{pet.vet_clinic}</div>
+            <a
+              href="https://vetpawer.appointmaster.com/avascheduler-standalone/?ACID=694b401e9e745ae8ca6ad39e"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn primary"
+              style={{ marginTop: 8, fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5, textDecoration: 'none' }}
+            >
+              <ExternalLink size={12} /> Book Vet Appointment
+            </a>
           </div>
           <div className="stat-card">
             <div className="stat-label">Groomer</div>
             <div className="stat-val" style={{ fontSize: 14 }}>{pet.groomer_name}<br />{pet.groomer_address}</div>
+            <a
+              href="https://tailsandwhiskersgrooming.square.site/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn primary"
+              style={{ marginTop: 8, fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5, textDecoration: 'none' }}
+            >
+              <ExternalLink size={12} /> Book Grooming Appointment
+            </a>
           </div>
         </div>
       </div>

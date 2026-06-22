@@ -13,7 +13,7 @@ type Severity = 'none' | 'very_mild' | 'mild' | 'moderate' | 'strong' | 'severe'
 type PainType = 'throbbing' | 'sharp' | 'dull' | 'pressure' | 'burning' | 'shooting' | 'cramping' | 'radiating';
 type SleepQuality = 'poor' | 'fair' | 'good' | 'excellent';
 // Pain location zones matching the head diagram
-type PainZone = 'forehead' | 'right_temple' | 'left_temple' | 'top_of_head' | 'back_of_head' | 'behind_eyes' | 'jaw_neck' | 'full_head';
+type PainZone = 'forehead' | 'right_temple' | 'left_temple' | 'top_of_head' | 'back_of_head' | 'behind_eyes' | 'jaw_neck' | 'full_head' | 'side_front' | 'side_top' | 'side_back' | 'side_ear' | 'side_jaw';
 
 interface MigraineEntry {
   id: string;
@@ -70,6 +70,11 @@ const PAIN_ZONE_DEFS: { value: PainZone; label: string }[] = [
   { value: 'behind_eyes',   label: 'Behind Eyes / Sinuses' },
   { value: 'jaw_neck',      label: 'Jaw / Neck' },
   { value: 'full_head',     label: 'Full Head / Diffuse' },
+  { value: 'side_front',    label: 'Side — Front / Forehead' },
+  { value: 'side_top',      label: 'Side — Top of Head' },
+  { value: 'side_back',     label: 'Side — Back of Head' },
+  { value: 'side_ear',      label: 'Side — Around Ear / Temple' },
+  { value: 'side_jaw',      label: 'Side — Jaw / Neck' },
 ];
 
 const PAIN_TYPES: { value: PainType; label: string }[] = [
@@ -223,74 +228,85 @@ function HeadZoneMap({ selected, onChange }: { selected: PainZone[]; onChange: (
   return (
     <div>
       <div style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600, marginBottom: 10 }}>
-        Pain Location <span style={{ fontWeight: 400 }}>— click zones on the head</span>
+        Pain Location <span style={{ fontWeight: 400 }}>— click zones on either head view</span>
       </div>
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        {/* SVG Head diagram */}
-        <div style={{ position: 'relative', width: 200, height: 220, flexShrink: 0 }}>
-          {/* Front-facing head SVG */}
-          <svg width="200" height="220" viewBox="0 0 200 220" style={{ position: 'absolute', top: 0, left: 0 }}>
-            {/* Neck */}
-            <rect x="82" y="172" width="36" height="32" rx="8" fill="#f0f0f0" stroke="#ccc" strokeWidth="1.5" />
-            {/* Head shape */}
-            <ellipse cx="100" cy="100" rx="72" ry="82" fill="#f8f7f5" stroke="#ccc" strokeWidth="1.8" />
-            {/* Ears */}
-            <ellipse cx="27" cy="108" rx="9" ry="14" fill="#f0f0f0" stroke="#ccc" strokeWidth="1.5" />
-            <ellipse cx="173" cy="108" rx="9" ry="14" fill="#f0f0f0" stroke="#ccc" strokeWidth="1.5" />
-            {/* Eyes */}
-            <ellipse cx="78" cy="105" rx="13" ry="9" fill="white" stroke="#bbb" strokeWidth="1.2" />
-            <ellipse cx="122" cy="105" rx="13" ry="9" fill="white" stroke="#bbb" strokeWidth="1.2" />
-            <circle cx="78" cy="105" r="5" fill="#888" />
-            <circle cx="122" cy="105" r="5" fill="#888" />
-            <circle cx="80" cy="103" r="2" fill="white" />
-            <circle cx="124" cy="103" r="2" fill="white" />
-            {/* Eyebrows */}
-            <path d="M67 93 Q78 88 89 93" stroke="#aaa" strokeWidth="1.8" fill="none" strokeLinecap="round" />
-            <path d="M111 93 Q122 88 133 93" stroke="#aaa" strokeWidth="1.8" fill="none" strokeLinecap="round" />
-            {/* Nose */}
-            <path d="M97 112 Q93 128 88 132 Q96 136 100 136 Q104 136 112 132 Q107 128 103 112" stroke="#bbb" strokeWidth="1.3" fill="none" />
-            {/* Mouth */}
-            <path d="M84 150 Q100 160 116 150" stroke="#bbb" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-            {/* Hair */}
-            <path d="M30 88 Q32 30 100 22 Q168 30 170 88" fill="#d4c4a8" stroke="#c4b090" strokeWidth="1.2" />
-          </svg>
 
-          {/* Clickable zones overlaid */}
-          {/* Forehead */}
-          <div onClick={() => toggle('forehead')} title="Forehead"
-            style={{ ...zoneStyle('forehead'), top: 32, left: 62, width: 76, height: 34 }} />
-          {/* Behind eyes / sinuses */}
-          <div onClick={() => toggle('behind_eyes')} title="Behind Eyes / Sinuses"
-            style={{ ...zoneStyle('behind_eyes'), top: 90, left: 54, width: 92, height: 30 }} />
-          {/* Left temple */}
-          <div onClick={() => toggle('left_temple')} title="Left Temple"
-            style={{ ...zoneStyle('left_temple'), top: 60, left: 24, width: 38, height: 44 }} />
-          {/* Right temple */}
-          <div onClick={() => toggle('right_temple')} title="Right Temple"
-            style={{ ...zoneStyle('right_temple'), top: 60, right: 24, width: 38, height: 44 }} />
-          {/* Top of head */}
-          <div onClick={() => toggle('top_of_head')} title="Top of Head"
-            style={{ ...zoneStyle('top_of_head'), top: 10, left: 56, width: 88, height: 28 }} />
-          {/* Back of head — show as lower arc hint */}
-          <div onClick={() => toggle('back_of_head')} title="Back of Head"
-            style={{ ...zoneStyle('back_of_head'), bottom: 44, left: 56, width: 88, height: 30 }} />
-          {/* Jaw / Neck */}
-          <div onClick={() => toggle('jaw_neck')} title="Jaw / Neck"
-            style={{ ...zoneStyle('jaw_neck'), bottom: 4, left: 70, width: 60, height: 42 }} />
-          {/* Full head */}
-          <div onClick={() => toggle('full_head')} title="Full Head"
-            style={{ ...zoneStyle('full_head'), top: 10, left: 28, width: 144, height: 162, background: selected.includes('full_head') ? 'rgba(183,48,64,0.18)' : 'transparent', border: selected.includes('full_head') ? '2px dashed #b83040' : '2px dashed transparent', borderRadius: 80 }} />
+        {/* ── Front view ── */}
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', marginBottom: 4 }}>Front</div>
+          <div style={{ position: 'relative', width: 200, height: 220, flexShrink: 0 }}>
+            <svg width="200" height="220" viewBox="0 0 200 220" style={{ position: 'absolute', top: 0, left: 0 }}>
+              <rect x="82" y="172" width="36" height="32" rx="8" fill="#f0f0f0" stroke="#ccc" strokeWidth="1.5" />
+              <ellipse cx="100" cy="100" rx="72" ry="82" fill="#f8f7f5" stroke="#ccc" strokeWidth="1.8" />
+              <ellipse cx="27" cy="108" rx="9" ry="14" fill="#f0f0f0" stroke="#ccc" strokeWidth="1.5" />
+              <ellipse cx="173" cy="108" rx="9" ry="14" fill="#f0f0f0" stroke="#ccc" strokeWidth="1.5" />
+              <ellipse cx="78" cy="105" rx="13" ry="9" fill="white" stroke="#bbb" strokeWidth="1.2" />
+              <ellipse cx="122" cy="105" rx="13" ry="9" fill="white" stroke="#bbb" strokeWidth="1.2" />
+              <circle cx="78" cy="105" r="5" fill="#888" />
+              <circle cx="122" cy="105" r="5" fill="#888" />
+              <circle cx="80" cy="103" r="2" fill="white" />
+              <circle cx="124" cy="103" r="2" fill="white" />
+              <path d="M67 93 Q78 88 89 93" stroke="#aaa" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+              <path d="M111 93 Q122 88 133 93" stroke="#aaa" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+              <path d="M97 112 Q93 128 88 132 Q96 136 100 136 Q104 136 112 132 Q107 128 103 112" stroke="#bbb" strokeWidth="1.3" fill="none" />
+              <path d="M84 150 Q100 160 116 150" stroke="#bbb" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+              <path d="M30 88 Q32 30 100 22 Q168 30 170 88" fill="#d4c4a8" stroke="#c4b090" strokeWidth="1.2" />
+            </svg>
+            <div onClick={() => toggle('forehead')} title="Forehead" style={{ ...zoneStyle('forehead'), top: 32, left: 62, width: 76, height: 34 }} />
+            <div onClick={() => toggle('behind_eyes')} title="Behind Eyes / Sinuses" style={{ ...zoneStyle('behind_eyes'), top: 90, left: 54, width: 92, height: 30 }} />
+            <div onClick={() => toggle('left_temple')} title="Left Temple" style={{ ...zoneStyle('left_temple'), top: 60, left: 24, width: 38, height: 44 }} />
+            <div onClick={() => toggle('right_temple')} title="Right Temple" style={{ ...zoneStyle('right_temple'), top: 60, right: 24, width: 38, height: 44 }} />
+            <div onClick={() => toggle('top_of_head')} title="Top of Head" style={{ ...zoneStyle('top_of_head'), top: 10, left: 56, width: 88, height: 28 }} />
+            <div onClick={() => toggle('back_of_head')} title="Back of Head" style={{ ...zoneStyle('back_of_head'), bottom: 44, left: 56, width: 88, height: 30 }} />
+            <div onClick={() => toggle('jaw_neck')} title="Jaw / Neck" style={{ ...zoneStyle('jaw_neck'), bottom: 4, left: 70, width: 60, height: 42 }} />
+            <div onClick={() => toggle('full_head')} title="Full Head" style={{ ...zoneStyle('full_head'), top: 10, left: 28, width: 144, height: 162, background: selected.includes('full_head') ? 'rgba(183,48,64,0.18)' : 'transparent', border: selected.includes('full_head') ? '2px dashed #b83040' : '2px dashed transparent', borderRadius: 80 }} />
+          </div>
+        </div>
+
+        {/* ── Side view ── */}
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', marginBottom: 4 }}>Side</div>
+          <div style={{ position: 'relative', width: 200, height: 220, flexShrink: 0 }}>
+            <svg width="200" height="220" viewBox="0 0 200 220" style={{ position: 'absolute', top: 0, left: 0 }}>
+              {/* Neck */}
+              <rect x="30" y="170" width="34" height="36" rx="8" fill="#f0f0f0" stroke="#ccc" strokeWidth="1.5" />
+              {/* Head — side profile shape */}
+              <path d="M50 170 Q40 155 38 130 Q34 100 40 75 Q50 40 80 24 Q110 10 140 20 Q165 30 172 55 Q180 80 170 108 Q162 130 148 148 Q130 168 100 172 Q70 175 50 170Z" fill="#f8f7f5" stroke="#ccc" strokeWidth="1.8" />
+              {/* Hair */}
+              <path d="M50 80 Q55 38 85 22 Q115 8 142 20 Q165 30 170 56 Q175 45 160 28 Q135 5 100 8 Q65 10 45 42 Q32 62 38 88Z" fill="#d4c4a8" stroke="#c4b090" strokeWidth="1.2" />
+              {/* Ear */}
+              <ellipse cx="46" cy="118" rx="12" ry="16" fill="#f0f0f0" stroke="#ccc" strokeWidth="1.5" />
+              <path d="M46 108 Q50 112 50 118 Q50 124 46 128" stroke="#bbb" strokeWidth="1" fill="none" />
+              {/* Eye */}
+              <ellipse cx="130" cy="98" rx="14" ry="9" fill="white" stroke="#bbb" strokeWidth="1.2" />
+              <circle cx="132" cy="98" r="5" fill="#888" />
+              <circle cx="134" cy="96" r="2" fill="white" />
+              {/* Eyebrow */}
+              <path d="M118 88 Q130 83 144 87" stroke="#aaa" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+              {/* Nose */}
+              <path d="M155 110 Q165 120 158 130 Q152 136 148 132" stroke="#bbb" strokeWidth="1.3" fill="none" />
+              {/* Mouth */}
+              <path d="M135 150 Q145 155 152 148" stroke="#bbb" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+            </svg>
+            {/* Side clickable zones */}
+            <div onClick={() => toggle('side_front')} title="Side — Front / Forehead" style={{ ...zoneStyle('side_front'), top: 28, left: 110, width: 70, height: 52 }} />
+            <div onClick={() => toggle('side_top')} title="Side — Top of Head" style={{ ...zoneStyle('side_top'), top: 10, left: 60, width: 90, height: 32 }} />
+            <div onClick={() => toggle('side_back')} title="Side — Back of Head" style={{ ...zoneStyle('side_back'), top: 60, left: 30, width: 50, height: 70 }} />
+            <div onClick={() => toggle('side_ear')} title="Side — Around Ear / Temple" style={{ ...zoneStyle('side_ear'), top: 95, left: 28, width: 56, height: 50 }} />
+            <div onClick={() => toggle('side_jaw')} title="Side — Jaw / Neck" style={{ ...zoneStyle('side_jaw'), top: 148, left: 30, width: 80, height: 48 }} />
+          </div>
         </div>
 
         {/* Zone chip list */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 4 }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Click zones or tap here:</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Selected zones:</div>
           {PAIN_ZONE_DEFS.map((z) => {
             const active = selected.includes(z.value);
             return (
               <button key={z.value} type="button" onClick={() => toggle(z.value)}
                 style={{
-                  padding: '6px 12px', borderRadius: 8, fontSize: 12, textAlign: 'left',
+                  padding: '5px 10px', borderRadius: 8, fontSize: 11.5, textAlign: 'left',
                   border: `1.5px solid ${active ? '#b83040' : 'var(--border)'}`,
                   background: active ? '#fdd0d8' : 'white',
                   color: active ? '#b83040' : 'var(--text)',
