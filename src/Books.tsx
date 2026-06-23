@@ -65,9 +65,9 @@ type AISuggestion = { book: Book; reason: string } | null;
 
 const STATUS_LABELS: Record<ReadStatus, string> = {
   unread: 'Unread',
-  reading: 'Reading',
+  reading: 'Currently Reading',
   read: 'Read',
-  wishlist: 'Wishlist',
+  wishlist: 'Wishlist (To Buy)',
   dnf: 'Did Not Finish',
 };
 
@@ -134,16 +134,21 @@ function parseGoodreadsCSV(text: string): GoodreadsRow[] {
   if (lines.length < 2) return [];
   const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase().replace(/\s+/g, '_'));
 
-  const idx = (name: string) => headers.indexOf(name);
-  const titleIdx   = idx('title');
-  const authorIdx  = idx('author');
-  const isbnIdx    = idx('isbn');
-  const isbn13Idx  = idx('isbn13');
-  const idIdx      = idx('book_id');
-  const shelfIdx   = idx('exclusive_shelf');
-  const ratingIdx  = idx('my_rating');
-  const dateReadIdx = idx('date_read');
-  const dateAddedIdx = idx('date_added');
+  const idx = (name: string) => {
+    // Try exact match first, then with spaces removed
+    const exact = headers.indexOf(name);
+    if (exact >= 0) return exact;
+    return headers.findIndex(h => h.replace(/[^a-z0-9]/g,'') === name.replace(/[^a-z0-9]/g,''));
+  };
+  const titleIdx    = idx('title');
+  const authorIdx   = idx('author');
+  const isbnIdx     = idx('isbn');
+  const isbn13Idx   = idx('isbn13');
+  const idIdx       = idx('book_id') >= 0 ? idx('book_id') : idx('bookid');
+  const shelfIdx    = idx('exclusive_shelf') >= 0 ? idx('exclusive_shelf') : idx('exclusiveshelf');
+  const ratingIdx   = idx('my_rating') >= 0 ? idx('my_rating') : idx('myrating');
+  const dateReadIdx = idx('date_read') >= 0 ? idx('date_read') : idx('dateread');
+  const dateAddedIdx = idx('date_added') >= 0 ? idx('date_added') : idx('dateadded');
 
   const results: GoodreadsRow[] = [];
   for (let i = 1; i < lines.length; i++) {
@@ -177,11 +182,13 @@ function parseGoodreadsCSV(text: string): GoodreadsRow[] {
 }
 
 function goodreadsShelfToStatus(shelf: string): ReadStatus {
-  const s = shelf.toLowerCase();
-  if (s === 'currently-reading' || s === 'reading') return 'reading';
-  if (s === 'to-read') return 'wishlist';
+  const s = shelf.toLowerCase().trim();
+  if (s === 'currently-reading') return 'reading';
+  if (s === 'to-read') return 'unread';   // owned, not yet read
+  if (s === 'to-buy') return 'wishlist';  // not owned yet
+  if (s === 'did-not-finish') return 'dnf';
   if (s === 'read') return 'read';
-  return 'read';
+  return 'unread';
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -386,6 +393,8 @@ export default function Books() {
           goodreads_rating: row.rating,
           goodreads_date_read: row.date_read,
           status,
+          // Goodreads is source of truth for status — update owned accordingly
+          owned: status !== 'wishlist',
         };
         await supabase.from('books').update(patch).eq('id', existing.id);
         updated++;
@@ -537,6 +546,7 @@ export default function Books() {
     reading:  books.filter(b => b.status === 'reading').length,
     unread:   books.filter(b => b.status === 'unread' && b.owned).length,
     wishlist: books.filter(b => b.status === 'wishlist').length,
+    dnf:      books.filter(b => b.status === 'dnf').length,
   }), [books]);
 
   const currentlyReading = books.filter(b => b.status === 'reading');
@@ -575,7 +585,7 @@ export default function Books() {
 
       {/* Stats row */}
       <div className="stats-row">
-        {([['Total owned', stats.total], ['Read', stats.read], ['Reading', stats.reading], ['Unread', stats.unread], ['Wishlist', stats.wishlist]] as [string, number][]).map(([label, val]) => (
+        {([['Owned', stats.total], ['Read', stats.read], ['Reading', stats.reading], ['Unread', stats.unread], ['Wishlist', stats.wishlist], ['DNF', stats.dnf]] as [string, number][]).map(([label, val]) => (
           <div className="stat-card" key={label}>
             <div className="stat-label">{label}</div>
             <div className="stat-val">{val}</div>
@@ -718,10 +728,12 @@ export default function Books() {
             <input placeholder="Search title, author, genre…" value={search} onChange={e => setSearch(e.target.value)} style={{ paddingLeft: 32, width: '100%' }} />
           </div>
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as ReadStatus | 'all')}>
-            <option value="all">All statuses</option>
-            {(Object.entries(STATUS_LABELS) as [ReadStatus, string][]).map(([v, l]) => (
-              <option key={v} value={v}>{l}</option>
-            ))}
+            <option value="all">All books</option>
+            <option value="reading">📖 Currently Reading</option>
+            <option value="unread">📚 Owned — Unread</option>
+            <option value="read">✅ Read</option>
+            <option value="wishlist">🛒 Wishlist (To Buy)</option>
+            <option value="dnf">❌ Did Not Finish</option>
           </select>
           {genres.length > 0 && (
             <select value={genreFilter} onChange={e => setGenreFilter(e.target.value)}>
@@ -796,8 +808,9 @@ function BookCard({ book, onUpdate, onDelete }: { book: Book; onUpdate: (id: str
     >
       {book.cover_url
         ? <img src={book.cover_url} alt={book.title} style={{ width: '100%', aspectRatio: '2/3', objectFit: 'cover', display: 'block' }} />
-        : <div style={{ width: '100%', aspectRatio: '2/3', background: `${STATUS_COLORS[book.status]}22`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <BookOpen size={32} style={{ color: STATUS_COLORS[book.status] }} />
+        : <div style={{ width: '100%', aspectRatio: '2/3', background: `${STATUS_COLORS[book.status]}22`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 8 }}>
+            <BookOpen size={28} style={{ color: STATUS_COLORS[book.status] }} />
+            <span style={{ fontSize: 10, color: STATUS_COLORS[book.status], textAlign: 'center', lineHeight: 1.3, fontWeight: 500 }}>{book.title.slice(0,30)}</span>
           </div>
       }
       <div style={{ padding: '8px 8px 6px' }}>
