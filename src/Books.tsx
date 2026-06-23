@@ -427,6 +427,60 @@ export default function Books() {
     setImporting(false);
   }
 
+  // ── iCollect CSV import ─────────────────────────────────────────────
+  async function handleiCollectImport(file: File) {
+    if (!supabase) return;
+    setImporting(true);
+    setImportMsg('Reading CSV…');
+    const text = await file.text();
+    const lines = text.split(/\r?\n/);
+    if (lines.length < 2) { setImportMsg('No rows found.'); setImporting(false); return; }
+    const headers = lines[0].split(',').map(h => h.replace(/"/g,'').trim().toLowerCase());
+    const idx = (name: string) => headers.indexOf(name);
+    const tIdx = idx('title'), aIdx = idx('author'), gIdx = idx('genre');
+    const isbnIdx = idx('isbn'), pgIdx = idx('page_count'), rIdx = idx('rating');
+    const stIdx = idx('status'), synIdx = idx('synopsis');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { setImporting(false); return; }
+    let added = 0, skipped = 0;
+    setImportMsg(`Found ${lines.length - 1} books. Importing…`);
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const cells: string[] = [];
+      let cur = '', inQ = false;
+      for (const ch of line + ',') {
+        if (ch === '"') { inQ = !inQ; continue; }
+        if (ch === ',' && !inQ) { cells.push(cur.trim()); cur = ''; continue; }
+        cur += ch;
+      }
+      const get = (i: number) => i >= 0 ? (cells[i] ?? '').replace(/"/g,'').trim() : '';
+      const title = get(tIdx);
+      if (!title) continue;
+      const exists = books.find(b => b.title.toLowerCase() === title.toLowerCase());
+      if (exists) { skipped++; continue; }
+      const ratingRaw = parseInt(get(rIdx));
+      const pgRaw = parseInt(get(pgIdx));
+      await supabase.from('books').insert({
+        user_id: session.user.id,
+        title,
+        author: get(aIdx) || null,
+        genre: get(gIdx) || null,
+        isbn: get(isbnIdx) || null,
+        page_count: isNaN(pgRaw) ? null : pgRaw,
+        rating: isNaN(ratingRaw) || ratingRaw === 0 ? null : ratingRaw,
+        status: (get(stIdx) as ReadStatus) || 'unread',
+        owned: true,
+        description: get(synIdx) || null,
+      });
+      added++;
+      if (added % 50 === 0) setImportMsg(`Imported ${added} so far…`);
+    }
+    await loadBooks();
+    setImportMsg(`Done! Added ${added} books${skipped ? `, skipped ${skipped} duplicates` : ''}.`);
+    setImporting(false);
+  }
+
   // ── AI suggestion ───────────────────────────────────────────────────
   async function getSuggestion(mood: 'match' | 'uplifting') {
     setSuggesting(true);
