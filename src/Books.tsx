@@ -511,6 +511,11 @@ export default function Books() {
             <input type="file" accept=".csv" style={{ display: 'none' }}
               onChange={e => { const f = e.target.files?.[0]; if (f) { setShowImport(true); handleGoodreadsImport(f); } }} />
           </label>
+          <label className="btn ghost" style={{ cursor: 'pointer' }}>
+            <Upload size={15} /> Import iCollect CSV
+            <input type="file" accept=".csv" style={{ display: 'none' }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) { setShowImport(true); handleiCollectImport(f); } }} />
+          </label>
         </div>
       </div>
 
