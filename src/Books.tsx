@@ -283,8 +283,8 @@ export default function Books() {
   const [search, setSearch]           = useState('');
   const [statusFilter, setStatusFilter] = useState<ReadStatus | 'all'>('all');
   const [genreFilter, setGenreFilter] = useState('all');
-  const [sortKey, setSortKey]         = useState<SortKey>('date_added');
-  const [sortAsc, setSortAsc]         = useState(false);
+  const [sortKey, setSortKey]         = useState<SortKey>('title');
+  const [sortAsc, setSortAsc]         = useState(true);
   const [viewMode, setViewMode]       = useState<ViewMode>('grid');
   const [showAdd, setShowAdd]         = useState(false);
   const [showImport, setShowImport]   = useState(false);
@@ -519,8 +519,12 @@ export default function Books() {
     setSuggestion(null);
     setSuggestionDismissed(false);
     const currentlyReading = books.filter(b => b.status === 'reading');
+    // Fall back to recently read books if nothing currently reading
+    const context = currentlyReading.length > 0
+      ? currentlyReading
+      : books.filter(b => b.status === 'read' && b.goodreads_date_read).sort((a,b) => (b.goodreads_date_read ?? '').localeCompare(a.goodreads_date_read ?? '')).slice(0, 3);
     const unreadOwned = books.filter(b => b.status === 'unread' && b.owned);
-    const result = await getAISuggestion(currentlyReading, unreadOwned, mood);
+    const result = await getAISuggestion(context, unreadOwned, mood);
     setSuggestion(result);
     setSuggesting(false);
   }
@@ -687,22 +691,26 @@ export default function Books() {
             </button>
           </div>
 
-          {currentlyReading.length > 0 && (
+          {currentlyReading.length > 0 ? (
             <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 10px' }}>
               Currently reading: {currentlyReading.map(b => `"${b.title}"`).join(', ')}
+            </p>
+          ) : (
+            <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 10px' }}>
+              No current read — suggesting based on your recent reads and shelf.
             </p>
           )}
 
           {!suggestion && !suggesting && (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button className="btn primary" onClick={() => getSuggestion('match')} disabled={books.filter(b => b.status === 'unread' && b.owned).length === 0}>
+              <button className="btn primary" onClick={() => getSuggestion('match')} disabled={suggesting || books.filter(b => b.status === 'unread' && b.owned).length === 0}>
                 <Sparkles size={14} /> Suggest from my shelf
               </button>
-              <button className="btn ghost" onClick={() => getSuggestion('uplifting')} disabled={books.filter(b => b.status === 'unread' && b.owned).length === 0}>
+              <button className="btn ghost" onClick={() => getSuggestion('uplifting')} disabled={suggesting || books.filter(b => b.status === 'unread' && b.owned).length === 0}>
                 <Heart size={14} /> Something more uplifting
               </button>
               {books.filter(b => b.status === 'unread' && b.owned).length === 0 && (
-                <span style={{ fontSize: 12, color: 'var(--muted)', alignSelf: 'center' }}>Add some unread books first!</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)', alignSelf: 'center' }}>No unread owned books found.</span>
               )}
             </div>
           )}
@@ -745,12 +753,12 @@ export default function Books() {
 
       {/* Filters + sort */}
       <section className="panel" style={{ paddingBottom: 10 }}>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ position: 'relative', flex: 1, minWidth: 160 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', boxSizing: 'border-box' }}>
+          <div style={{ position: 'relative', flex: '1 1 180px', minWidth: 0, boxSizing: 'border-box' }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)' }} />
-            <input placeholder="Search title, author, genre…" value={search} onChange={e => setSearch(e.target.value)} style={{ paddingLeft: 32, width: '100%' }} />
+            <input placeholder="Search title, author, genre…" value={search} onChange={e => setSearch(e.target.value)} style={{ paddingLeft: 32, width: '100%', boxSizing: 'border-box' }} />
           </div>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as ReadStatus | 'all')}>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as ReadStatus | 'all')} style={{ flex: '0 0 auto' }}>
             <option value="all">All books</option>
             <option value="reading">📖 Currently Reading</option>
             <option value="unread">📚 Owned — Unread</option>
@@ -759,12 +767,14 @@ export default function Books() {
             <option value="dnf">❌ Did Not Finish</option>
           </select>
           {genres.length > 0 && (
-            <select value={genreFilter} onChange={e => setGenreFilter(e.target.value)}>
+            <select value={genreFilter} onChange={e => setGenreFilter(e.target.value)} style={{ flex: '0 0 auto', maxWidth: 160 }}>
               <option value="all">All genres</option>
               {genres.map(g => <option key={g} value={g}>{g}</option>)}
             </select>
           )}
-          <div style={{ display: 'flex', gap: 4 }}>
+        </div>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1 }}>
             {(['title','author','genre','status','rating','date_added'] as SortKey[]).map(key => (
               <button key={key} className={sortKey === key ? 'btn primary tiny' : 'btn ghost tiny'} onClick={() => toggleSort(key)}>
                 {key === 'date_added' ? 'Added' : key.charAt(0).toUpperCase() + key.slice(1)}
@@ -772,7 +782,7 @@ export default function Books() {
               </button>
             ))}
           </div>
-          <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
+          <div style={{ display: 'flex', gap: 4 }}>
             <button className={viewMode === 'grid' ? 'btn primary tiny' : 'btn ghost tiny'} onClick={() => setViewMode('grid')}><LayoutGrid size={13} /></button>
             <button className={viewMode === 'list' ? 'btn primary tiny' : 'btn ghost tiny'} onClick={() => setViewMode('list')}><List size={13} /></button>
           </div>
@@ -831,9 +841,9 @@ function BookCard({ book, onUpdate, onDelete }: { book: Book; onUpdate: (id: str
     >
       {book.cover_url
         ? <img src={book.cover_url} alt={book.title} style={{ width: '100%', aspectRatio: '2/3', objectFit: 'cover', display: 'block' }} />
-        : <div style={{ width: '100%', aspectRatio: '2/3', background: `${STATUS_COLORS[book.status]}22`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 8 }}>
-            <BookOpen size={28} style={{ color: STATUS_COLORS[book.status] }} />
-            <span style={{ fontSize: 10, color: STATUS_COLORS[book.status], textAlign: 'center', lineHeight: 1.3, fontWeight: 500 }}>{book.title.slice(0,30)}</span>
+        : <div style={{ width: '100%', aspectRatio: '2/3', background: `${STATUS_COLORS[book.status]}18`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 6px' }}>
+            <BookOpen size={22} style={{ color: STATUS_COLORS[book.status], flexShrink: 0 }} />
+            <span style={{ fontSize: 9, color: STATUS_COLORS[book.status], textAlign: 'center', lineHeight: 1.3, fontWeight: 600, wordBreak: 'break-word' }}>{book.title.slice(0,40)}</span>
           </div>
       }
       <div style={{ padding: '8px 8px 6px' }}>
