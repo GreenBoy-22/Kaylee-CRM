@@ -451,6 +451,52 @@ export default function Books() {
   }
 
 
+
+  // ── Fetch covers from Google Books ──────────────────────────────────
+  async function fetchCovers() {
+    if (!supabase) return;
+    const needsCovers = books.filter(b => !b.cover_url && b.title);
+    if (!needsCovers.length) { return; }
+    setImportMsg(`Fetching covers for ${needsCovers.length} books...`);
+    setShowImport(true);
+    let updated = 0;
+    for (const book of needsCovers) {
+      try {
+        const query = book.isbn
+          ? `isbn:${book.isbn}`
+          : `intitle:${encodeURIComponent(book.title)}${book.author ? `+inauthor:${encodeURIComponent(book.author.split(' & ')[0])}` : ''}`;
+        const resp = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${query}&maxResults=1&printType=books`);
+        const json = await resp.json();
+        const item = json.items?.[0];
+        if (!item) continue;
+        const info = item.volumeInfo ?? {};
+        const cover = info.imageLinks?.thumbnail?.replace('http://', 'https://') ?? null;
+        const genre = book.genre || (info.categories?.[0]?.split('/')[0]?.trim() ?? null);
+        const description = book.description || info.description || null;
+        const page_count = book.page_count || info.pageCount || null;
+        const google_books_id = item.id ?? null;
+        if (cover || genre || description) {
+          await supabase.from('books').update({
+            cover_url: cover ?? book.cover_url,
+            genre: genre ?? book.genre,
+            description: description ?? book.description,
+            page_count: page_count ?? book.page_count,
+            google_books_id: google_books_id ?? book.google_books_id,
+            updated_at: new Date().toISOString(),
+          }).eq('id', book.id);
+          updated++;
+        }
+        // Rate limit — Google Books free tier allows ~1 req/100ms
+        await new Promise(r => setTimeout(r, 120));
+        if (updated % 50 === 0 && updated > 0) {
+          setImportMsg(`Fetched ${updated} covers so far...`);
+        }
+      } catch { /* skip failed books */ }
+    }
+    await loadBooks();
+    setImportMsg(`Done! Fetched covers/metadata for ${updated} books.`);
+  }
+
   // ── Merged library CSV import (iCollect + Goodreads pre-merged) ─────
   async function handleMergedImport(file: File) {
     if (!supabase) return;
@@ -687,6 +733,9 @@ export default function Books() {
             <input type="file" accept=".csv" style={{ display: 'none' }}
               onChange={e => { const f = e.target.files?.[0]; if (f) { setShowImport(true); handleMergedImport(f); } }} />
           </label>
+          <button className="btn ghost" onClick={fetchCovers} title="Fetch missing covers and metadata from Google Books">
+            <RefreshCw size={15} /> Fetch Covers
+          </button>
         </div>
       </div>
 
