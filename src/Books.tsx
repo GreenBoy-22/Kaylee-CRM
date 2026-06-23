@@ -309,15 +309,37 @@ export default function Books() {
   const [searching, setSearching]     = useState(false);
   const [expandedId, setExpandedId]   = useState<string | null>(null);
   const [suggestion, setSuggestion]   = useState<AISuggestion>(null);
+  const [lastGoodreadsSyncAt, setLastGoodreadsSyncAt] = useState<string | null>(null);
+  const [lastIcollectSyncAt, setLastIcollectSyncAt]   = useState<string | null>(null);
   const [suggesting, setSuggesting]   = useState(false);
   const [suggestionDismissed, setSuggestionDismissed] = useState(false);
 
   // ── Load books ──────────────────────────────────────────────────────
+  // ── Save sync timestamp to user_preferences ─────────────────────────
+  async function saveSyncTimestamp(key: 'goodreads_last_sync' | 'icollect_last_sync') {
+    if (!supabase) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    const now = new Date().toISOString();
+    await supabase.from('user_preferences').upsert(
+      { user_id: session.user.id, key, value: now },
+      { onConflict: 'user_id,key' }
+    );
+    if (key === 'goodreads_last_sync') setLastGoodreadsSyncAt(now);
+    if (key === 'icollect_last_sync') setLastIcollectSyncAt(now);
+  }
+
   const loadBooks = useCallback(async () => {
     if (!supabase) return;
     setLoading(true);
-    const { data } = await supabase.from('books').select('*').order('created_at', { ascending: false });
-    if (data) setBooks(data as Book[]);
+    const [booksResult, grSync, icSync] = await Promise.all([
+      supabase.from('books').select('*').order('created_at', { ascending: false }),
+      supabase.from('user_preferences').select('value').eq('key', 'goodreads_last_sync').maybeSingle(),
+      supabase.from('user_preferences').select('value').eq('key', 'icollect_last_sync').maybeSingle(),
+    ]);
+    if (booksResult.data) setBooks(booksResult.data as Book[]);
+    if (grSync.data?.value) setLastGoodreadsSyncAt(grSync.data.value);
+    if (icSync.data?.value) setLastIcollectSyncAt(icSync.data.value);
     setLoading(false);
   }, []);
 
@@ -559,6 +581,7 @@ export default function Books() {
     }
     await loadBooks();
     setImportMsg(`Done! Added ${added} books${skipped ? `, skipped ${skipped} duplicates` : ''}.`);
+    await saveSyncTimestamp('goodreads_last_sync');
     setImporting(false);
   }
 
@@ -636,6 +659,7 @@ export default function Books() {
     }
     await loadBooks();
     setImportMsg(`Done! Added ${added} books${skipped ? `, skipped ${skipped} duplicates` : ''}.`);
+    await saveSyncTimestamp('icollect_last_sync');
     setImporting(false);
   }
 
@@ -748,6 +772,67 @@ export default function Books() {
           </div>
         ))}
       </div>
+
+      {/* Sync status + nudge banners */}
+      {(() => {
+        const NUDGE_DAYS = 14;
+        const now = Date.now();
+        const grDays = lastGoodreadsSyncAt
+          ? Math.floor((now - new Date(lastGoodreadsSyncAt).getTime()) / 86400000)
+          : null;
+        const icDays = lastIcollectSyncAt
+          ? Math.floor((now - new Date(lastIcollectSyncAt).getTime()) / 86400000)
+          : null;
+        const grNudge = grDays === null || grDays >= NUDGE_DAYS;
+        const icNudge = icDays === null || icDays >= NUDGE_DAYS;
+        if (!grNudge && !icNudge) return (
+          <div style={{ display: 'flex', gap: 16, fontSize: 12, color: 'var(--muted)', margin: '0 0 4px', flexWrap: 'wrap' }}>
+            {lastGoodreadsSyncAt && <span>📚 Goodreads synced {grDays === 0 ? 'today' : `${grDays}d ago`}</span>}
+            {lastIcollectSyncAt && <span>📖 iCollect synced {icDays === 0 ? 'today' : `${icDays}d ago`}</span>}
+          </div>
+        );
+        return (
+          <section className="panel" style={{ borderLeft: '3px solid var(--amber, #D97706)', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13 }}>
+              <RefreshCw size={14} style={{ color: 'var(--amber, #D97706)' }} />
+              Time to sync your library
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 13 }}>
+              {grNudge && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ color: 'var(--muted)' }}>
+                    Goodreads: {grDays === null ? 'never synced' : `${grDays} days ago`}
+                  </span>
+                  <label className="btn ghost tiny" style={{ cursor: 'pointer' }}>
+                    <Upload size={12} /> Import now
+                    <input type="file" accept=".csv" style={{ display: 'none' }}
+                      onChange={e => { const f = e.target.files?.[0]; if (f) { setShowImport(true); handleGoodreadsImport(f); } }} />
+                  </label>
+                </div>
+              )}
+              {icNudge && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ color: 'var(--muted)' }}>
+                    iCollect: {icDays === null ? 'never synced' : `${icDays} days ago`}
+                  </span>
+                  <label className="btn ghost tiny" style={{ cursor: 'pointer' }}>
+                    <Upload size={12} /> Import now
+                    <input type="file" accept=".csv" style={{ display: 'none' }}
+                      onChange={e => { const f = e.target.files?.[0]; if (f) { setShowImport(true); handleMergedImport(f); } }} />
+                  </label>
+                </div>
+              )}
+            </div>
+            {(lastGoodreadsSyncAt || lastIcollectSyncAt) && (
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                {lastGoodreadsSyncAt && `Goodreads last synced ${new Date(lastGoodreadsSyncAt).toLocaleDateString()}`}
+                {lastGoodreadsSyncAt && lastIcollectSyncAt && ' · '}
+                {lastIcollectSyncAt && `iCollect last synced ${new Date(lastIcollectSyncAt).toLocaleDateString()}`}
+              </div>
+            )}
+          </section>
+        );
+      })()}
 
       {/* Goodreads import status */}
       {showImport && (
