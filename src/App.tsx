@@ -4,7 +4,7 @@ import {
   Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen
+  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
@@ -479,6 +479,7 @@ function App() {
   const [mode, setMode] = useState<Mode>('home');
 
   // ── Dark mode ──
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     try { return localStorage.getItem('kh-dark-mode') === 'true'; } catch { return false; }
   });
@@ -1565,17 +1566,24 @@ Kaylee`;
         </div>
       </header>
       <div className="main">
-        <aside className="sidebar">
+        <button
+          className={`sidebar-toggle ${sidebarOpen ? 'open' : ''}`}
+          onClick={() => setSidebarOpen(o => !o)}
+          title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+        >
+          {sidebarOpen ? <XIcon size={14} /> : <Menu size={14} />}
+        </button>
+        <aside className={`sidebar${sidebarOpen ? '' : ' collapsed'}`}>
           <div className="nav-label">{activeRole === 'limited' ? 'Home' : mode === 'home' ? 'Home' : 'Work'}</div>
           {navItems.map(([id, label, Icon]) => (
-            <button key={id} className={`nav-item ${page === id ? 'active' : ''}`} onClick={() => setPage(id)}>
+            <button key={id} className={`nav-item ${page === id ? 'active' : ''}`} onClick={() => { setPage(id); if (window.innerWidth < 900) setSidebarOpen(false); }}>
               <Icon size={16} /><span>{label}</span>{activeRole === 'limited' && id !== 'dashboard' && permissionFor(id).access_level !== 'edit' && <Lock size={13} className="nav-lock" />}
             </button>
           ))}
           {activeRole === 'admin' && (
             <>
               <div className="nav-label">Admin</div>
-              <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPage('settings')}><Settings size={16} /><span>Settings</span></button>
+              <button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => { setPage('settings'); if (window.innerWidth < 900) setSidebarOpen(false); }}><Settings size={16} /><span>Settings</span></button>
             </>
           )}
           <div className="side-note"><strong>{activeRole === 'limited' ? 'Adam home mode' : mode === 'home' ? 'Canton tenant mode' : 'FERPA-safe mode'}</strong><p>{activeRole === 'limited' ? 'Home side only. Kaylee controls view/edit access by section.' : mode === 'home' ? 'Tenant-only suggestions. Adam access controlled in Settings.' : 'First name/nickname only. Clipboard copy only.'}</p></div>
