@@ -437,6 +437,29 @@ export default function Books() {
   }
 
   // ── iCollect CSV import ─────────────────────────────────────────────
+  function fixEncoding(text: string): string {
+    return text
+      .replace(/â€™/g, "'").replace(/â€˜/g, "'")
+      .replace(/â€œ/g, '"').replace(/â€/g, '"')
+      .replace(/â€"/g, '—').replace(/â€"/g, '–')
+      .replace(/â€¦/g, '…').replace(/Â/g, '')
+      .trim();
+  }
+
+  function convertAuthor(raw: string): string {
+    if (!raw) return '';
+    raw = fixEncoding(raw);
+    const parts = raw.split(',').map(p => p.trim());
+    if (parts.length === 2) return `${parts[1]} ${parts[0]}`;
+    if (parts.length === 4) return `${parts[1]} ${parts[0]} & ${parts[3]} ${parts[2]}`;
+    if (parts.length > 2 && parts.length % 2 === 0) {
+      const authors = [];
+      for (let i = 0; i < parts.length; i += 2) authors.push(`${parts[i+1]} ${parts[i]}`);
+      return authors.join(' & ');
+    }
+    return raw;
+  }
+
   async function handleiCollectImport(file: File) {
     if (!supabase) return;
     setImporting(true);
@@ -464,7 +487,7 @@ export default function Books() {
         cur += ch;
       }
       const get = (i: number) => i >= 0 ? (cells[i] ?? '').replace(/"/g,'').trim() : '';
-      const title = get(tIdx);
+      const title = fixEncoding(get(tIdx));
       if (!title) continue;
       const exists = books.find(b => b.title.toLowerCase() === title.toLowerCase());
       if (exists) { skipped++; continue; }
@@ -473,8 +496,8 @@ export default function Books() {
       await supabase.from('books').insert({
         user_id: session.user.id,
         title,
-        author: get(aIdx) || null,
-        genre: get(gIdx) || null,
+        author: convertAuthor(get(aIdx)) || null,
+        genre: fixEncoding(get(gIdx).split(',')[0]) || null,
         isbn: get(isbnIdx) || null,
         page_count: isNaN(pgRaw) ? null : pgRaw,
         rating: isNaN(ratingRaw) || ratingRaw === 0 ? null : ratingRaw,
