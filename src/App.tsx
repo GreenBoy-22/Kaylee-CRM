@@ -2123,7 +2123,7 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
             ? <div className="brief-item" style={{ color: 'var(--muted)' }}>All clear — nothing due today.</div>
             : myChores.map(c => (
               <div key={c.id} className="brief-item" style={{ borderLeft: c.due_date && c.due_date < today ? '3px solid var(--red)' : '3px solid var(--green)' }}>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{c.title}</div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
                 {c.due_date && c.due_date < today && <div style={{ fontSize: 11, color: 'var(--red)' }}>Overdue · {c.due_date}</div>}
               </div>
             ))

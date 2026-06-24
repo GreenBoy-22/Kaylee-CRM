@@ -70,8 +70,8 @@ export function useDailyBriefing(role: Role = 'admin') {
             const { data: choreTasks } = await supabase.from('chore_tasks').select('title, due_date, is_completed').eq('assigned_to', adamUser.id).eq('is_completed', false);
             const overdue  = (choreTasks ?? []).filter((c: any) => c.due_date && c.due_date < todayKey);
             const dueToday = (choreTasks ?? []).filter((c: any) => c.due_date === todayKey);
-            if (overdue.length > 0) generated.push({ id: 'adam-chores-overdue', text: `${overdue.length} overdue chore${overdue.length > 1 ? 's' : ''}: ${overdue.map((c: any) => c.title).join(', ')}.`, severity: 'urgent' });
-            if (dueToday.length > 0) generated.push({ id: 'adam-chores-today', text: `${dueToday.length} chore${dueToday.length > 1 ? 's' : ''} due today: ${dueToday.map((c: any) => c.title).join(', ')}.`, severity: 'info' });
+            if (overdue.length > 0) generated.push({ id: 'adam-chores-overdue', text: `${overdue.length} overdue chore${overdue.length > 1 ? 's' : ''}: ${overdue.map((c: any) => c.name).join(', ')}.`, severity: 'urgent' });
+            if (dueToday.length > 0) generated.push({ id: 'adam-chores-today', text: `${dueToday.length} chore${dueToday.length > 1 ? 's' : ''} due today: ${dueToday.map((c: any) => c.name).join(', ')}.`, severity: 'info' });
             if (overdue.length === 0 && dueToday.length === 0) generated.push({ id: 'adam-chores-clear', text: 'No chores assigned to you today.', severity: 'info' });
           }
 
