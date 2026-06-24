@@ -88,7 +88,6 @@ function eventDateKeys(event: GCalEvent): string[] {
     return [dateKey(new Date(event.start))];
   }
   const keys: string[] = [];
-  // All-day start/end arrive as "YYYY-MM-DD"; parse at midnight local time.
   const start = new Date(event.start + (event.start.length === 10 ? 'T00:00:00' : ''));
   const end = new Date(event.end + (event.end.length === 10 ? 'T00:00:00' : ''));
   const cursor = new Date(start);
@@ -98,7 +97,6 @@ function eventDateKeys(event: GCalEvent): string[] {
     cursor.setDate(cursor.getDate() + 1);
     guard++;
   }
-  // Fallback: always include at least the start day.
   if (keys.length === 0) keys.push(dateKey(start));
   return keys;
 }
@@ -116,10 +114,6 @@ export interface DaySummary {
   busyLevel: BusyLevel;
 }
 
-/**
- * Builds a map of date-key -> DaySummary for every day that has at least
- * one event or chore in the provided data.
- */
 export function summarizeByDay(
   events: GCalEvent[],
   chores: GCalChore[]
@@ -140,7 +134,6 @@ export function summarizeByDay(
     for (const key of keys) {
       const entry = ensure(key);
       entry.events.push(event);
-      // All-day events are reminders, not scheduled time - excluded from busy math.
       if (!event.allDay) {
         entry.busyHours += hoursBetween(event.start, event.end);
       }
@@ -168,7 +161,7 @@ interface UseGoogleCalendarDataOptions {
   daysBack?: number;
 }
 
-const AUTO_REFRESH_MS = 6 * 60 * 60 * 1000; // 6 hours - matches the 4x/day background sync
+const AUTO_REFRESH_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 export function useGoogleCalendarData(options: UseGoogleCalendarDataOptions = {}) {
   const { daysForward = 60, daysBack = 14 } = options;
@@ -178,29 +171,34 @@ export function useGoogleCalendarData(options: UseGoogleCalendarDataOptions = {}
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
 
   // Reads the background-synced snapshot from google_calendar_cache.
-  // This is fast (no live Google API call) and reflects whatever the
-  // 4x/day cron sync last fetched.
+  // Falls back to any household member's cache if the current user has none
+  // (e.g. Adam viewing Kaylee's calendar data).
   const fetchFromCache = useCallback(async (): Promise<boolean> => {
     if (!hasSupabase || !supabase) return false;
     const { data: sessionData } = await supabase.auth.getSession();
     const userId = sessionData.session?.user?.id;
     if (!userId) return false;
 
-    const { data: cacheRow, error } = await supabase
-     const { data: cache } = await supabase
-  .from('google_calendar_cache')
-  .select('*')
-  .eq('user_id', userId)
-  .maybeSingle();
-
-// Fall back to any household cache if user has none (Adam viewing Kaylee's calendar)
-const { data: finalCache } = cache 
-  ? { data: cache }
-  : await supabase.from('google_calendar_cache').select('*').order('updated_at', { ascending: false }).limit(1).maybeSingle();
+    // First try the current user's own cache
+    const { data: ownCache } = await supabase
+      .from('google_calendar_cache')
+      .select('*')
+      .eq('user_id', userId)
       .maybeSingle();
 
-    if (error || !cacheRow) return false;
+    // Fall back to any household member's cache (Adam sees Kaylee's calendar)
+    let cacheRow = ownCache;
+    if (!cacheRow) {
+      const { data: householdCache } = await supabase
+        .from('google_calendar_cache')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      cacheRow = householdCache;
+    }
 
+    if (!cacheRow) return false;
     if (cacheRow.sync_status === 'never') return false;
 
     setData({
@@ -215,9 +213,6 @@ const { data: finalCache } = cache
     return true;
   }, []);
 
-  // Live fetch via the edge function - used as a fallback when there's no
-  // cache yet (first-ever connect, before the cron has run) and as the
-  // explicit manual "refresh" action so the button always feels responsive.
   const fetchLive = useCallback(
     async (isRefresh = false) => {
       if (isRefresh) setRefreshing(true);
@@ -261,8 +256,6 @@ const { data: finalCache } = cache
     [daysForward, daysBack]
   );
 
-  // Initial load: try the cache first (fast), fall back to a live fetch if
-  // nothing's been synced yet.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -274,9 +267,7 @@ const { data: finalCache } = cache
         setLoading(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -288,9 +279,6 @@ const { data: finalCache } = cache
     }
   }, [fetchLive]);
 
-  // Auto-refresh every 6 hours while the tab is open, matching the
-  // background sync cadence (4x/day) so an open tab never drifts far
-  // from what's been cached.
   useEffect(() => {
     const interval = setInterval(() => {
       fetchFromCache();
@@ -324,7 +312,7 @@ const { data: finalCache } = cache
     data,
     daySummaries,
     syncedAt,
-    refresh: () => fetchLive(true), // manual refresh button forces a live Google fetch
+    refresh: () => fetchLive(true),
     connect,
     dateKeyOf: dateKey,
   };
