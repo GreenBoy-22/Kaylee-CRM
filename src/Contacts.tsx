@@ -390,7 +390,8 @@ export default function Contacts() {
               importantDates: row.important_dates ?? [],
               notes: row.notes ?? null,
               organization: row.organization ?? null,
-              title: row.title ?? null,
+              jobTitle: row.job_title ?? null,
+              labels: row.labels ?? [],
             }));
             setContacts(contactsFromCache);
             setLoadState('loaded');
@@ -427,7 +428,8 @@ export default function Contacts() {
             important_dates: c.importantDates ?? null,
             notes: c.notes ?? null,
             organization: c.organization ?? null,
-            title: c.title ?? null,
+            job_title: c.jobTitle ?? null,
+            labels: c.labels ?? [],
             updated_at: new Date().toISOString(),
           }));
           // Upsert in batches of 100
