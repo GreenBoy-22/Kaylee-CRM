@@ -856,3 +856,264 @@ th { font-size: 10.5px !important; }
     overflow: visible !important;
   }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════
+   PWA + MOBILE RESPONSIVE LAYOUT
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Safe area insets for notched phones (iPhone X+) */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --bottom-nav-height: 56px;
+}
+
+/* ── Bottom nav bar (mobile only) ── */
+.mobile-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* App shell: full viewport, no overflow */
+  .app-shell {
+    height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  /* Hide desktop sidebar on mobile */
+  .sidebar {
+    display: none !important;
+  }
+
+  /* Hide sidebar toggle on mobile */
+  .sidebar-toggle {
+    display: none !important;
+  }
+
+  /* Topbar: slimmer on mobile */
+  .topbar {
+    min-height: 48px !important;
+    padding: 6px 12px !important;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  /* Hide mode toggle text on small screens */
+  .toggle-wrap button span { display: none; }
+  .toggle-wrap button { padding: 6px 8px !important; }
+
+  /* Main: full height minus topbar and bottom nav */
+  .main {
+    flex-direction: column !important;
+    height: calc(100dvh - 48px - var(--bottom-nav-height) - var(--safe-bottom)) !important;
+    overflow: hidden !important;
+  }
+
+  /* Content: scrolls internally, padded for bottom nav */
+  .content {
+    padding: 10px 12px !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    flex: 1 !important;
+  }
+
+  /* Bottom navigation bar */
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: calc(var(--bottom-nav-height) + var(--safe-bottom));
+    padding-bottom: var(--safe-bottom);
+    background: var(--card);
+    border-top: 1px solid var(--border);
+    z-index: 200;
+    align-items: stretch;
+    box-shadow: 0 -2px 12px rgba(0,0,0,0.08);
+  }
+
+  .mobile-bottom-nav button {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: 9.5px;
+    font-weight: 500;
+    padding: 6px 2px;
+    cursor: pointer;
+    transition: color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-bottom-nav button.active {
+    color: var(--purple);
+  }
+
+  .mobile-bottom-nav button.active svg {
+    stroke: var(--purple);
+  }
+
+  .mobile-bottom-nav .more-btn {
+    position: relative;
+  }
+
+  /* More menu drawer */
+  .mobile-more-drawer {
+    position: fixed;
+    bottom: calc(var(--bottom-nav-height) + var(--safe-bottom));
+    left: 0;
+    right: 0;
+    background: var(--card);
+    border-top: 1px solid var(--border);
+    border-radius: 16px 16px 0 0;
+    padding: 12px 8px;
+    z-index: 199;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.12);
+    animation: slideUp 0.2s ease;
+  }
+
+  @keyframes slideUp {
+    from { transform: translateY(100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .mobile-more-drawer button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 10px 6px;
+    border: none;
+    background: var(--surface-1);
+    border-radius: 10px;
+    color: var(--text);
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-more-drawer button.active {
+    background: var(--purple-bg);
+    color: var(--purple-dark);
+  }
+
+  .mobile-more-drawer-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 198;
+    background: rgba(0,0,0,0.3);
+  }
+
+  /* Make panels full-height friendly on mobile */
+  .panel {
+    max-height: none !important;
+    overflow: visible !important;
+    border-radius: 10px !important;
+  }
+
+  .table-card {
+    max-height: none !important;
+    overflow-x: auto !important;
+  }
+
+  .student-detail-pane {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* Stats row: 2 columns on mobile */
+  .stats-row {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Form grid: single column */
+  .form-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Students: single column */
+  .students-crm-layout {
+    grid-template-columns: 1fr !important;
+  }
+  .student-scroll-list {
+    max-height: 260px !important;
+  }
+
+  /* Health panel: single column */
+  .health-panel {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Quick facts: 2 cols */
+  .quick-facts {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  .quick-facts-goal {
+    grid-column: span 2 !important;
+  }
+
+  /* Page header: stack */
+  .page-header {
+    flex-direction: column !important;
+  }
+  .page-header .actions {
+    justify-content: flex-start !important;
+  }
+
+  /* Mentor grid: single column */
+  .mentor-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Bigger tap targets */
+  .btn {
+    min-height: 36px !important;
+    padding: 8px 12px !important;
+  }
+
+  .nav-item, .qty-button {
+    min-height: 36px !important;
+  }
+
+  /* Calendar: smaller cells */
+  .gcal-month-grid {
+    gap: 2px !important;
+  }
+  .gcal-day-cell {
+    min-height: 40px !important;
+  }
+
+  /* Grid two: single column */
+  .grid.two {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Dark mode bottom nav */
+[data-theme="dark"] .mobile-bottom-nav {
+  background: var(--card);
+  border-top-color: var(--border);
+}
+[data-theme="dark"] .mobile-more-drawer {
+  background: var(--card);
+  border-top-color: var(--border);
+}
+[data-theme="dark"] .mobile-more-drawer button {
+  background: var(--surface-2);
+  color: var(--text);
+}

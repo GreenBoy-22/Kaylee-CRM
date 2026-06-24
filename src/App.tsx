@@ -4,7 +4,7 @@ import {
   Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon
+  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
@@ -480,6 +480,7 @@ function App() {
 
   // ── Dark mode ──
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [showMoreDrawer, setShowMoreDrawer] = useState(false);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     try { return localStorage.getItem('kh-dark-mode') === 'true'; } catch { return false; }
   });
@@ -1612,6 +1613,62 @@ Kaylee`;
           {page === 'settings' && activeRole === 'admin' && <SettingsPage permissions={permissions} updatePermission={updatePermission} />}
         </main>
       </div>
+    </div>
+
+      {/* Mobile bottom navigation */}
+      {activeRole === 'admin' && (
+        <>
+          {showMoreDrawer && (
+            <>
+              <div className="mobile-more-drawer-overlay" onClick={() => setShowMoreDrawer(false)} />
+              <div className="mobile-more-drawer">
+                {(mode === 'home' ? homeNav : workNav)
+                  .slice(5)
+                  .filter(([id]) => canView(id as Page))
+                  .map(([id, label, Icon]) => (
+                    <button
+                      key={id}
+                      className={page === id ? 'active' : ''}
+                      onClick={() => { setPage(id as Page); setShowMoreDrawer(false); }}
+                    >
+                      <Icon size={20} />
+                      {label}
+                    </button>
+                  ))}
+                <button
+                  className={page === 'settings' ? 'active' : ''}
+                  onClick={() => { setPage('settings'); setShowMoreDrawer(false); }}
+                >
+                  <Settings size={20} />
+                  Settings
+                </button>
+              </div>
+            </>
+          )}
+          <nav className="mobile-bottom-nav">
+            {(mode === 'home' ? homeNav : workNav)
+              .slice(0, 4)
+              .filter(([id]) => canView(id as Page))
+              .map(([id, label, Icon]) => (
+                <button
+                  key={id}
+                  className={page === id ? 'active' : ''}
+                  onClick={() => { setPage(id as Page); setShowMoreDrawer(false); }}
+                >
+                  <Icon size={22} />
+                  {label.split(' ')[0]}
+                </button>
+              ))}
+            <button
+              className={`more-btn ${showMoreDrawer ? 'active' : ''}`}
+              onClick={() => setShowMoreDrawer(v => !v)}
+            >
+              <MoreHorizontal size={22} />
+              More
+            </button>
+          </nav>
+        </>
+      )}
     </div>
   );
 }
