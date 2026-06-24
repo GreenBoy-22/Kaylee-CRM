@@ -1613,7 +1613,6 @@ Kaylee`;
           {page === 'settings' && activeRole === 'admin' && <SettingsPage permissions={permissions} updatePermission={updatePermission} />}
         </main>
       </div>
-    </div>
 
       {/* Mobile bottom navigation */}
       {activeRole === 'admin' && (
