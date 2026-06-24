@@ -531,7 +531,7 @@ export default function Contacts() {
             ? <p style={{ color: 'var(--muted)', fontSize: 13 }}>No contact reminders set yet.</p>
             : remindersWithContacts.map(r => (
               <div key={r.id} className="brief-item" style={{
-                borderLeft: `3px solid ${r.next_due && r.next_due <= today ? 'var(--amber)' : 'var(--green)'}`,
+                borderLeft: `3px solid ${r.next_due_at && r.next_due_at <= today ? 'var(--amber)' : 'var(--green)'}`,
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center'
               }}>
                 <div>
@@ -540,8 +540,8 @@ export default function Contacts() {
                     {r.reminder_type} · every {r.frequency}
                   </div>
                 </div>
-                <span style={{ fontSize: 11, color: r.next_due && r.next_due <= today ? 'var(--amber)' : 'var(--muted)' }}>
-                  {r.next_due && r.next_due <= today ? 'Due now' : r.next_due ? `Next: ${r.next_due}` : ''}
+                <span style={{ fontSize: 11, color: r.next_due_at && r.next_due_at <= today ? 'var(--amber)' : 'var(--muted)' }}>
+                  {r.next_due_at && r.next_due_at <= today ? 'Due now' : r.next_due_at ? `Next: ${r.next_due_at}` : ''}
                 </span>
               </div>
             ))
