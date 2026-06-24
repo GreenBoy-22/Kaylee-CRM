@@ -479,7 +479,13 @@ function App() {
   const [mode, setMode] = useState<Mode>('home');
 
   // ── Dark mode ──
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem('kh-sidebar-open') !== 'false'; } catch { return true; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem('kh-sidebar-open', String(sidebarOpen)); } catch {}
+  }, [sidebarOpen]);
   const [showMoreDrawer, setShowMoreDrawer] = useState(false);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     try { return localStorage.getItem('kh-dark-mode') === 'true'; } catch { return false; }

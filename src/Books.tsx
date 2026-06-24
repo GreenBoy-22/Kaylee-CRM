@@ -249,7 +249,9 @@ async function getAISuggestion(
     `"${b.title}" by ${b.author ?? 'unknown'} (${b.genre ?? (b.categories?.[0] ?? 'unknown genre')})`
   ).join(', ') || 'nothing currently';
 
-  const shelf = unreadOwned.map((b, i) =>
+  // Limit shelf to 50 books to keep prompt size reasonable
+  const shelfSample = unreadOwned.slice(0, 50);
+  const shelf = shelfSample.map((b, i) =>
     `${i + 1}. "${b.title}" by ${b.author ?? 'unknown'} — genre: ${b.genre ?? (b.categories?.[0] ?? 'unknown')}`
   ).join('\n');
 
@@ -264,24 +266,35 @@ ${moodInstruction}
 Here are the unread books they already own (choose ONLY from this list):
 ${shelf}
 
-Reply with JSON only, no markdown:
-{"index": <1-based index from the list>, "reason": "<one warm, specific sentence explaining why this book next>"}`;
+Reply with JSON only, no markdown, no explanation:
+{"index": <1-based index from the list>, "reason": "<one warm specific sentence explaining why this book next>"}`;
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 200,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
+    // Call via Supabase edge function to keep the API key server-side
+    const { supabase } = await import('./lib/supabase');
+    if (!supabase) return null;
+    const { data: sessionData } = await supabase.auth.getSession();
+    const jwt = sessionData.session?.access_token;
+    if (!jwt) return null;
+
+    const resp = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-book-suggest`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${jwt}`,
+        },
+        body: JSON.stringify({ prompt }),
+      }
+    );
+
+    if (!resp.ok) return null;
     const data = await resp.json();
-    const text = data.content?.[0]?.text ?? '';
+    const text = data.text ?? '';
     const clean = text.replace(/```json|```/g, '').trim();
     const parsed = JSON.parse(clean);
-    const book = unreadOwned[parsed.index - 1];
+    const book = shelfSample[parsed.index - 1];
     if (!book) return null;
     return { book, reason: parsed.reason };
   } catch {

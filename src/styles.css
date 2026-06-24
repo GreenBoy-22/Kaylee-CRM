@@ -531,332 +531,54 @@ td small { display: block; margin-top: 2px; color: var(--muted); }
 }
 
 
+
 /* ═══════════════════════════════════════════════════════════════
-   DENSITY + INTERNAL SCROLL PASS
-   Every tab's panels scroll internally so the page never scrolls.
-   Panels that are "containers" (stats rows, toolbars, headers)
-   are excluded from height caps via .no-scroll or stat-card.
+   TARGETED SCROLL — only where explicitly wanted
    ═══════════════════════════════════════════════════════════════ */
 
-/* ── Make page-level elements smaller globally ── */
-h1 { font-size: 16px !important; margin: 0 0 2px !important; }
-h2 { font-size: 13px !important; margin: 0 0 6px !important; }
-h3 { font-size: 12.5px !important; margin: 0 0 4px !important; }
-h4 { font-size: 12px !important; margin: 0 0 4px !important; }
-
-/* ── Stats row: 3-line compact cards ── */
-.stat-card {
-  padding: 8px 10px !important;
-}
-.stat-label {
-  font-size: 10px !important;
-}
-.stat-val {
-  font-size: 18px !important;
-  margin-top: 1px !important;
-}
-.stat-sub {
-  font-size: 10px !important;
-}
-
-/* ── All panels: compact padding ── */
-.stat-card, .panel, .table-card, .day-card {
-  padding: 10px 12px !important;
-  border-radius: 10px !important;
-  margin-bottom: 8px !important;
-}
-
-/* ── Scrollable panels: cap height so page never scrolls ──
-   Panels get an internal scroll. The cap is relative to viewport
-   so it works across screen sizes. Stat cards, the gcal shell,
-   and panels explicitly marked .no-scroll are exempt. ── */
-
-.panel {
-  max-height: calc((100vh - 120px) / 2.1);
+/* Jules: grooming history table scrolls, status stays visible */
+.jules-groom-history {
+  max-height: 320px;
   overflow-y: auto;
 }
 
-/* Exempt short panels that should never scroll */
-.stat-card,
-.panel.no-scroll,
-.page-header,
-.toggle-wrap,
-.view-toggle,
-.stats-row {
-  max-height: none !important;
-  overflow: visible !important;
-}
-
-/* Full-height panels for calendar, migraine log form, students */
-.gcal-shell,
-.panel.full-height,
-.gcal-today-card {
-  max-height: none !important;
-  overflow: visible !important;
-}
-
-/* Jules: profile panel (stats cards) should not scroll */
-.stats-row .stat-card {
-  max-height: none !important;
-  overflow: visible !important;
-}
-
-/* Contacts list — tall scrollable */
-.panel.contacts-list {
-  max-height: calc(100vh - 160px) !important;
-}
-
-/* Library grid — taller */
-.panel.library-panel {
-  max-height: calc(100vh - 200px) !important;
-}
-
-/* Budget table panel */
-.table-card {
-  max-height: calc((100vh - 120px) / 1.5) !important;
-  overflow-y: auto !important;
-  overflow-x: auto !important;
-}
-
-/* ── Students two-column layout ── */
-.student-scroll-list {
-  max-height: calc(100vh - 175px) !important;
-}
-
-.student-detail-pane {
-  max-height: calc(100vh - 175px);
+/* Jules: medical history table scrolls, vaccine status stays visible */
+.jules-medical-history {
+  max-height: 320px;
   overflow-y: auto;
 }
 
-.student-top-zone {
-  max-height: none !important;
-  overflow: visible !important;
+/* Contacts: full page, no scroll boxes — natural page flow */
+/* Library: full page, natural flow */
+/* Everything else: natural page flow, no max-height caps */
+
+/* ── Dashboard layout: side-by-side panels like the screenshot ── */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-/* ── Brief items: denser ── */
-.brief-item {
-  padding: 5px 8px !important;
-  font-size: 12px !important;
-  margin-bottom: 4px !important;
-  border-radius: 6px !important;
+.dashboard-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-/* ── Panel head: tighter ── */
-.panel-head {
-  margin-bottom: 6px !important;
-  padding-bottom: 4px !important;
-}
-
-/* ── Form grid: tighter ── */
-.form-grid {
-  gap: 6px !important;
-}
-
-/* ── Buttons: smaller ── */
-.btn {
-  padding: 5px 9px !important;
-  font-size: 12px !important;
-  border-radius: 7px !important;
-  gap: 4px !important;
-}
-.btn.tiny {
-  padding: 3px 6px !important;
-  font-size: 11px !important;
-  margin-top: 3px !important;
-}
-
-/* ── Inputs: shorter ── */
-input:not([type="checkbox"]):not([type="radio"]):not([type="date"]):not([type="time"]):not([type="month"]) {
-  padding: 6px 9px !important;
-  font-size: 12.5px !important;
-  border-radius: 7px !important;
-}
-select {
-  padding: 5px 8px !important;
-  font-size: 12.5px !important;
-  border-radius: 7px !important;
-}
-textarea {
-  min-height: 60px !important;
-  padding: 6px 9px !important;
-  font-size: 12.5px !important;
-  margin: 4px 0 !important;
-}
-
-/* ── Table: denser rows ── */
-th, td {
-  padding: 5px 8px !important;
-  font-size: 11.5px !important;
-}
-th { font-size: 10.5px !important; }
-
-/* ── Nav items: tighter ── */
-.nav-item {
-  padding: 5px 10px !important;
-  font-size: 12px !important;
-  gap: 6px !important;
-}
-.nav-label {
-  margin: 6px 0 3px !important;
-  font-size: 9.5px !important;
-}
-.side-note, .sync-note {
-  margin: 8px 8px !important;
-  padding: 6px 8px !important;
-  font-size: 10.5px !important;
-  border-radius: 8px !important;
-}
-
-/* ── Page header: minimal ── */
-.page-header {
-  margin-bottom: 8px !important;
-  gap: 8px !important;
-}
-
-/* ── Grid gaps ── */
-.grid.two { gap: 8px !important; }
-.stats-row { gap: 6px !important; margin-bottom: 8px !important; }
-
-/* ── Topbar slim ── */
-.topbar {
-  min-height: 44px !important;
-  padding: 4px 12px !important;
-}
-.logo-mark {
-  width: 26px !important;
-  height: 26px !important;
-  font-size: 11px !important;
-}
-.role-pill {
-  padding: 4px 8px !important;
-  font-size: 11px !important;
-}
-.toggle-wrap button {
-  padding: 5px 10px !important;
-  font-size: 12px !important;
-}
-.toggle-wrap {
-  padding: 3px !important;
-  gap: 3px !important;
-}
-
-/* ── Sidebar toggle adjust for slimmer topbar ── */
-.sidebar-toggle { top: 52px !important; }
-.sidebar-toggle.open { left: 206px !important; }
-
-/* ── Sidebar narrower ── */
-.sidebar { width: 195px !important; min-width: 195px !important; }
-
-/* ── gcal calendar: compact ── */
-.gcal-shell { padding: 0 !important; }
-.gcal-toolbar { padding: 4px 0 8px !important; }
-.gcal-month-grid {
-  gap: 3px !important;
-}
-.gcal-day-cell {
-  min-height: 52px !important;
-  padding: 3px !important;
-  border-radius: 6px !important;
-}
-.gcal-day-num { font-size: 10px !important; }
-.gcal-day-event-chip { font-size: 9px !important; padding: 1px 4px !important; }
-.gcal-day-detail { margin-top: 8px !important; padding-top: 8px !important; }
-.gcal-today-item { padding: 6px 10px !important; margin-bottom: 4px !important; }
-.gcal-today-item-time { font-size: 11px !important; min-width: 55px !important; }
-.gcal-today-item-title { font-size: 12.5px !important; }
-.gcal-today-item-loc { font-size: 10.5px !important; }
-.gcal-legend { gap: 8px !important; font-size: 10.5px !important; margin-top: 6px !important; }
-
-/* ── Quick facts grid ── */
-.quick-facts {
-  gap: 6px !important;
-  margin: 8px 0 2px !important;
-}
-.quick-facts > div {
-  padding: 6px 8px !important;
-  border-radius: 8px !important;
-}
-.quick-facts span { font-size: 9.5px !important; }
-.quick-facts strong { font-size: 12.5px !important; }
-
-/* ── Health panel ── */
-.health-panel { gap: 8px !important; margin: 8px 0 !important; }
-.health-score { padding: 10px !important; }
-.health-score strong { font-size: 30px !important; }
-.health-bars { padding: 8px !important; gap: 7px !important; }
-.health-insights > div { padding: 7px 9px !important; }
-
-/* ── Touchpoint calendar ── */
-.touchpoint-calendar { padding: 8px !important; }
-
-/* ── Profile grid ── */
-.profile-grid > div { padding: 7px 9px !important; }
-
-/* ── Timeline items ── */
-.timeline-item-collapsible {
-  padding: 6px 9px !important;
-  margin-bottom: 4px !important;
-}
-
-/* ── Migraine tracker specific ── */
-.gcal-view-toggle button {
-  padding: 5px 10px !important;
-  font-size: 12px !important;
-}
-
-/* ── Readonly/copy pills ── */
-.readonly-pill, .copy-pill, .risk-pill, .health-pill {
-  padding: 3px 7px !important;
-  font-size: 10.5px !important;
-}
-
-/* ── Student list items ── */
-.student-list-item {
-  padding: 7px 9px !important;
-  margin-bottom: 6px !important;
-  border-radius: 8px !important;
-}
-
-/* ── Mentor queue rows ── */
-.mentor-queue-row {
-  padding: 8px !important;
-  margin-bottom: 6px !important;
-  border-radius: 9px !important;
-}
-.queue-rank {
-  width: 22px !important;
-  height: 22px !important;
-  font-size: 11px !important;
-}
-
-/* ── Call prep cards ── */
-.call-prep-card { padding: 8px 10px !important; margin-bottom: 6px !important; }
-
-/* ── View-only banner ── */
-.view-only-banner { padding: 6px 10px !important; margin-bottom: 8px !important; font-size: 12px !important; }
-
-/* ── Permission rows ── */
-.permission-row { padding: 8px 10px !important; border-radius: 8px !important; }
-
-/* ── Next call compact ── */
-.next-call-compact { margin-top: 8px !important; padding-top: 8px !important; }
-.next-call-compact-head { margin-bottom: 4px !important; }
-
-/* ── Mobile: restore natural scroll ── */
 @media (max-width: 900px) {
-  .panel {
-    max-height: none !important;
-    overflow: visible !important;
-  }
-  .table-card {
-    max-height: none !important;
-  }
-  .student-detail-pane {
-    max-height: none !important;
-    overflow: visible !important;
-  }
+  .dashboard-grid,
+  .dashboard-grid-3 { grid-template-columns: 1fr; }
 }
 
+/* ── Students: keep scroll on the list panel only ── */
+.student-scroll-list {
+  max-height: calc(100vh - 240px);
+  overflow-y: auto;
+  position: sticky;
+  top: 0;
+}
 
 /* ═══════════════════════════════════════════════════════════════
    PWA + MOBILE RESPONSIVE LAYOUT
