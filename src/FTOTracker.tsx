@@ -11,7 +11,7 @@
 //   - Cancelled entries stay visible but are struck through and excluded from totals
 
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, X, RefreshCw, RotateCcw, Calendar, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
+import { Plus, X, RefreshCw, RotateCcw, Calendar, AlertCircle, CheckCircle2, Clock, Pencil } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -32,8 +32,9 @@ type FTOEntry = {
 
 const HOURS_PER_DAY = 8;
 
-function toDays(hours: number): string {
+function toDays(hours: number, round = false): string {
   const days = hours / HOURS_PER_DAY;
+  if (round) return `${Math.round(days)}d`;
   return days % 1 === 0 ? `${days}d` : `${days.toFixed(2)}d`;
 }
 
@@ -143,6 +144,13 @@ export default function FTOTracker() {
     await load();
   }
 
+  // ── Update entry ───────────────────────────────────────────────────────
+  async function updateEntry(id: string, patch: Partial<FTOEntry>) {
+    if (!supabase) return;
+    await supabase.from('fto_entries').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', id);
+    await load();
+  }
+
   // ── Delete ─────────────────────────────────────────────────────────────
   async function deleteEntry(id: string) {
     if (!supabase) return;
@@ -208,24 +216,24 @@ export default function FTOTracker() {
       <div className="stats-row">
         <div className="stat-card">
           <div className="stat-label">Used (rolling year)</div>
-          <div className="stat-val" style={{ color: statusColor }}>{toDays(usedTotalHours)}</div>
+          <div className="stat-val" style={{ color: statusColor }}>{toDays(usedTotalHours, true)}</div>
           <small>{toHrsLabel(usedTotalHours)} of {TARGET_HOURS}h target</small>
         </div>
         <div className="stat-card">
           <div className="stat-label">Remaining</div>
           <div className="stat-val" style={{ color: remainingDays >= 5 ? 'var(--green)' : remainingDays >= 2 ? 'var(--amber)' : 'var(--red)' }}>
-            {toDays(Math.max(0, remainingHours))}
+            {toDays(Math.max(0, remainingHours), true)}
           </div>
           <small>{toHrsLabel(Math.max(0, remainingHours))} left in window</small>
         </div>
         <div className="stat-card">
           <div className="stat-label">Vacation used</div>
-          <div className="stat-val">{toDays(usedVacHours)}</div>
+          <div className="stat-val">{toDays(usedVacHours, true)}</div>
           <small>{toHrsLabel(usedVacHours)}</small>
         </div>
         <div className="stat-card">
           <div className="stat-label">Sick used</div>
-          <div className="stat-val">{toDays(usedSickHours)}</div>
+          <div className="stat-val">{toDays(usedSickHours, true)}</div>
           <small>{toHrsLabel(usedSickHours)}</small>
         </div>
       </div>
@@ -314,8 +322,15 @@ export default function FTOTracker() {
             </h2>
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>Not counted until date arrives</span>
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 4px 6px', borderBottom: '2px solid var(--border)', fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            <span style={{ minWidth: 64 }}>Type</span>
+            <span style={{ minWidth: 170 }}>Date</span>
+            <span style={{ minWidth: 80 }}>Hours (Days)</span>
+            <span style={{ flex: 1 }}>Comment</span>
+            <span style={{ minWidth: 100, textAlign: 'right' }}>Status / Actions</span>
+          </div>
           {futureEntries.map(entry => (
-            <EntryRow key={entry.id} entry={entry} onToggleCancel={toggleCancel} onDelete={deleteEntry} isFuture />
+            <EntryRow key={entry.id} entry={entry} onToggleCancel={toggleCancel} onDelete={deleteEntry} onUpdate={updateEntry} isFuture />
           ))}
         </section>
       )}
@@ -329,11 +344,19 @@ export default function FTOTracker() {
           </h2>
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>{fmtDate(winStart)} → today</span>
         </div>
+        {/* Column headers */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 4px 6px', borderBottom: '2px solid var(--border)', fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          <span style={{ minWidth: 64 }}>Type</span>
+          <span style={{ minWidth: 170 }}>Date</span>
+          <span style={{ minWidth: 80 }}>Hours (Days)</span>
+          <span style={{ flex: 1 }}>Comment</span>
+          <span style={{ minWidth: 80, textAlign: 'right' }}>Actions</span>
+        </div>
         {usedEntries.length === 0 && (
           <div className="brief-item">No entries in the rolling window yet.</div>
         )}
         {usedEntries.map(entry => (
-          <EntryRow key={entry.id} entry={entry} onToggleCancel={toggleCancel} onDelete={deleteEntry} />
+          <EntryRow key={entry.id} entry={entry} onToggleCancel={toggleCancel} onDelete={deleteEntry} onUpdate={updateEntry} />
         ))}
       </section>
 
@@ -348,7 +371,7 @@ export default function FTOTracker() {
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>Not counted — restore if plans change back</span>
           </div>
           {cancelledEntries.map(entry => (
-            <EntryRow key={entry.id} entry={entry} onToggleCancel={toggleCancel} onDelete={deleteEntry} isCancelled />
+            <EntryRow key={entry.id} entry={entry} onToggleCancel={toggleCancel} onDelete={deleteEntry} onUpdate={updateEntry} isCancelled />
           ))}
         </section>
       )}
@@ -364,7 +387,7 @@ export default function FTOTracker() {
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>Before {fmtDate(winStart)} — no longer counted</span>
           </div>
           {pastOutOfWindow.map(entry => (
-            <EntryRow key={entry.id} entry={entry} onToggleCancel={toggleCancel} onDelete={deleteEntry} isRolledOff />
+            <EntryRow key={entry.id} entry={entry} onToggleCancel={toggleCancel} onDelete={deleteEntry} onUpdate={updateEntry} isRolledOff />
           ))}
         </section>
       )}
@@ -374,17 +397,66 @@ export default function FTOTracker() {
 
 // ── Entry row ──────────────────────────────────────────────────────────────
 
-function EntryRow({ entry, onToggleCancel, onDelete, isFuture, isCancelled, isRolledOff }: {
+function EntryRow({ entry, onToggleCancel, onDelete, onUpdate, isFuture, isCancelled, isRolledOff }: {
   entry: FTOEntry;
   onToggleCancel: (e: FTOEntry) => void;
   onDelete: (id: string) => void;
+  onUpdate: (id: string, patch: Partial<FTOEntry>) => void;
   isFuture?: boolean;
   isCancelled?: boolean;
   isRolledOff?: boolean;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [editDate, setEditDate]       = useState(entry.entry_date);
+  const [editHours, setEditHours]     = useState(String(entry.hours));
+  const [editCategory, setEditCategory] = useState<Category>(entry.category);
+  const [editComment, setEditComment] = useState(entry.comment ?? '');
+
   const color = CATEGORY_COLORS[entry.category];
   const bg    = CATEGORY_BG[entry.category];
   const dim   = isCancelled || isRolledOff;
+
+  function handleSave() {
+    onUpdate(entry.id, {
+      entry_date: editDate,
+      hours: parseFloat(editHours) || entry.hours,
+      category: editCategory,
+      comment: editComment.trim() || null,
+    });
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div style={{ padding: '10px 4px', borderBottom: '1px solid var(--border)', background: 'var(--purple-bg)', borderRadius: 8, marginBottom: 4 }}>
+        <div className="form-grid" style={{ marginBottom: 8 }}>
+          <label style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+            Date
+            <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} />
+          </label>
+          <label style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+            Hours
+            <input type="number" min="0.5" max="8" step="0.5" value={editHours} onChange={e => setEditHours(e.target.value)} />
+          </label>
+          <label style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+            Type
+            <select value={editCategory} onChange={e => setEditCategory(e.target.value as Category)}>
+              <option value="vacation">Vacation</option>
+              <option value="sick">Sick</option>
+            </select>
+          </label>
+          <label style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+            Comment
+            <input type="text" value={editComment} onChange={e => setEditComment(e.target.value)} placeholder="Optional note" />
+          </label>
+        </div>
+        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+          <button className="btn ghost tiny" onClick={() => setEditing(false)}>Cancel</button>
+          <button className="btn primary tiny" onClick={handleSave}>Save changes</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -426,6 +498,14 @@ function EntryRow({ entry, onToggleCancel, onDelete, isFuture, isCancelled, isRo
 
       {/* Actions */}
       <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+        <button
+          className="qty-button"
+          title="Edit this entry"
+          onClick={() => setEditing(true)}
+          style={{ color: 'var(--purple)' }}
+        >
+          <Pencil size={12} />
+        </button>
         <button
           className="qty-button"
           title={isCancelled ? 'Restore this entry' : 'Cancel this entry'}
