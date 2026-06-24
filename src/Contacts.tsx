@@ -370,10 +370,36 @@ export default function Contacts() {
     try {
       const googleToken = await getGoogleToken();
       if (!googleToken) {
-        // No Google token for this user (e.g. Adam) — load reminders only
-        // so they can still see the contacts Kaylee has set reminders for
+        // No Google token for this user (e.g. Adam) — load from Supabase cache
         await loadReminders();
-        setLoadState('reminders_only');
+        if (supabase) {
+          const { data: cached } = await supabase
+            .from('cached_contacts')
+            .select('*')
+            .order('display_name', { ascending: true });
+          if (cached && cached.length > 0) {
+            // Convert cached rows back to Contact shape
+            const contactsFromCache: Contact[] = (cached as any[]).map(row => ({
+              resourceName: row.resource_name,
+              displayName: row.display_name,
+              phones: row.phones ?? [],
+              emails: row.emails ?? [],
+              addresses: row.addresses ?? [],
+              photoUrl: row.photo_url ?? null,
+              birthday: row.birthday ?? null,
+              importantDates: row.important_dates ?? [],
+              notes: row.notes ?? null,
+              organization: row.organization ?? null,
+              title: row.title ?? null,
+            }));
+            setContacts(contactsFromCache);
+            setLoadState('loaded');
+          } else {
+            setLoadState('reminders_only');
+          }
+        } else {
+          setLoadState('reminders_only');
+        }
         return;
       }
       const [fetchedContacts, fetchedGroups] = await Promise.all([
@@ -384,6 +410,35 @@ export default function Contacts() {
       setGroupMap(fetchedGroups);
       await loadReminders();
       setLoadState('loaded');
+      // Cache contacts in Supabase so other household members can see them
+      if (supabase && fetchedContacts.length > 0) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const ownerId = sessionData.session?.user?.id;
+        if (ownerId) {
+          const rows = fetchedContacts.map((c: Contact) => ({
+            owner_user_id: ownerId,
+            resource_name: c.resourceName,
+            display_name: c.displayName,
+            phones: c.phones ?? null,
+            emails: c.emails ?? null,
+            addresses: c.addresses ?? null,
+            photo_url: c.photoUrl ?? null,
+            birthday: c.birthday ?? null,
+            important_dates: c.importantDates ?? null,
+            notes: c.notes ?? null,
+            organization: c.organization ?? null,
+            title: c.title ?? null,
+            updated_at: new Date().toISOString(),
+          }));
+          // Upsert in batches of 100
+          for (let i = 0; i < rows.length; i += 100) {
+            await supabase.from('cached_contacts').upsert(
+              rows.slice(i, i + 100),
+              { onConflict: 'owner_user_id,resource_name' }
+            );
+          }
+        }
+      }
     } catch (e: any) {
       if (e?.message === 'no_contacts_scope') {
         setError('Contacts permission not granted. Go to Settings → Reconnect Google Account.');
