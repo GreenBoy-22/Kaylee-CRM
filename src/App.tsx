@@ -242,6 +242,8 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'migraine', module_name: 'migraine', label: 'Migraine Tracker', default_access: 'edit' },
   { page: 'suggestions', module_name: 'home_suggestions', label: 'Home Suggestions', default_access: 'edit' },
   { page: 'budget', module_name: 'budget', label: 'Budget', default_access: 'view' },
+  { page: 'contacts', module_name: 'contacts', label: 'Contacts', default_access: 'view' },
+  { page: 'books', module_name: 'books', label: 'Library', default_access: 'view' },
   { page: 'students', module_name: 'students', label: 'Students', default_access: 'hidden' },
   { page: 'outreach', module_name: 'outreach', label: 'Outreach Drafts', default_access: 'hidden' }
 ];
