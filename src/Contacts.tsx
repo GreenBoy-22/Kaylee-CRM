@@ -48,7 +48,7 @@ type Reminder = {
   todoist_task_id: string | null;
 };
 
-type LoadState = 'idle' | 'loading' | 'loaded' | 'error' | 'no_auth';
+type LoadState = 'idle' | 'loading' | 'loaded' | 'error' | 'no_auth' | 'reminders_only';
 
 const FREQUENCIES = [
   { value: 'weekly',     label: 'Weekly' },
@@ -369,7 +369,13 @@ export default function Contacts() {
     setError(null);
     try {
       const googleToken = await getGoogleToken();
-      if (!googleToken) { setLoadState('no_auth'); return; }
+      if (!googleToken) {
+        // No Google token for this user (e.g. Adam) — load reminders only
+        // so they can still see the contacts Kaylee has set reminders for
+        await loadReminders();
+        setLoadState('reminders_only');
+        return;
+      }
       const [fetchedContacts, fetchedGroups] = await Promise.all([
         fetchGoogleContacts(googleToken),
         fetchContactGroups(googleToken),
@@ -509,6 +515,40 @@ export default function Contacts() {
 
   if (loadState === 'idle' || loadState === 'loading') {
     return <section className="panel"><div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--muted)' }}><RefreshCw size={16} className="spin" /><span>Loading contacts from Google…</span></div></section>;
+  }
+
+  if (loadState === 'reminders_only') {
+    const today = new Date().toISOString().slice(0, 10);
+    const remindersWithContacts = reminders.filter(r => r.display_name);
+    return (
+      <>
+        <div className="page-header">
+          <div><h1>Contacts</h1><p>Outreach reminders — contacts from Kaylee's account</p></div>
+        </div>
+        <section className="panel">
+          <div className="panel-head"><h2>Outreach Reminders</h2></div>
+          {remindersWithContacts.length === 0
+            ? <p style={{ color: 'var(--muted)', fontSize: 13 }}>No contact reminders set yet.</p>
+            : remindersWithContacts.map(r => (
+              <div key={r.id} className="brief-item" style={{
+                borderLeft: `3px solid ${r.next_due && r.next_due <= today ? 'var(--amber)' : 'var(--green)'}`,
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+              }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{r.display_name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                    {r.reminder_type} · every {r.frequency}
+                  </div>
+                </div>
+                <span style={{ fontSize: 11, color: r.next_due && r.next_due <= today ? 'var(--amber)' : 'var(--muted)' }}>
+                  {r.next_due && r.next_due <= today ? 'Due now' : r.next_due ? `Next: ${r.next_due}` : ''}
+                </span>
+              </div>
+            ))
+          }
+        </section>
+      </>
+    );
   }
 
   if (loadState === 'no_auth') {

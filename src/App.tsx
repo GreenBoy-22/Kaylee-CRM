@@ -1974,7 +1974,9 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
   const myChores = useMemo(() => {
     const mine = choreTasks.filter(c =>
       !c.is_completed && !c.deleted_in_todoist &&
-      (meUser ? (c.assigned_to === meUser.id || (!c.assigned_to && isKaylee)) : isKaylee)
+      (meUser
+        ? (c.assigned_to === meUser.id || !c.assigned_to)  // my assigned + all unassigned
+        : !c.assigned_to)
     );
     return computeTackleToday(mine).slice(0, 5);
   }, [choreTasks, meUser, isKaylee]);
@@ -2457,8 +2459,8 @@ function Today({ tasks, choreTasks, householdUsers, completeTask, completeChore,
 
   // My chores
   const myChoreTasks = useMemo(() => {
-    if (!meUser) return isKaylee ? choreTasks : [];
-    return choreTasks.filter(c => c.assigned_to === meUser.id || (!c.assigned_to && isKaylee));
+    if (!meUser) return choreTasks.filter(c => !c.assigned_to);
+    return choreTasks.filter(c => c.assigned_to === meUser.id || !c.assigned_to);
   }, [choreTasks, meUser, isKaylee]);
   const tackleList = useMemo(() => computeTackleToday(myChoreTasks), [myChoreTasks]);
   const shown = compact ? tackleList.slice(0, 3) : tackleList;
@@ -3388,15 +3390,22 @@ function Chores({
   // Split chores by who they're assigned to. Anything with no assignment
   // at all defaults into Kaylee's view, since unassigned Todoist tasks are
   // hers by default until she delegates them.
+  // Determine which user is "me" based on currentUserName
+  const isCurrentUserAdam = currentUserName?.toLowerCase().includes('adam');
+  const currentUserObj = isCurrentUserAdam ? adam : kaylee;
+  const otherUserObj   = isCurrentUserAdam ? kaylee : adam;
+
   const myChores = useMemo(() => {
-    if (!kaylee) return choreTasks.filter((c) => !c.assigned_to);
-    return choreTasks.filter((c) => c.assigned_to === kaylee.id || !c.assigned_to);
-  }, [choreTasks, kaylee]);
+    // "My Tasks" = assigned to me OR unassigned (shared household tasks)
+    if (!currentUserObj) return choreTasks.filter((c) => !c.assigned_to);
+    return choreTasks.filter((c) => c.assigned_to === currentUserObj.id || !c.assigned_to);
+  }, [choreTasks, currentUserObj]);
 
   const adamChores = useMemo(() => {
-    if (!adam) return [];
-    return choreTasks.filter((c) => c.assigned_to === adam.id);
-  }, [choreTasks, adam]);
+    // "Other" tab = tasks explicitly assigned to the other person
+    if (!otherUserObj) return [];
+    return choreTasks.filter((c) => c.assigned_to === otherUserObj.id);
+  }, [choreTasks, otherUserObj]);
 
   // Recently-escalated chores: were Adam's, auto-moved to Kaylee for being
   // 3+ days overdue. Surfaced as a callout at the top of "My Tasks".
