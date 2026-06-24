@@ -12,7 +12,7 @@ import GoogleCalendarToday from './GoogleCalendarToday';
 import Budget from './Budget';
 import Vehicles from './Vehicles';
 import Jules from './Jules';
-import { useDailyBriefing } from './useDailyBriefing';
+import { useDailyBriefing, type BriefingLine } from './useDailyBriefing';
 import MigraineTracker from './MigraineTracker';
 import Contacts from './Contacts';
 import Books from './Books';
@@ -1604,7 +1604,7 @@ Kaylee`;
           {!activeCanEdit && activeRole === 'limited' && page !== 'dashboard' && <ViewOnlyBanner />}
           {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} choreTasks={choreTasks} householdUsers={householdUsers} role={activeRole} setPage={setPage} />}
           {page === 'today' && <Today tasks={tasks.filter((task) => activeRole === 'admin' || task.mode === 'home')} choreTasks={choreTasks} householdUsers={householdUsers} completeTask={completeTask} completeChore={completeChore} editable={canEdit('today') && canEdit('chores')} />}
-          {page === 'briefing' && <Briefing />}
+          {page === 'briefing' && <Briefing role={activeRole} />}
           {page === 'calendar' && (mode === 'home' || activeRole === 'limited'
             ? <GoogleCalendar />
             : <WorkCalendar students={students} />
@@ -1942,12 +1942,334 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, 
     </>;
   }
 
-  return <>
-    <Header title={role === 'limited' ? 'Adam home dashboard' : mode === 'home' ? 'Home command center' : 'Work command center'} sub={role === 'limited' ? 'Home-only view. Kaylee controls which sections are editable.' : mode === 'home' ? 'Tasks, approvals, inventory, vehicles, and tenant-safe home care.' : 'FERPA-safe student workflow, GROW notes, and daily planning.'} />
-    {mode === 'home' && <GoogleCalendarToday />}
-    <Stats items={mode === 'home' ? [['Open tasks', String(tasks.filter((task) => task.status !== 'completed' && task.mode === 'home').length), 'home'], ['Adam pending', String(pending), 'approval needed'], ['Inventory', String(inventory.length), `${expiring} expiring`], ['Vehicle alerts', '4', 'critical/due']] : [['Active students', String(activeStudents.length), 'FERPA-safe'], ['Need copy', String(students.filter((s) => !s.copied).length), 'Salesforce'], ['FERPA', 'On', 'clipboard only'], ['Calls today', String(callsToday.length), 'manual now']]} />
-    <div className="grid two"><Today tasks={tasks.filter((task) => mode === 'work' ? task.mode === 'work' : task.mode === 'home').slice(0, 3)} choreTasks={mode === 'home' ? choreTasks : []} householdUsers={householdUsers} completeTask={() => undefined} completeChore={() => undefined} editable={false} compact /><Briefing compact /></div>
-  </>;
+  // ── Home dashboard: command center grid ───────────────────────────────
+  return <HomeDashboard
+    role={role}
+    tasks={tasks}
+    choreTasks={choreTasks}
+    inventory={inventory}
+    householdUsers={householdUsers}
+    setPage={setPage}
+  />;
+}
+
+// ── HomeDashboard: command center grid ─────────────────────────────────────
+function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, setPage }: {
+  role: Role;
+  tasks: TaskItem[];
+  choreTasks: ChoreTask[];
+  inventory: InventoryItem[];
+  householdUsers: HouseholdUser[];
+  setPage: (p: Page) => void;
+}) {
+  const isKaylee = role === 'admin';
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Identify users
+  const kaylee = householdUsers.find(u => u.name.toLowerCase().includes('kaylee')) ?? null;
+  const adam   = householdUsers.find(u => u.name.toLowerCase().includes('adam')) ?? null;
+  const meUser = isKaylee ? kaylee : adam;
+
+  // My chores today
+  const myChores = useMemo(() => {
+    const mine = choreTasks.filter(c =>
+      !c.is_completed && !c.deleted_in_todoist &&
+      (meUser ? (c.assigned_to === meUser.id || (!c.assigned_to && isKaylee)) : isKaylee)
+    );
+    return computeTackleToday(mine).slice(0, 5);
+  }, [choreTasks, meUser, isKaylee]);
+
+  // Supabase snapshot data
+  const [migraineToday, setMigraineToday]       = useState<null | 'yes' | 'no'>(null);
+  const [migraineSeverity, setMigraineSeverity] = useState<string>('');
+  const [currentBook, setCurrentBook]           = useState<{ title: string; author: string | null } | null>(null);
+  const [dueContacts, setDueContacts]           = useState<{ name: string; type: string }[]>([]);
+  const [vehicleAlerts, setVehicleAlerts]       = useState<{ name: string; item: string; status: string }[]>([]);
+  const [budgetToday, setBudgetToday]           = useState<{ name: string; amount: number }[]>([]);
+  const [expiringSoon, setExpiringSoon]         = useState<{ name: string; expires: string }[]>([]);
+  const [suggestionCount, setSuggestionCount]   = useState<number>(0);
+  const [julesDue, setJulesDue]                 = useState<string[]>([]);
+  const [loadingSnaps, setLoadingSnaps]         = useState(true);
+
+  useEffect(() => {
+    if (!supabase) { setLoadingSnaps(false); return; }
+    (async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData.session?.user?.id;
+      if (!userId) { setLoadingSnaps(false); return; }
+
+      await Promise.all([
+        // 1. Migraine today
+        (async () => {
+          const { data } = await supabase.from('migraine_log').select('severity, wong_baker_score').eq('entry_date', today).limit(1).maybeSingle();
+          if (data) { setMigraineToday('yes'); setMigraineSeverity(data.severity ?? ''); }
+          else setMigraineToday('no');
+        })(),
+
+        // 2. Current book
+        (async () => {
+          const { data } = await supabase.from('books').select('title, author').eq('user_id', userId).eq('status', 'reading').limit(1).maybeSingle();
+          if (data) setCurrentBook({ title: data.title, author: data.author });
+        })(),
+
+        // 3. Contacts due for outreach
+        (async () => {
+          const { data } = await supabase.from('contact_reminders')
+            .select('display_name, reminder_type, next_due')
+            .eq('user_id', userId)
+            .eq('is_done', false)
+            .lte('next_due', today)
+            .order('next_due', { ascending: true })
+            .limit(5);
+          if (data) setDueContacts(data.map((r: any) => ({ name: r.display_name, type: r.reminder_type })));
+        })(),
+
+        // 4. Vehicle alerts (from budget rules)
+        (async () => {
+          const [vehiclesRes, maintRes, rulesRes] = await Promise.all([
+            supabase.from('vehicles').select('id, name').eq('active', true),
+            supabase.from('vehicle_maintenance_log').select('vehicle_id, service_type, service_date'),
+            supabase.from('budget_recurring_rules').select('vehicle_id, name, month_of_year, months').eq('category', 'vehicle'),
+          ]);
+          const vehicles = vehiclesRes.data ?? [];
+          const maint = maintRes.data ?? [];
+          const rules = rulesRes.data ?? [];
+          const alerts: { name: string; item: string; status: string }[] = [];
+          const nowMonth = new Date().getMonth() + 1;
+          for (const v of vehicles) {
+            for (const r of rules.filter((r: any) => r.vehicle_id === v.id)) {
+              const lastDone = maint.filter((m: any) => m.vehicle_id === v.id).sort((a: any, b: any) => b.service_date.localeCompare(a.service_date))[0];
+              const months: number[] = r.months ?? (r.month_of_year ? [r.month_of_year] : []);
+              if (months.includes(nowMonth) || months.includes(nowMonth - 1)) {
+                alerts.push({ name: v.name, item: r.name, status: months.includes(nowMonth) ? 'due' : 'overdue' });
+              }
+            }
+          }
+          setVehicleAlerts(alerts.slice(0, 4));
+        })(),
+
+        // 5. Budget items due today
+        (async () => {
+          const { data } = await supabase.from('budget_recurring_rules').select('name, amount, day_of_month').eq('active', true).eq('recurrence', 'monthly_day');
+          if (data) {
+            const dom = new Date().getDate();
+            const due = (data as any[]).filter(r => r.day_of_month === dom);
+            setBudgetToday(due.map(r => ({ name: r.name, amount: r.amount })));
+          }
+        })(),
+
+        // 6. Inventory expiring soon (within 7 days)
+        (async () => {
+          const soon = new Date(); soon.setDate(soon.getDate() + 7);
+          const soonStr = soon.toISOString().slice(0, 10);
+          const items = inventory.filter(i => i.expires && i.expires <= soonStr && i.expires >= today);
+          setExpiringSoon(items.slice(0, 4).map(i => ({ name: i.name, expires: i.expires! })));
+        })(),
+
+        // 7. Home suggestions pending
+        (async () => {
+          const { count } = await supabase.from('home_suggestions').select('*', { count: 'exact', head: true }).eq('status', 'pending');
+          setSuggestionCount(count ?? 0);
+        })(),
+
+        // 8. Jules due items
+        (async () => {
+          const { data: pet } = await supabase.from('pet_info').select('id').limit(1).maybeSingle();
+          if (!pet) return;
+          const { data: med } = await supabase.from('pet_medical_log').select('item_type, service_date, recurrence_months').eq('pet_id', pet.id);
+          const { data: groom } = await supabase.from('pet_grooming_log').select('groom_date').eq('pet_id', pet.id).order('groom_date', { ascending: false }).limit(1).maybeSingle();
+          const dueDates: string[] = [];
+          if (med) {
+            for (const m of med as any[]) {
+              if (!m.recurrence_months) continue;
+              const due = new Date(m.service_date + 'T00:00:00');
+              due.setMonth(due.getMonth() + m.recurrence_months);
+              if (due <= new Date()) dueDates.push(m.item_type.replace(/_/g, ' '));
+            }
+          }
+          if (groom) {
+            const lastGroom = new Date(groom.groom_date + 'T00:00:00');
+            const nextGroom = new Date(lastGroom); nextGroom.setDate(nextGroom.getDate() + 42);
+            if (nextGroom <= new Date()) dueDates.push('grooming');
+          }
+          setJulesDue([...new Set(dueDates)].slice(0, 3));
+        })(),
+      ]);
+      setLoadingSnaps(false);
+    })();
+  }, [today, inventory]);
+
+  const greeting = isKaylee ? 'Hey Kaylee 👋' : 'Hey Adam 👋';
+  const subGreeting = `${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`;
+
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <h1>{greeting}</h1>
+          <p>{subGreeting}</p>
+        </div>
+      </div>
+
+      {/* Top row: calendar today + my tasks */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+        <div><GoogleCalendarToday /></div>
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('today')}>
+          <div className="panel-head">
+            <h2>📋 My Tasks Today</h2>
+            <span className="readonly-pill">{myChores.length} items</span>
+          </div>
+          {myChores.length === 0
+            ? <div className="brief-item" style={{ color: 'var(--muted)' }}>All clear — nothing due today.</div>
+            : myChores.map(c => (
+              <div key={c.id} className="brief-item" style={{ borderLeft: c.due_date && c.due_date < today ? '3px solid var(--red)' : '3px solid var(--green)' }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{c.title}</div>
+                {c.due_date && c.due_date < today && <div style={{ fontSize: 11, color: 'var(--red)' }}>Overdue · {c.due_date}</div>}
+              </div>
+            ))
+          }
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>View all →</div>
+        </section>
+      </div>
+
+      {/* Middle row: 4-column snapshot grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, marginBottom: 12 }}>
+
+        {/* Migraine */}
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('migraine')}>
+          <div className="panel-head"><h2>🧠 Migraine</h2></div>
+          {migraineToday === null
+            ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>Loading…</div>
+            : migraineToday === 'yes'
+            ? <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--red)' }}>YES</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{migraineSeverity.replace(/_/g, ' ')}</div>
+              </div>
+            : <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--green)' }}>NO</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>None logged today</div>
+              </div>
+          }
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Log / view →</div>
+        </section>
+
+        {/* Library */}
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('books')}>
+          <div className="panel-head"><h2>📖 Reading Now</h2></div>
+          {currentBook
+            ? <>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{currentBook.title}</div>
+                {currentBook.author && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>by {currentBook.author}</div>}
+              </>
+            : <div style={{ fontSize: 12, color: 'var(--muted)' }}>No book in progress</div>
+          }
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Library →</div>
+        </section>
+
+        {/* Jules */}
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('jules')}>
+          <div className="panel-head"><h2>🐾 Jules</h2></div>
+          {julesDue.length === 0
+            ? <div style={{ fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>All up to date ✓</div>
+            : julesDue.map((item, i) => (
+                <div key={i} className="brief-item" style={{ borderLeft: '3px solid var(--amber)' }}>
+                  <span style={{ fontSize: 12, textTransform: 'capitalize' }}>{item} due</span>
+                </div>
+              ))
+          }
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>View Jules →</div>
+        </section>
+
+        {/* Home Suggestions */}
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('suggestions')}>
+          <div className="panel-head"><h2>🏠 Suggestions</h2></div>
+          <div style={{ textAlign: 'center', padding: '8px 0' }}>
+            <div style={{ fontSize: 28, fontWeight: 800, color: suggestionCount > 0 ? 'var(--amber)' : 'var(--green)' }}>{suggestionCount}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>pending items</div>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>View all →</div>
+        </section>
+      </div>
+
+      {/* Bottom row: contacts, vehicles, budget, inventory */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+
+        {/* Contacts due */}
+        {isKaylee && (
+          <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('contacts')}>
+            <div className="panel-head">
+              <h2>👥 Outreach Due</h2>
+              {dueContacts.length > 0 && <span className="risk-pill high">{dueContacts.length}</span>}
+            </div>
+            {dueContacts.length === 0
+              ? <div style={{ fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>No outreach overdue ✓</div>
+              : dueContacts.map((c, i) => (
+                  <div key={i} className="brief-item" style={{ borderLeft: '3px solid var(--purple)' }}>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>{c.type}</div>
+                  </div>
+                ))
+            }
+            <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Open Contacts →</div>
+          </section>
+        )}
+
+        {/* Vehicles */}
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('vehicles')}>
+          <div className="panel-head">
+            <h2>🚗 Vehicles</h2>
+            {vehicleAlerts.length > 0 && <span className="risk-pill high">{vehicleAlerts.length} alerts</span>}
+          </div>
+          {vehicleAlerts.length === 0
+            ? <div style={{ fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>No maintenance due ✓</div>
+            : vehicleAlerts.map((a, i) => (
+                <div key={i} className="brief-item" style={{ borderLeft: `3px solid ${a.status === 'overdue' ? 'var(--red)' : 'var(--amber)'}` }}>
+                  <div style={{ fontWeight: 600, fontSize: 12 }}>{a.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{a.item} — {a.status}</div>
+                </div>
+              ))
+          }
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>View Vehicles →</div>
+        </section>
+
+        {/* Budget */}
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('budget')}>
+          <div className="panel-head">
+            <h2>💰 Budget</h2>
+            {budgetToday.length > 0 && <span className="risk-pill medium">{budgetToday.length} due today</span>}
+          </div>
+          {budgetToday.length === 0
+            ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>No bills due today</div>
+            : budgetToday.map((b, i) => (
+                <div key={i} className="brief-item" style={{ borderLeft: '3px solid var(--amber)', display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 12 }}>{b.name}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>${b.amount.toFixed(2)}</span>
+                </div>
+              ))
+          }
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Open Budget →</div>
+        </section>
+
+        {/* Inventory */}
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('inventory')}>
+          <div className="panel-head">
+            <h2>📦 Inventory</h2>
+            {expiringSoon.length > 0 && <span className="risk-pill medium">{expiringSoon.length} expiring</span>}
+          </div>
+          {expiringSoon.length === 0
+            ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>Nothing expiring this week</div>
+            : expiringSoon.map((item, i) => (
+                <div key={i} className="brief-item" style={{ borderLeft: '3px solid var(--amber)', display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 12 }}>{item.name}</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>{item.expires}</span>
+                </div>
+              ))
+          }
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Open Inventory →</div>
+        </section>
+      </div>
+    </>
+  );
 }
 
 /* ============================================================
@@ -2056,53 +2378,197 @@ function choreToRowProps(chore: ChoreTask, showReason: boolean) {
   };
 }
 
-function Today({ tasks, choreTasks, householdUsers, completeTask, completeChore, editable, compact = false }: { tasks: TaskItem[]; choreTasks: ChoreTask[]; householdUsers: HouseholdUser[]; completeTask: (id: string) => void; completeChore: (id: string) => void; editable: boolean; compact?: boolean }) {
-  const list = compact ? tasks.slice(0, 3) : tasks;
-  const kaylee = householdUsers.find((u) => u.name.toLowerCase() === 'kaylee') ?? null;
-  // Today's Tasks is Kaylee's personal daily view — Adam has his own tab
-  // under Chores & Tasks. Unassigned chores default to her until delegated.
+function Today({ tasks, choreTasks, householdUsers, completeTask, completeChore, editable, role, compact = false }: { tasks: TaskItem[]; choreTasks: ChoreTask[]; householdUsers: HouseholdUser[]; completeTask: (id: string) => void; completeChore: (id: string) => void; editable: boolean; role?: Role; compact?: boolean }) {
+  const isKaylee = role === 'admin';
+  const today = new Date().toISOString().slice(0, 10);
+  const kaylee = householdUsers.find((u) => u.name.toLowerCase().includes('kaylee')) ?? null;
+  const adam   = householdUsers.find((u) => u.name.toLowerCase().includes('adam')) ?? null;
+  const meUser = isKaylee ? kaylee : adam;
+
+  // Cross-tab snapshot data for Today
+  const [julesDue, setJulesDue]         = useState<string[]>([]);
+  const [vehiclesDue, setVehiclesDue]   = useState<string[]>([]);
+  const [budgetDue, setBudgetDue]       = useState<{ name: string; amount: number }[]>([]);
+  const [contactsDue, setContactsDue]   = useState<string[]>([]);
+  const [migraineToday, setMigraineToday] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!supabase) return;
+    (async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData.session?.user?.id;
+      if (!userId) return;
+
+      await Promise.all([
+        // Jules overdue items
+        (async () => {
+          const { data: pet } = await supabase.from('pet_info').select('id').limit(1).maybeSingle();
+          if (!pet) return;
+          const { data: med } = await supabase.from('pet_medical_log').select('item_type, service_date, recurrence_months').eq('pet_id', pet.id);
+          const { data: groom } = await supabase.from('pet_grooming_log').select('groom_date').eq('pet_id', pet.id).order('groom_date', { ascending: false }).limit(1).maybeSingle();
+          const due: string[] = [];
+          if (med) for (const m of med as any[]) {
+            if (!m.recurrence_months) continue;
+            const d = new Date(m.service_date + 'T00:00:00'); d.setMonth(d.getMonth() + m.recurrence_months);
+            if (d <= new Date()) due.push(m.item_type.replace(/_/g, ' '));
+          }
+          if (groom) {
+            const last = new Date(groom.groom_date + 'T00:00:00'); const next = new Date(last); next.setDate(next.getDate() + 42);
+            if (next <= new Date()) due.push('grooming');
+          }
+          setJulesDue([...new Set(due)]);
+        })(),
+
+        // Vehicle alerts this month
+        (async () => {
+          const nowMonth = new Date().getMonth() + 1;
+          const { data: rules } = await supabase.from('budget_recurring_rules').select('name, months, month_of_year').eq('category', 'vehicle').eq('active', true);
+          if (rules) {
+            const due = (rules as any[]).filter(r => {
+              const months: number[] = r.months ?? (r.month_of_year ? [r.month_of_year] : []);
+              return months.includes(nowMonth) || months.includes(nowMonth - 1);
+            }).map(r => r.name);
+            setVehiclesDue(due.slice(0, 3));
+          }
+        })(),
+
+        // Budget due today
+        (async () => {
+          const dom = new Date().getDate();
+          const { data } = await supabase.from('budget_recurring_rules').select('name, amount').eq('active', true).eq('recurrence', 'monthly_day').eq('day_of_month', dom);
+          if (data) setBudgetDue((data as any[]).map(r => ({ name: r.name, amount: r.amount })));
+        })(),
+
+        // Contacts overdue (Kaylee only)
+        (async () => {
+          if (!isKaylee) return;
+          const { data } = await supabase.from('contact_reminders').select('display_name').eq('user_id', userId).eq('is_done', false).lte('next_due', today).limit(5);
+          if (data) setContactsDue((data as any[]).map(r => r.display_name));
+        })(),
+
+        // Migraine today (Adam check)
+        (async () => {
+          const { data } = await supabase.from('migraine_log').select('id').eq('entry_date', today).limit(1).maybeSingle();
+          setMigraineToday(!!data);
+        })(),
+      ]);
+    })();
+  }, [today, isKaylee]);
+
+  // My chores
   const myChoreTasks = useMemo(() => {
-    if (!kaylee) return choreTasks;
-    return choreTasks.filter((c) => c.assigned_to === kaylee.id || !c.assigned_to);
-  }, [choreTasks, kaylee]);
+    if (!meUser) return isKaylee ? choreTasks : [];
+    return choreTasks.filter(c => c.assigned_to === meUser.id || (!c.assigned_to && isKaylee));
+  }, [choreTasks, meUser, isKaylee]);
   const tackleList = useMemo(() => computeTackleToday(myChoreTasks), [myChoreTasks]);
   const shown = compact ? tackleList.slice(0, 3) : tackleList;
 
+  if (compact) {
+    return <section className="panel ct-panel">
+      <div className="panel-head">
+        <h2>Today's Tackle List</h2>
+        <span className="readonly-pill"><Zap size={14} /> {tackleList.length}</span>
+      </div>
+      {shown.length === 0 && <div className="brief-item" style={{ color: 'var(--muted)' }}>Nothing due today.</div>}
+      <div className="ct-list">
+        {shown.map(chore => <CompactTaskRow key={chore.id} {...choreToRowProps(chore, true)} editable={editable} onToggle={() => completeChore(chore.id)} />)}
+      </div>
+    </section>;
+  }
+
   return <>
+    <div className="page-header">
+      <div>
+        <h1>Today's Tasks</h1>
+        <p>{isKaylee ? 'Kaylee' : 'Adam'} · {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
+      </div>
+    </div>
+
+    {/* My chores */}
     <section className="panel ct-panel">
       <div className="panel-head">
-        <h2>{compact ? "Today's Tackle List" : "Today's Task Outlook Center"}</h2>
-        {!compact && <span className="readonly-pill"><Zap size={14} /> {tackleList.length} for today</span>}
+        <h2>📋 My Chores & Tasks</h2>
+        <span className="readonly-pill"><Zap size={14} /> {tackleList.length} for today</span>
       </div>
-      {shown.length === 0 && <div className="brief-item">No chores queued for today. Run <strong>Sync from Todoist</strong> on the Chores tab to pull the latest, or add a new task in Todoist.</div>}
+      {tackleList.length === 0 && <div className="brief-item" style={{ color: 'var(--muted)' }}>No chores queued for today. Sync from Todoist on the Chores tab.</div>}
       <div className="ct-list">
-        {shown.map((chore) => {
-          const props = choreToRowProps(chore, true);
-          return <CompactTaskRow
-            key={chore.id}
-            {...props}
-            editable={editable}
-            onToggle={() => completeChore(chore.id)}
-          />;
-        })}
+        {tackleList.map(chore => <CompactTaskRow key={chore.id} {...choreToRowProps(chore, true)} editable={editable} onToggle={() => completeChore(chore.id)} />)}
       </div>
     </section>
-    {!compact && tasks.length > 0 && <section className="panel ct-panel">
-      <h2>Other Tasks</h2>
-      <div className="ct-list">
-        {list.map((task) => <CompactTaskRow
-          key={task.id}
-          title={task.title}
-          completed={task.status === 'completed'}
-          onToggle={() => completeTask(task.id)}
-          editable={editable}
-          priorityDot={task.priority}
-          projectLabel={task.source}
-          reason={null}
-          timeLabel={task.minutes ? `${task.minutes} min` : null}
-        />)}
-      </div>
-    </section>}
+
+    {/* Cross-tab items */}
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+
+      {/* Jules */}
+      {julesDue.length > 0 && (
+        <section className="panel">
+          <div className="panel-head"><h2>🐾 Jules Needs Attention</h2></div>
+          {julesDue.map((item, i) => (
+            <div key={i} className="brief-item" style={{ borderLeft: '3px solid var(--amber)' }}>
+              <span style={{ fontSize: 13, textTransform: 'capitalize' }}>{item} is due</span>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {/* Vehicles */}
+      {vehiclesDue.length > 0 && (
+        <section className="panel">
+          <div className="panel-head"><h2>🚗 Vehicle Maintenance</h2></div>
+          {vehiclesDue.map((item, i) => (
+            <div key={i} className="brief-item" style={{ borderLeft: '3px solid var(--amber)' }}>
+              <span style={{ fontSize: 13 }}>{item}</span>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {/* Budget */}
+      {budgetDue.length > 0 && (
+        <section className="panel">
+          <div className="panel-head"><h2>💰 Bills Due Today</h2></div>
+          {budgetDue.map((b, i) => (
+            <div key={i} className="brief-item" style={{ borderLeft: '3px solid var(--purple)', display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 13 }}>{b.name}</span>
+              <span style={{ fontWeight: 600 }}>${b.amount.toFixed(2)}</span>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {/* Contacts (Kaylee only) */}
+      {isKaylee && contactsDue.length > 0 && (
+        <section className="panel">
+          <div className="panel-head"><h2>👥 Reach Out Today</h2></div>
+          {contactsDue.map((name, i) => (
+            <div key={i} className="brief-item" style={{ borderLeft: '3px solid var(--green)' }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{name}</span>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {/* Migraine reminder for Adam */}
+      {!isKaylee && (
+        <section className="panel" style={{ borderLeft: migraineToday ? '4px solid var(--green)' : '4px solid var(--purple)' }}>
+          <div className="panel-head"><h2>🧠 Migraine Check-in</h2></div>
+          {migraineToday
+            ? <div style={{ color: 'var(--green)', fontWeight: 600 }}>✓ Logged today</div>
+            : <div style={{ color: 'var(--muted)', fontSize: 13 }}>No migraine logged yet today. If you have one, track it in the Migraine Tracker tab.</div>
+          }
+        </section>
+      )}
+    </div>
+
+    {/* Other Todoist tasks */}
+    {tasks.length > 0 && (
+      <section className="panel ct-panel" style={{ marginTop: 12 }}>
+        <h2>Other Tasks</h2>
+        <div className="ct-list">
+          {tasks.map(task => <CompactTaskRow key={task.id} title={task.title} completed={task.status === 'completed'} onToggle={() => completeTask(task.id)} editable={editable} priorityDot={task.priority} projectLabel={task.source} reason={null} timeLabel={task.minutes ? `${task.minutes} min` : null} />)}
+        </div>
+      </section>
+    )}
   </>;
 }
 
@@ -2151,9 +2617,32 @@ function computeTackleToday(choreTasks: ChoreTask[]): ChoreTask[] {
   return candidates.map((x) => x.chore);
 }
 
-function Briefing({ compact = false }: { compact?: boolean }) {
-  const list = compact ? briefing.slice(0, 2) : briefing;
-  return <section className="panel"><h2>Daily Briefing</h2>{list.map((item) => <div className="brief-item" key={item}>{item}</div>)}</section>;
+function Briefing({ compact = false, role }: { compact?: boolean; role?: Role }) {
+  const { loading, lines } = useDailyBriefing(role ?? 'admin');
+  const shown = compact ? lines.slice(0, 3) : lines;
+  const isKaylee = (role ?? 'admin') === 'admin';
+
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <h2>✨ Daily Briefing</h2>
+        {!compact && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{isKaylee ? 'Kaylee' : 'Adam'}'s day</span>}
+      </div>
+      {loading
+        ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>Building your briefing…</div>
+        : shown.length === 0
+        ? <div className="brief-item">Nothing urgent today — all clear!</div>
+        : shown.map(item => (
+            <div key={item.id} className={`brief-item ${item.severity === 'urgent' ? 'urgent' : item.severity === 'warning' ? 'warning' : ''}`}>
+              {item.text}
+            </div>
+          ))
+      }
+      {compact && lines.length > 3 && (
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>+{lines.length - 3} more items</div>
+      )}
+    </section>
+  );
 }
 
 function Inventory({ inventory, createItem, updateQuantity, editable }: { inventory: InventoryItem[]; createItem: (item: Omit<InventoryItem, 'id'>) => void; updateQuantity: (id: string, quantity: number) => void; editable: boolean }) {
