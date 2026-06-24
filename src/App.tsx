@@ -2008,7 +2008,7 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
 
         // 2. Current book
         (async () => {
-          const { data } = await supabase.from('books').select('title, author').eq('user_id', userId).eq('status', 'reading').limit(1).maybeSingle();
+          const { data } = await supabase.from('books').select('title, author').eq('status', 'reading').limit(1).maybeSingle();
           if (data) setCurrentBook({ title: data.title, author: data.author });
         })(),
 
@@ -2016,7 +2016,7 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
         (async () => {
           const { data } = await supabase.from('contact_reminders')
             .select('display_name, reminder_type, next_due')
-            .eq('user_id', userId)
+            .eq('user_id', '551642ea-f9e1-41f4-9c37-5482dd56aeea')
             .eq('is_done', false)
             .lte('next_due', today)
             .order('next_due', { ascending: true })
@@ -2116,7 +2116,7 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
         <div><GoogleCalendarToday /></div>
         <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('today')}>
           <div className="panel-head">
-            <h2>📋 My Tasks Today</h2>
+            <h2>📋 {isKaylee ? "My" : "Adam's"} Tasks Today</h2>
             <span className="readonly-pill">{myChores.length} items</span>
           </div>
           {myChores.length === 0
@@ -2442,7 +2442,7 @@ function Today({ tasks, choreTasks, householdUsers, completeTask, completeChore,
         // Contacts overdue (Kaylee only)
         (async () => {
           if (!isKaylee) return;
-          const { data } = await supabase.from('contact_reminders').select('display_name').eq('user_id', userId).eq('is_done', false).lte('next_due', today).limit(5);
+          const { data } = await supabase.from('contact_reminders').select('display_name').eq('user_id', '551642ea-f9e1-41f4-9c37-5482dd56aeea').eq('is_done', false).lte('next_due', today).limit(5);
           if (data) setContactsDue((data as any[]).map(r => r.display_name));
         })(),
 
@@ -3483,7 +3483,7 @@ function Chores({
         My Tasks{myChores.length > 0 ? ` (${myChores.filter((c) => !c.is_completed).length})` : ''}
       </button>
       <button className={view === 'adam' ? 'active' : ''} onClick={() => setView('adam')}>
-        Adam's Tasks{adamChores.length > 0 ? ` (${adamChores.filter((c) => !c.is_completed).length})` : ''}
+        {currentUserName?.toLowerCase().includes('adam') ? "Kaylee's Tasks" : "Adam's Tasks"}{adamChores.length > 0 ? ` (${adamChores.filter((c) => !c.is_completed).length})` : ''}
       </button>
       <button className={view === 'approval' ? 'active' : ''} onClick={() => setView('approval')}>
         Needs Approval{reviewSuggestions.length > 0 ? ` (${reviewSuggestions.length})` : ''}
@@ -3529,7 +3529,7 @@ function Chores({
     {/* ============ DATE-GROUPED LIST (My Tasks / Adam's Tasks) ============ */}
     {view !== 'approval' && <section className="panel ct-panel">
       <div className="panel-head">
-        <h2>{view === 'mine' ? 'My Tasks' : "Adam's Tasks"}</h2>
+        <h2>{view === 'mine' ? 'My Tasks' : (currentUserName?.toLowerCase().includes('adam') ? "Kaylee's Tasks" : "Adam's Tasks")}</h2>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
           <input type="checkbox" checked={showCompleted} onChange={(e) => setShowCompleted(e.target.checked)} />
           Show completed
@@ -3537,7 +3537,7 @@ function Chores({
       </div>
       {dateBuckets.length === 0 && <div className="brief-item">
         {view === 'adam'
-          ? "Nothing assigned to Adam right now. Approve a suggestion for him from Needs Approval, or assign a task to him in Todoist."
+          ? (currentUserName?.toLowerCase().includes('adam') ? "Nothing assigned to Kaylee right now." : "Nothing assigned to Adam right now. Approve a suggestion for him from Needs Approval, or assign a task to him in Todoist.")
           : 'Nothing scheduled. Sync Todoist or add tasks there.'}
       </div>}
       {dateBuckets.map((bucket) => {

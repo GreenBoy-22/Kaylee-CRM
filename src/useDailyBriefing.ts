@@ -43,7 +43,8 @@ export function useDailyBriefing(role: Role = 'admin') {
         if (!userId) { setLoading(false); return; }
 
         // ── SHARED: Calendar ─────────────────────────────────────────────
-        const cacheRes = await supabase.from('google_calendar_cache').select('events').eq('user_id', userId).maybeSingle();
+        // Use household view — returns most recent cache regardless of which user owns it
+        const cacheRes = await supabase.from('household_calendar_cache').select('events').maybeSingle();
         if (cacheRes.data?.events) {
           const events = (cacheRes.data as any).events ?? [];
           const todaysEvents = events.filter((e: any) => e.start && e.start.slice(0, 10) === todayKey);
@@ -151,7 +152,7 @@ export function useDailyBriefing(role: Role = 'admin') {
         }
 
         // Contacts overdue for outreach
-        const { data: dueContacts } = await supabase.from('contact_reminders').select('display_name').eq('user_id', userId).eq('is_done', false).lte('next_due', todayKey);
+        const { data: dueContacts } = await supabase.from('contact_reminders').select('display_name').eq('user_id', '551642ea-f9e1-41f4-9c37-5482dd56aeea').eq('is_done', false).lte('next_due', todayKey);
         if (dueContacts?.length) generated.push({ id: 'contacts-due', text: `${dueContacts.length} contact${dueContacts.length > 1 ? 's' : ''} due for outreach: ${(dueContacts as any[]).map(c => c.display_name).join(', ')}.`, severity: 'info' });
 
         // Chores overdue

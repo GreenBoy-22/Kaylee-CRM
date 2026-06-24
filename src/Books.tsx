@@ -345,8 +345,10 @@ export default function Books() {
   const loadBooks = useCallback(async () => {
     if (!supabase) return;
     setLoading(true);
+    // Books are household-shared — load all books regardless of user_id
+    // user_preferences sync timestamps still filter by Kaylee's user_id
     const [booksResult, grSync, icSync] = await Promise.all([
-      supabase.from('books').select('*').order('created_at', { ascending: false }),
+      supabase.from('books').select('*').order('title', { ascending: true }),
       supabase.from('user_preferences').select('value').eq('key', 'goodreads_last_sync').maybeSingle(),
       supabase.from('user_preferences').select('value').eq('key', 'icollect_last_sync').maybeSingle(),
     ]);
