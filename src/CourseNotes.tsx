@@ -1,3 +1,244 @@
+
+
+Pasted text(297).txt
+Document
+
+This is almost certainly one bad line of text in CourseNotes.tsx, not 150 separate TypeScript errors.
+
+The giveaway is:
+
+Errors are concentrated on line 174
+
+Then line 177
+
+Then line 181
+
+Then line 187
+
+Repeated TS1127: Invalid character
+
+Repeated TS1005: ',' expected
+
+That pattern happens when a large object or array contains copied text with smart quotes, invisible Unicode characters, or improperly escaped line breaks.
+
+What probably happened
+You likely pasted notes that contain something like:
+
+content: "This is a note \n
+Another line"
+or
+
+content: "Don’t forget..."
+(where the apostrophe is a smart quote)
+
+or
+
+content: "Line one
+Line two"
+inside a normal quoted string.
+
+TypeScript then loses its place and reports hundreds of errors afterward.
+
+Open src/CourseNotes.tsx
+Go directly to:
+
+Line 174
+Line 177
+Line 181
+Line 187
+Look for any of these:
+
+Bad
+text: "This is line 1
+This is line 2"
+Good
+text: `This is line 1
+This is line 2`
+or
+
+text: "This is line 1\nThis is line 2"
+Also search for
+“
+”
+’
+•
+→
+Replace them with:
+
+"
+"
+'
+-
+->
+These often cause TS1127 when pasted from Word, PDFs, ChatGPT, or course materials.
+
+Fastest way to find it
+In VS Code:
+
+Open CourseNotes.tsx
+
+Press Ctrl+G
+
+Enter:
+
+174
+Look at that entire line.
+
+If it's a huge object, expand around lines 170–190.
+
+I would bet money that one of those course note entries contains a pasted paragraph with an unescaped quote or newline. The build log shows the parser first breaks at line 174 and everything after that cascades. Pasted text.txt
+
+If you paste lines 160–190 of CourseNotes.tsx, I can pinpoint the exact character causing the build failure.
+
+
+
+CourseNotes.tsx
+TypeScript
+
+I found the problem.
+
+Your file has literal \n characters outside of strings, which means a large chunk of JSON/object data was pasted incorrectly. That's why TypeScript is throwing hundreds of "Invalid character" errors. CourseNotes.tsx
+
+For example, around the C963 section, the file currently contains:
+
+{ type: 'competencies', content: '...' },\n
+{ type: 'pacing', content: '...' },\n
+{ type: 'structure', content: '...' },\n
+Notice those \n sequences after the closing },.
+
+They should be actual newlines in the file, not the characters \ and n.
+
+What happened
+It looks like part of the course data was generated/exported as escaped JSON and then pasted directly into the TypeScript object.
+
+Instead of:
+
+],
+'C963': [
+  { ... },
+  { ... },
+],
+the file contains:
+
+],\n
+'C963': [\n
+  { ... },\n
+which is invalid TypeScript. CourseNotes.tsx
+
+Fast fix
+In VS Code:
+
+Open CourseNotes.tsx
+
+Press Ctrl + H
+
+Enable Regex (.*)
+
+Find:
+
+\\n
+Replace with:
+
+(an actual blank line)
+
+Then review the file before saving.
+
+Even better
+The corruption appears to start around the C963 course and continues through many later courses. The safest fix is:
+
+Revert CourseNotes.tsx to the last working commit.
+
+Re-add the new course notes.
+
+Or paste the entire file through a formatter/JSON validator before inserting it into the TypeScript object.
+
+The build errors at lines 174, 177, 181, 187 are just where the parser finally gives up—the actual corruption is the escaped \n text scattered throughout the course definitions. CourseNotes.tsx
+
+If you upload the current GitHub version or paste the section from line 173 through the end of PRELOADED_NOTES, I can clean it and give you a corrected replacement block.
+
+
+
+Library
+/
+CourseNotes.tsx
+More actions
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
 // src/CourseNotes.tsx
 //
 // Work tab: BSCSIA Course Notes reference tool.
@@ -75,448 +316,3 @@ const PRELOADED_NOTES: Record<string, { type: NoteType; content: string }[]> = {
     { type: 'cert', content: ' CERTS INCLUDED IN BSCSIA 202509:\n- CompTIA A+ Core 1 (D316) -- Webcam/PearsonVUE\n- CompTIA A+ Core 2 (D317) -- Webcam/PearsonVUE\n- CompTIA Network+ (D325) -- Webcam/PearsonVUE\n- CompTIA Security+ (D329) -- TEST CENTER ONLY\n- Axelos ITIL Foundation (D336) -- PeopleSoft\n- CompTIA Project+ (D324) -- Webcam/PearsonVUE\n- LPI Linux Essentials (D281) -- Webcam/PearsonVUE\n- ISC2 SSCP (C845) -- optional voucher, PearsonVUE\n- CompTIA Data+ (D492) -- Webcam/PearsonVUE\n- CompTIA CySA+ (D340) -- Webcam/PearsonVUE\n- ISC2 CCSP (D320) -- optional voucher, PearsonVUE\n- CompTIA PenTest+ (D332) -- Webcam/PearsonVUE' },
     { type: 'cert', content: ' STACKABLE CERTS (earned automatically by CompTIA):\n- CompTIA IT Operations Specialist = A+ Core 1 + A+ Core 2\n- CompTIA Secure Infrastructure Specialist = A+ Core 1 + A+ Core 2 + Network+\n- CompTIA Network Vulnerability Assessment Professional = Network+ + Security+ + PenTest+\n- CompTIA Network Security Professional = Network+ + Security+ + PenTest+ + CySA+\n- CompTIA Security Analytics Professional = Security+ + CySA+' },
   ],
-
-  'C458': [
-    { type: 'competencies', content: '- Identifies factors that influence mental, emotional, and social wellness\n- Identifies the application of core competencies of social and emotional learning\n- Identifies the influence of disease, fitness, and lifestyle on the body\n- Identifies the principles of nutrition and components of a healthy diet' },
-    { type: 'pacing', content: '- Speedy: 1 week\n- Steady: 2 weeks\n- Deliberate: 4 weeks' },
-    { type: 'structure', content: '- 4 sections each followed by a section test\n- Section 1: Physical Health (11 lessons)\n- Section 2: Nutrition (10 lessons)\n- Section 3: Emotional Health (10 lessons)\n- Section 4: SEL (17 lessons)' },
-    { type: 'student_tips', content: '- Email questions to health@wgu.edu -- team-taught, no individual instructor\n- Start by watching the welcome video\n- Access videos and podcasts to reinforce learning' },
-  ],
-  'C683': [
-    { type: 'competencies', content: '- Accurately executes the process of scientific inquiry through experimentation in the natural world\n- Draws conclusions based on academic research and scientific inquiry\n- Evaluates academic sources for their credibility and relevance to a chosen research topic on a natural world phenomenon' },
-    { type: 'structure', content: '- 10 lessons to prepare for PA\n- PA: Students conduct a science experiment -- research, design, perform, write a report\n- V4 launched 5/11/26: Enhanced learning resources, improved instructional clarity, updated videos' },
-  ],
-  'D322': [
-    { type: 'competencies', content: '- Describes fundamental data management functions in databases\n- Describes basics of programming languages in software development\n- Describes the role of the IT department in IT infrastructure management, disaster recovery, and business continuity\n- Describes structure, function, and security associated with networks\n- Evaluates ethical concerns in information technology\n- Explains different computer hardware and networking technologies\n- Identifies components of software and its relation to operating systems\n- Identifies computer hardware components' },
-    { type: 'pacing', content: '- Speedy: 2-3 weeks\n- Steady: 3-4 weeks\n- Deliberate: 4-5 weeks' },
-    { type: 'structure', content: '- 8 sections\n- Has a "21 Challenge Plan" to complete the course\n- Questions on comprehensive reviews and readiness quizzes are same as pre-assessment\n- Aim for 85% min score on practice test' },
-    { type: 'resources', content: '- Watch "Why/Why not?" video for test-taking strategy\n- Sharepoint site: Great resources -- link in notes\n- Udemy: CompTIA IT Fundamentals ITF+ practice tests' },
-  ],
-  'D685': [
-    { type: 'competencies', content: '- Creates effective prompts with consideration of scope, specificity, and context to elicit targeted information\n- Evaluates the efficacy of writing different prompts on research outcomes and improves depth and quality of analytical investigations\n- Evaluates the images, texts, and sound of the prompt and adjusts prompts to output relevant results\n- Explains why prompt engineering is necessary' },
-    { type: 'pacing', content: '- Speedy: 2 weeks or less (10-Day Challenge Plan)\n- Steady: 3 weeks\n- Deliberate: 4 weeks\n- Can complete in 7 days and pass OA on 1st attempt' },
-    { type: 'structure', content: '- 4 sections: Generative AI & Prompt Engineering, Crafting Effective Prompts, Prompt Methods & Evaluation, Prompt Engineering Optimization\n- Videos via Pluralsight\n- 2 practice tests at end -- do both and pre-assessment before OA\n- Replaces C844 Emerging Technologies' },
-    { type: 'student_tips', content: '- Practice ChatGPT or Gemini with varying levels of detail and observe output differences\n- Use prompt frameworks: Persona/Instruction/Output format for different tasks' },
-  ],
-  'D316': [
-    { type: 'competencies', content: '- Configures common hardware and software components of mobile devices\n- Configures common hardware in computer systems\n- Configures wired and wireless networks\n- Creates client-side virtualization with cloud computing components\n- Troubleshoots hardware, software, and network issues with best practice methodologies' },
-    { type: 'pacing', content: '- Accel: 2 weeks\n- Speedy: 3-4 weeks\n- Steady: 4-6 weeks\n- Deliberate: 8 weeks\n- Average time: 8 weeks' },
-    { type: 'cert', content: '- Cert: CompTIA A+ Core 1\n- Voucher covers BOTH D316 and D317 (shared voucher)\n- Request approval under Assessments -- voucher arrives within 48 hours\n- Use WGU email address for test registration' },
-    { type: 'structure', content: '- 6 sections: Welcome, Support, Hardware, Networks, Mobile Devices, Printers\n- Some sections include interactive labs\n- No lab orientation in this course -- orientation is in D317' },
-    { type: 'student_tips', content: '- Skip PBQs if needed, come back later\n- Test strategy: 1st pass = easy MC, 2nd pass = medium difficulty, Final = PBQs and flagged\n- Never leave a question blank\n- Helpful instructors: Lori Davis, Arthur Moore\n- Check Course Playbook FAQ for "Student Tips"' },
-    { type: 'cert', content: '- Exam: CompTIA A+ Core 1 (220-1101)\n- 90 questions max, 90 minutes\n- Passing score: 675/900\n- Question types: Multiple choice, drag-and-drop, performance-based\n- Renewal: Every 3 years via CE or retake\n- Voucher shared with D317 -- one voucher covers BOTH exams\n- Exam location: Webcam or PearsonVUE test center\n- Waiting period between attempts: 0, 14, 14 days' },
-  ],
-  'D317': [
-    { type: 'competencies', content: '- Identifies operating systems and their configurations\n- Identifies remote access technology solutions\n- Identifies scripting basics\n- Implements basic disaster recovery and business continuity procedures\n- Implements basic operational procedures (documentation, change mgmt, compliance, communication)\n- Implements security principles across devices and networks\n- Troubleshoots software, security, and malware issues' },
-    { type: 'pacing', content: '- Accel: 2 weeks\n- Speedy: 3-4 weeks\n- Steady: 4-6 weeks\n- Deliberate: 8 weeks\n- Average time: 6 weeks' },
-    { type: 'cert', content: '- Cert: CompTIA A+ Core 2\n- Voucher covers BOTH D316 and D317\n- Request approval under Assessments -- voucher arrives within 48 hours\n- Test uses drag-and-drop, matching, and answer resequencing' },
-    { type: 'structure', content: '- 6 sections, 13 lessons\n- Sections: Welcome, Support, Operating Systems, Security, Mobile, Using Data Security\n- 6 practice exams + CertMaster Practice exam -- goal: 85% score' },
-    { type: 'student_tips', content: '- Reading-based learners: CompTIA ebook + CertMaster Perform\n- Video-based learners: Udemy + Percipio\n- Linux cheat sheet resource available (one pager)\n- Helpful instructors: Lori Davis, Arthur Moore' },
-    { type: 'cert', content: '- Exam: CompTIA A+ Core 2 (220-1102)\n- 90 questions max, 90 minutes\n- Passing score: 700/900\n- Question types: Multiple choice, drag-and-drop, performance-based\n- Renewal: Every 3 years via CE or retake\n- Voucher shared with D316 -- one voucher covers BOTH exams\n- Exam location: Webcam or PearsonVUE test center\n- Waiting period between attempts: 0, 14, 14 days\n- Stackable certs earned with A+: CompTIA IT Operations Specialist, CompTIA Secure Infrastructure Specialist' },
-  ],
-  'C955': [
-    { type: 'competencies', content: '- Applies principles and methods of probability-based mathematics to explain and solve problems\n- Applies operations/processes of basic algebra to evaluate quantitative expressions, solve equations/inequalities\n- Applies operations/processes of fractions, decimals, and percentages to evaluate quantitative expressions\n- Evaluates categorical and quantitative data for a single variable using appropriate graphical displays and numerical measures\n- Evaluates the relationship between two quantitative variables through correlation and regression\n- Evaluates the relationship between two variables through interpretation of visual displays and numerical measures' },
-    { type: 'pacing', content: '- Speedy: 2 weeks or less\n- Steady: 4-6 weeks\n- Deliberate: 6-10 weeks' },
-    { type: 'structure', content: '- 7 modules via MindEdge\n- Module 1: Basic Numeracy (25 tasks) through Module 7: Probability (16 tasks)\n- Includes pre-quiz, readings, examples, key terms, games, flashcards, tests' },
-    { type: 'student_tips', content: '- Recommended calculator: TI-30XS Multiview\n- Watch cohort videos first, then read text, do every practice set\n- Access the recorded cohort videos\n- Per Zach Vega: Have the recommended calculator -- reduces fractions out of the hundreds' },
-  ],
-  'D270': [
-    { type: 'competencies', content: '- Composes a written message with language appropriate for cross-cultural communication\n- Incorporates research to support a position or idea\n- Incorporates self-expression in written communication\n- Researches valid and reliable sources\n- Writes a message using an effective communication approach for a given situation\n- Writes a reference list\n- Writes in a professional manner for a given scenario' },
-    { type: 'pacing', content: '- Speedy: 1-2 weeks (submit task every 2-3 days)\n- Steady: 3-4 weeks (submit task every 7 days or less)\n- Deliberate: 5-6 weeks (submit task every 10-14 days or less)' },
-    { type: 'structure', content: '- 4 sections: Writing an Appropriate Message, Support with Resources, Support with Sources, Support with Sources (References)\n- Each section ends with a test\n- About 48 hours to receive evaluator feedback' },
-    { type: 'student_tips', content: '- Meet with an instructor at the beginning of the course\n- View sample tasks to understand structure\n- Email work to selfexpression@wgu.edu for feedback\n- Use WGU Library resources' },
-  ],
-  'C957': [
-    { type: 'competencies', content: '- Analyzes graphical depictions of real-world situations using functional properties\n- Applies exponential functions and their properties to real-world problems\n- Applies linear functions and their properties to real-world problems\n- Applies logistic functions and their properties to real-world problems\n- Applies polynomial functions and their properties to real-world problems\n- Interprets the real-world meaning of various functions based on notation, graphical representations, and data representations\n- Verifies the validity of a given model' },
-    { type: 'pacing', content: '- Speedy: 2 weeks or less\n- Steady: 4-6 weeks\n- Deliberate: 6-8 weeks' },
-    { type: 'structure', content: '- 8 sections covering Function Interpretation through Validity of Models\n- 3 paths: Linear (start to finish), Topical (theme approach), Targeted (quiz first, focus on weak areas)\n- Math taught through real-world applications' },
-    { type: 'student_tips', content: '- Whiteboard recommended for practice and the OA\n- Instructors available 7 days/week without appointment at Live Instructor Support\n- Read "How to Succeed in Applied Algebra" in COS\n- Peer tutoring available under "Course Tips"' },
-  ],
-  'D315': [
-    { type: 'competencies', content: '- Applies network security concepts for business continuity, data access, and confidentiality\n- Identifies basic network systems and concepts related to networking technologies\n- Identifies solutions for compliance with security guidance' },
-    { type: 'structure', content: '- 3 sections: Intro to Networking Concepts, Intro to Network Security, Network Security Options\n- Flow: Read, watch, some knowledge checks and activities\n- Has pre-assessment and WGU OA' },
-    { type: 'resources', content: '- OSI Layers Quiz -- ExamCompass\n- Wireless Networking Quiz -- ExamCompass\n- Network Devices Quiz -- ExamCompass\n- Quizlet study sets available\n- C172 Cohort recordings (Webex links)' },
-  ],
-  'D827': [
-    { type: 'competencies', content: '- Explains how human, organizational, and societal factors impact cybersecurity\n- Identifies the threats, principles, standards, and industry best practices related to connection and system security\n- Identifies the threats, principles, standards, and industry best practices related to data security\n- Identifies the threats, principles, standards, and industry best practices related to software and component security' },
-    { type: 'structure', content: '- 12 sections via Zybooks\n- Content starts at section 3 -- section 2 is career exploration\n- Labs in sections 5, 7, 9 -- info will reappear on OA\n- Green labs are required; optional labs are in a different platform\n- More interactive than old course (labs, animations, optional items)' },
-    { type: 'student_tips', content: '- Pre-assessment is NOT reflective of OA -- pre is definition-driven; OA is scenario-based\n- Read the electronic textbook\n- Pay special attention to the CIA triad\n- Complete optional items -- helps with future coursework\n- Salesforce limits students to signing up for only 1 cohort at a time' },
-    { type: 'resources', content: '- Quizlet: D827 Pre Exam flash cards\n- Quizlet: D827 Practice Exam 1 and 2\n- Quizlet: D827 Acronyms complete list\n- cyberseek.org -- good for exploring cyber careers' },
-  ],
-  'D265': [
-    { type: 'competencies', content: '- Evaluates bias and its impact\n- Evaluates evidence based on source credibility\n- Evaluates the quality of an argument\n- Makes claims based on evidence' },
-    { type: 'pacing', content: '- 1-2 weeks if highly motivated\n- New PAMS version 3/COS version 2 has a PA (older version has OA)' },
-    { type: 'structure', content: '- 5 sections: Evaluating Arguments, Source Credibility, Identifying Bias, Making a Claim, Review with Feedback Practice PA\n- Each section ends with application/test' },
-    { type: 'student_tips', content: '- Do not try to overcomplicate the PA tasks\n- SWAY walkthrough available including 10-min video sample (accessible on cell phone)\n- PA task can take 30 minutes once student understands content\n- Returned PAs come with video feedback from instructor\n- Template available for the PA' },
-  ],
-  'D325': [
-    { type: 'competencies', content: '- Configures a network infrastructure\n- Configures networking components\n- Implements network security techniques\n- Optimizes network operations for availability, performance, and security\n- Troubleshoots network issues' },
-    { type: 'pacing', content: '- Speedy: 4 weeks or less\n- Steady: 6-8 weeks\n- Deliberate: 8-12 weeks\n- Average time: 9 weeks' },
-    { type: 'cert', content: '- Cert: CompTIA Network+\n- Voucher requirements (request): 80%+ on CertMaster Perform/Practice Assessment OR 85%+ on Jason Dion Practice Quizzes 1 or 2 OR Mike Myers Practice Quizzes (screenshot required)\n- Uses Network Sandbox lab and CertMaster curriculum' },
-    { type: 'structure', content: '- 5 sections, 14 modules\n- Section 1: Hardware and Topologies (Modules 1-3)\n- Section 2: Network Services & Configuration (Modules 4-6)\n- Section 3: Managing Networks (Modules 7-9)\n- Section 4: Secure Networks (Modules 10-12)\n- Section 5: Remote Access & Cloud Technologies (Modules 13-14)' },
-    { type: 'student_tips', content: '- 6-week pacing guide in WGU Connect\n- Use Jason Dion practice tests IN ADDITION to CompTIA practice tests\n- Jason Dion on Udemy: "CompTIA Network+ (N10-009) 6 Practice Exams Set 1"\n- Great instructors: Ken Aitken, Lori Davis, Josh Dunn (sends weekly test question texts)' },
-    { type: 'cert', content: '- Exam: CompTIA Network+ (N10-009)\n- 90 questions max, 90 minutes\n- Passing score: 720/900\n- Renewal: Every 3 years via CE or retake\n- Exam location: Webcam or PearsonVUE\n- Waiting period: 0, 14, 14 days\n- Stackable certs: CompTIA IT Operations Specialist, CompTIA Secure Infrastructure Specialist (with A+)' },
-  ],
-  'D268': [
-    { type: 'competencies', content: '- Implements appropriate communication styles based on audience and setting\n- Uses communication strategies for managing conflict\n- Uses communication strategies to influence others' },
-    { type: 'pacing', content: '- Speedy: 3 weeks or less\n- Steady: 4-6 weeks\n- Deliberate: 6-10 weeks' },
-    { type: 'structure', content: '- 3 sections: Communicating in Diverse Groups, Art of Conflict Management & Professional Conversations, Influencing Others\n- Each section ends with Application & Test\n- If student answers "yes" to "Prepare for Assessment" -- can start section with section test' },
-    { type: 'student_tips', content: '- Complete the PA after each section\n- Complete the CPT for this course\n- Instructors recommend Panopto Capture for Tasks 1 and 3\n- Task 3 requires multimedia presentation with video -- students can use voiceover instead of being on camera\n- Connect with Assessment Services if needing help' },
-  ],
-  'D336': [
-    { type: 'competencies', content: '- Applies ITIL concepts, core components, principles, and models of service management\n- Applies the ITIL six activities of the service value chain' },
-    { type: 'pacing', content: '- Average time: 6 weeks' },
-    { type: 'cert', content: '- Cert: Axelos ITIL (taken through PeopleSoft)\n- Course links in last section (Exam Readiness): 6 full-length practice tests, CyberVista practice exam' },
-    { type: 'structure', content: '- 6 sections: Course Overview, Key Concepts of Service Management, Four Dimensions, Guiding Principles & Practices, Key ITIL Practices, Exam Readiness\n- Flow: Read chapters, watch videos, knowledge check, section test, summary' },
-    { type: 'cert', content: '- Exam: Axelos ITIL Foundation\n- Taken through PeopleSoft (not PearsonVUE)\n- 40 questions, 60 minutes\n- Passing score: 65% (26/40)\n- Closed book exam\n- Renewal: Not required -- foundation cert is lifetime\n- No waiting period between attempts: 0, 5, 5 days' },
-  ],
-  'C963': [
-    { type: 'competencies', content: '- Describes the influence of competing political ideologies on the development of the US government\n- Examines the influence of political parties, citizens, and non-governmental organizations on elections and political processes\n- Examines the influence of media, public opinion, and political discourse on American democracy\n- Examines the struggle to balance individual liberty, public order, and state\'s rights\n- Explains how the structure and powers of the US government interact to form public policy' },\n    { type: 'pacing', content: '- Per R. Boyce: 3 weeks max; can be done in a weekend if students push themselves\n- Change from OA to PA effective 6/3/25 -- 3 tasks' },\n    { type: 'structure', content: '- 5 sections: Constitutional Democracy, Structure of US Government, Political Participation, Civil Liberties & Rights, Public Opinion and Media\n- Each lesson: smaller parts (videos, readings, knowledge checks, summary, quiz)' },\n    { type: 'resources', content: '- WGU Connect: recorded videos and audio podcasts\n- Cohorts: 3 Tasks in 30 minutes, individual ones for each task, task-writing success strategies' },\n  ],\n  'D420': [\n    { type: 'competencies', content: '- Evaluates the truth of statements using proofs and the principles of deductive logic\n- Minimizes circuits using Boolean algebra and Boolean functions' },\n    { type: 'pacing', content: '- Speedy: 10 days or less\n- Steady: 2-3 weeks\n- Deliberate: 3-5 weeks\n- Goal: 3 weeks or less\n- Updated versions rolled 2/17/26: updated OA, Pre-assessment, improved instructional flow' },\n    { type: 'structure', content: '- 10 modules via Zybooks\n- Modules 1-6: Propositions through Competency 1 Review\n- Modules 7-10: Boolean Algebra through Competency 2 Review\n- Formula sheet IS provided on OA\n- Instructors do live events through the week -- no appointment necessary' },\n    { type: 'student_tips', content: '- Do NOT approach as a math course -- it is symbol recognition and patterns\n- Take pre-assessment right away -- formula sheet and general rules help identify what to memorize\n- YouTube videos helpful: Kimberly Brehm (#1-21)\n- Work on course a little every day\n- Most students who pass pre-assessment on 1st attempt also pass OA on 1st attempt\n- Most students need 2 attempts on OA' },\n  ],\n  'D329': [\n    { type: 'competencies', content: '- Analyzes information security controls, governance, risk, and compliance\n- Designs security solutions for enterprise infrastructures and architectures\n- Executes operations and incident response with tools, policies, forensics, and mitigation techniques\n- Identifies threats, attacks, and vulnerabilities to organizational security\n- Implements security solutions across hardware, applications, and network services' },\n    { type: 'pacing', content: '- Speedy: 3 weeks or less\n- Steady: 4-8 weeks\n- Deliberate: 9-12 weeks\n- Average time: 9 weeks' },\n    { type: 'cert', content: '- Cert: CompTIA Security+\n- Must take at a test center (whiteboard and markers provided)\n- Linked to CertMaster curriculum\n- 8-week pacing guide in instructor welcome email' },\n    { type: 'structure', content: '- 8 sections, 16 lessons\n- Covers: Network Security, Securing Information, Vulnerabilities, Capabilities, Security Incidents, Security Management & Policy\n- Course rhythm: bounce between WGU materials (videos, labs) and CompTIA (review activities, PBQs, practice questions)\n- Aim for 90% on all labs, quizzes, practice tests' },\n    { type: 'student_tips', content: '- Test is difficult because of TIME limitation, not content\n- Skip simulations and do at end OR do them quickly\n- Read each question thoroughly to know exactly what is being asked\n- Confidence level ratings on each page before moving on' },\n    { type: 'cert', content: '- Exam: CompTIA Security+ (SY0-701)\n- 90 questions max, 90 minutes\n- Passing score: 750/900\n- Renewal: Every 3 years via CE or retake\n- Must take at a test center -- whiteboard and markers provided\n- Waiting period: 0, 14, 14 days\n- Stackable certs earned: CompTIA Secure Infrastructure Specialist, CompTIA Security Analytics Professional, CompTIA Network Vulnerability Assessment Professional, CompTIA Network Security Professional' },\n  ],\n  'D828': [\n    { type: 'competencies', content: '- Analyzes applicable regional, national, international, and industry legal requirements and system security best practices\n- Discusses the implications of ethical issues for specific cybersecurity actions within an organization\n- Explains the fundamental standards, frameworks, and practices of data privacy and data privacy protection\n- Outlines a security awareness training and education (SATE) program to raise employee awareness' },\n    { type: 'pacing', content: '- Speedy: 3 weeks or less\n- Steady: 4-5 weeks\n- Deliberate: 6-7 weeks\n- 25 days to complete -- moved to term 7 -- not recommended to pull into terms 1 or 2' },\n    { type: 'structure', content: '- 22 sections via Zybooks\n- Covers: Governance/Risk/Compliance, Cybersecurity Landscape, Cyber Leadership, NIST frameworks, US & International regulations, Privacy laws, Auditing, AI in Cyber\n- Has 1 lab and 4 case studies\n- Video from section 21.2 is crucial to watch BEFORE completing Task 2 (tracked via LinkedIn Learning)\n- Task 1: Framework is not specifically identified -- student must infer what is there' },\n    { type: 'student_tips', content: '- Bottom right corner of Zybooks: "Getting started" button -- good for students to click\n- Bottom of subtopics: "Print lesson" button for those who prefer print format\n- Watch all videos (some are over an hour long)\n- Per Zach Vega: Join WGU Connect, read rubrics, use template' },\n  ],\n  'D829': [\n    { type: 'competencies', content: '- Analyzes gathered evidence with forensic tools in alignment with investigation processes\n- Collects forensic evidence from deleted files and artifacts\n- Creates incident reports communicating the conclusions of a forensic investigation to organizational stakeholders\n- Identifies laws, rules, standards, policies, and best practices related to digital forensics' },\n    { type: 'pacing', content: '- Speedy: 3 weeks or less\n- Steady: 4-5 weeks\n- Deliberate: 5-6 weeks\n- Course playbook shows week-to-week breakdown by pace preference' },\n    { type: 'prereqs', content: '- Complete AFTER: D316, D317, D315, D325, D329\n- Certs needed before: A+, Network+' },\n    { type: 'structure', content: '- 21 sections via Zybooks + Autopsy\n- Has readings, videos, labs, 1 PA (requires screenshots uploaded in specific manner)\n- Dense reading -- read out loud, hyper focus, or use free text/speech\n- PA: complete in tandem with lab open; use rubric to align with "competent" column' },\n    { type: 'student_tips', content: '- Do not just describe what the tool shows -- EXPLAIN WHY IT MATTERS\n- Focus on interpreting findings and connecting back to investigation scenario\n- Stick to pacing chart -- rushing leads to missed screenshots or incomplete analysis\n- To meet student ID requirement: open NotePad with "My student number is [#]" in each screenshot\n- Read WGU Connect discussions and watch resources tab video BEFORE starting\n- Recorded cohort helps with writing the paper' },\n  ],\n  'C845': [\n    { type: 'competencies', content: '- Defends the security of a network by maintaining the CIA of information transmitted over communication networks\n- Evaluates cryptographic systems and operations to protect data security\n- Evaluates security concerns with countermeasures to guard against malicious activity to end-point devices, virtualization, cloud, and large-scale distributed systems\n- Evaluates security incident handling plans to protect and preserve organization assets and data\n- Evaluates security operations concepts and policies to ensure CIA of information assets\n- Manages control access to privileged, confidential, or proprietary resources\n- Proposes security risk mitigation processes to identify, evaluate, prioritize, and prevent potential security threats' },\n    { type: 'pacing', content: '- Speedy pace (med/high on CPT): 4 weeks or less\n- 3 PA tasks to pass course (~2-3 pages per PA)' },\n    { type: 'cert', content: '- Optional SSCP cert voucher available after passing PAs -- good for 1 year from issue date\n- Per Holly: Student who takes SSCP cert test BEFORE the course CAN submit passing score for course credit\n- After finishing course, students LOSE course material access but keep LinkedIn Learning and WGU Library access\n- Plan to take cert test within the SAME TERM (optional)\n- Certificate not given until graduation -- students are SSCP Associates until then' },\n    { type: 'structure', content: '- 7 domains: Security Concepts, Access Controls, Risk ID/Monitoring/Analysis, Incident Response/Recovery, Cryptography, Network/Communications Security, Systems/Application Security\n- Flow: Intro, Learning Objectives, Learning Activity, Knowledge Check, Summary -> then SSCP Cert Prep section\n- Mike Chapple YouTube videos available' },\n    { type: 'student_tips', content: '- Per Justin Moss: Overdo the risk definition on PAs -- what evaluators look for may not match task requirements\n- Per Zach Vega: Use WGU Connect recorded cohorts -- explains tasks and what evaluators want\n- Per Chad Kliewer (Instructor): Read domains 1-3 -> write Task 1, read 4-5 -> write Task 2, read 6-7 -> write Task 3\n- Per Dillon Gonyea on SSCP exam: Hardest cert so far; some elements from Project+, Security+, Network+; no going back on test' },\n    { type: 'cert', content: '- Exam: ISC2 SSCP (Systems Security Certified Practitioner)\n- 125 questions, 3 hours\n- Passing score: 700/1000\n- Computer adaptive testing (CAT format)\n- Voucher: optional, available after passing all PAs -- good for 1 year\n- Exam location: PearsonVUE only\n- Renewal: Every 3 years -- requires 60 CPE credits\n- Students identified as "SSCP Associate" until graduation/experience requirement met\n- 2 years of work experience required for full SSCP designation (waived 1 year with degree)\n- After finishing course: lose course access but keep LinkedIn Learning + WGU Library' },\n  ],\n  'D324': [\n    { type: 'competencies', content: '- Applies communication methods and change control processes within a project\n- Determines requirements of a project management plan\n- Identifies project factors, constraints, and risk strategies' },\n    { type: 'pacing', content: '- Speedy: 3 weeks or less\n- Steady: 6-8 weeks\n- Deliberate: 8-12 weeks\n- Average time: 8 weeks' },\n    { type: 'cert', content: '- Cert: CompTIA Project+\n- Calculator provided on cert test; whiteboard/paper provided\n- Per Lauren C.: Project+ earned BEFORE Oct 1, 2025 = good for life; earned ON or AFTER = expires every 3 years' },\n    { type: 'structure', content: '- 4 parts, 14 lessons linked to CertMaster\n- Parts: Project Mgmt Intro, Initiating and Planning (Lessons 3-9), Executing/Monitoring/Controlling (Lessons 10-13), Closing (Lesson 14)\n- Course rhythm: bounce between WGU materials and CompTIA (includes PBQs, practice questions)\n- 9 Performance-based Questions/tasks\n- Aim for 90%+ on quizzes, labs, practice tests' },\n    { type: 'student_tips', content: '- Course is HEAVY on terminology -- make flashcards or take notes\n- Per Justin Moss: CompTIA practice tests more helpful than Jason Dion (too wordy)\n- Per Zach Vega: Use CompTIA approach to answer -- what CompTIA says is right vs. what YOU think is right\n- Set course end date in CompTIA materials to activate countdown\n- Flashcards and Game Center on left side' },\n    { type: 'cert', content: '- Exam: CompTIA Project+ (PK0-005)\n- 95 questions max, 90 minutes\n- Passing score: 710/900\n- Calculator and whiteboard/paper provided during exam\n- Renewal: Certs earned BEFORE Oct 1, 2025 = good for life; ON or AFTER Oct 1, 2025 = expires every 3 years\n- Exam location: Webcam or PearsonVUE\n- Waiting period: 0, 14, 14 days' },\n  ],\n  'D421': [\n    { type: 'competencies', content: '- Analyzes mathematical problems using relations and directed graphs\n- Analyzes relationships between sets and functions' },\n    { type: 'pacing', content: '- Speedy: 10 days or less\n- Steady: 2-3 weeks\n- Deliberate: 3-5 weeks\n- Goal: 3 weeks or less\n- Updated 2/17/26: updated OA, Pre-assessment, improved instructional flow' },\n    { type: 'structure', content: '- 9 modules: Working with Sets, Higher Set Operations, Overview of Functions, Comp & Apps, Competency 1 Review, Binary Relations, Order Relations, N-ary Relations, Competency 2 Review\n- NO formula sheets allowed -- must memorize' },\n  ],\n  'D422': [\n    { type: 'competencies', content: '- Analyzes linear algorithms and associated big-O estimates\n- Analyzes the use of number theory in cryptography' },\n    { type: 'pacing', content: '- Speedy: 10 days or less\n- Steady: 2-3 weeks\n- Deliberate: 3-5 weeks\n- Goal: 3 weeks or less\n- Updated 2/17/26: updated OA, Pre-assessment, improved instructional flow' },\n    { type: 'structure', content: '- 10 modules: Algorithm Structures through Math Foundations of Encryption\n- NO formula sheets allowed -- must memorize\n- This course prepares for D830 Intro to Cryptography' },\n  ],\n  'D830': [\n    { type: 'competencies', content: '- Analyzes principles and operations of cryptographic algorithms and protocols to enhance an organization\'s ability to design and evaluate secure systems\n- Explains foundational cryptography concepts and the elements of a cryptographic system\n- Explains how cryptography frameworks inform alignment of organizational and information security guidelines\n- Implements encryption methods with symmetric and asymmetric algorithms' },
-    { type: 'pacing', content: '- 4-6 weeks to complete\n- 30-day pacing guide in WGU Connect Resources' },
-    { type: 'prereqs', content: '- Complete AFTER: D316, D317, D315, D325, D329' },
-    { type: 'structure', content: '- 12 sections via Zybooks (more interactive: videos, labs, knowledge checks)\n- Topics: in-depth security protocols, email security, cryptography frameworks, security guidelines, heavy math\n- Has pre-assessment (must complete to unlock OA), OA with 30 questions, AND 2 PAs (lab + written task)\n- PA scenario assigned based on student\'s last name' },\n  ],\n  'D832': [\n    { type: 'competencies', content: '- Develops security incident response plans that align to an organization\'s security goals and objectives and maintain business continuity\n- Recommends changes to established security management programs in response to a cyber-related incident\n- Recommends modifications to established information security governance to increase information assurance levels\n- Recommends risk mitigation strategies relevant to an organization\'s information security program\n- Recommends strategies for meeting regulatory compliance within an organization' },\n    { type: 'pacing', content: '- Course can be completed in a week\n- Speedy: 2 weeks or less\n- Steady: 4 weeks\n- Deliberate: 6 weeks\n- Course playbook shows week-to-week breakdown by pace' },\n    { type: 'structure', content: '- 28 parts via Zybooks\n- Readings and course material may NOT be required -- goal is to pass the PA\n- Configurable: students can rearrange lesson order or omit lessons ("Configure Zybook" button)\n- PA: 5 case studies, 4 tasks (equal to 2 typical WGU PA tasks), focused on incident response\n- Running case study throughout course prepares for PA' },\n    { type: 'student_tips', content: '- Forage website: Sign in with WGU email, complete tasks, download certificate from "Achievements" and upload to WGU course\n- WGU Connect "All in One Guide" -- very helpful\n- Some videos marked "optional" -- still worth watching' },\n  ],\n  'D278': [\n    { type: 'competencies', content: '- Explains the logic and outcome of simple algorithms\n- Identifies scripts for computer program requirements\n- Uses fundamental programming elements as part of common computer programming tasks' },\n    { type: 'pacing', content: '- Per Doug: typical pacing is 4 weeks' },\n    { type: 'structure', content: '- 11 sections via Zybooks\n- Sections 1-4: Intro, Variables, Branches, Loops\n- Sections 5-11: Arrays, Functions, Algorithms, Design Process, Software Topics, Troubleshooting, Debugging\n- Includes labs throughout' },\n  ],\n  'D281': [\n    { type: 'competencies', content: '- Develops resources for data access and security\n- Identifies the fundamentals of open-source software' },\n    { type: 'pacing', content: '- Speedy: 4 weeks or less\n- Steady: 5 weeks\n- Deliberate: 6 weeks\n- Average time: 6 weeks' },\n    { type: 'cert', content: '- Cert: Linux Professional Institute (LPI) Linux Essentials' },\n    { type: 'structure', content: '- 3 sections: Welcome, Linux Essentials (8 lessons -- Lessons 2 and 8 are LONG), Labs with virtual machine\n- Critical areas: Topics 2 (long), 3, and 5\n- Lesson flow: chapter reading, videos, knowledge checks' },\n    { type: 'cert', content: '- Exam: LPI Linux Essentials (010-160)\n- 40 questions, 60 minutes\n- Passing score: 500/800\n- Exam location: Webcam or PearsonVUE\n- Renewal: Not required -- lifetime certification\n- Waiting period: 7, 30, 30 days' },\n  ],\n  'D426': [\n    { type: 'competencies', content: '- Defines primary and foreign keys in data normalization\n- Determines how to run queries for creation and manipulation of data in relational databases\n- Explains attributes of databases, database tables, and structured and associated query language (SQL) commands' },\n    { type: 'pacing', content: '- Speedy: 4 weeks or less\n- Steady: 5-6 weeks\n- Deliberate: 7-8 weeks' },\n    { type: 'structure', content: '- 5 sections via Zybooks: Intro to Databases, Database Management (10 lessons, 8 labs), Complex Queries (8 lessons, 4 labs), Database Design (15 lessons, 2 labs), Indexes\n- Interactive lessons' },\n    { type: 'student_tips', content: '- Go through material MULTIPLE TIMES and do coding practices more than once\n- Partner with instructors' },\n  ],\n  'D522': [\n    { type: 'competencies', content: '- Applies Python principles and syntax to manage variables, data structures, and operators and to perform IT tasks\n- Creates Python scripts using control structures to automate system tasks\n- Integrates Python scripts, modules, packages, and libraries to automate networking tasks and processes' },\n    { type: 'structure', content: '- V1: 15 sections via Zybooks -- covers file handling, log analysis, subprocesses for real-world IT\n- V2 (effective 6/22/26): 3 sections, OA replaced by PA, whole new content\n- V2 PA: Design project from scratch -- Python fundamentals, Git and GitLab environments\n- V2 Task 1: DNS outage resolution using Python automation\n- V2 Task 2: Monitoring solution for DNS issues with alerting and ticketing' },\n    { type: 'student_tips', content: '- V1 OA: 20 multiple choice + 10 coding questions\n- D278 helps students with zero coding experience\n- Programming Center: sharepoint link\n- Use the 100 Days of Coding\n- Per Cyber Group: Definitely take D522 BEFORE D385!' },\n  ],\n  'D492': [\n    { type: 'competencies', content: '- Applies appropriate data acquisition and manipulation techniques to address businesses\' data requirements for analysis\n- Applies basic concepts to analyze data types and data structures\n- Applies data analysis techniques and tools to address a business need\n- Applies data management concepts to ensure the accuracy and quality of data\n- Applies data visualization techniques to communicate a business need\n- Selects the data visualization technique to communicate a business requirement' },
-    { type: 'pacing', content: '- Speedy: 4 weeks max\n- Steady: 5-7 weeks\n- Deliberate: 8-10 weeks\n- Can finish in 3 weeks doing 2 sections/week' },
-    { type: 'cert', content: '- Cert: CompTIA Data+\n- "Easiest cert test" compared to A+ (per instructor)\n- No calculator allowed -- do work by hand\n- Goal: at or close to 85% on CertMaster Practice test\n- 5-10% of questions are poorly worded / best guess -- test design issue' },
-    { type: 'structure', content: '- 6 sections, 18-19 lessons via CertMaster\n- Flow: Read, Watch, Lab(s), Practice Activities (flashcards, etc.)\n- Covers: data types, acquisition/manipulation, analysis, visualization, selection, management\n- 20% course overlap with D426 Data Mgmt Foundations' },
-    { type: 'student_tips', content: '- Use Course Materials + Udemy practice tests\n- Don\'t worry about optional labs -- focus on practice tests and PBQs in CertMaster\n- Helps students be more marketable\n- Mike Chapple LinkedIn Learning: Data+ Cert Prep' },\n    { type: 'cert', content: '- Exam: CompTIA Data+ (DA0-001)\n- 90 questions max, 90 minutes\n- Passing score: 675/900\n- No calculator allowed -- do work by hand\n- Exam location: Webcam or PearsonVUE\n- Renewal: Every 3 years via CE or retake\n- Waiting period: 0, 14, 14 days\n- "Easiest cert test" compared to A+ per instructors\n- 5-10% of questions are poorly worded (test design issue) -- best guess' },\n  ],\n  'D385': [\n    { type: 'competencies', content: '- Configures security authentication for REST and APIs\n- Develops mitigation solutions for security vulnerabilities\n- Evaluates application and network logs for performance, availability, and security vulnerabilities' },\n    { type: 'pacing', content: '- Per Doug: 4 weeks\n- Complete AFTER D522 Python (and per Cyber Group: DEFINITELY take D522 first!)' },\n    { type: 'prereqs', content: '- Complete AFTER: D522 Python' },\n    { type: 'structure', content: '- 4 sections: Overview, Application & Network Logs, Security Authentication, Mitigation Solutions\n- Look for "Practice Area" at end of sections -- has practice labs that mirror assessments\n- Requires students to memorize a lot of info\n- Be careful with spacing -- affects coding accuracy' },\n    { type: 'student_tips', content: '- Pre-assessment will NOT give helpful info for the coding problem section\n- Encourage struggling students to connect with a Peer Coach -- even weekly\n- Per Mario: Tricky course; OA to be redesigned\n- Per Lindsey Caraher: Task 1 "Summarize 5 distinct issues" -- run the vulnerabilities report in Python project, read report, pick issues from there\n- Email instructor group: cmsoftware@wgu.edu' },\n  ],\n  'D831': [\n    { type: 'competencies', content: '- Describes the types of artificial intelligence for decision-making in real-world applications\n- Explains best practices for managing secure AI systems within an organization\n- Explains how the collection, wrangling, and cleaning of data impacts AI/ML models' },\n    { type: 'structure', content: '- 14 sections via Zybooks\n- All reading and charts -- each part is short (1 page or less)\n- Includes knowledge checks and labs throughout\n- OA course' },\n  ],\n  'D340': [\n    { type: 'competencies', content: '- Applies controls and procedures for software and system security\n- Applies improvement techniques and automation based on system monitoring and threat hunting\n- Applies incident response procedures based on digital forensic analysis\n- Applies security concepts to risk mitigation with regards to privacy and protection\n- Manages security testing and response in defense of organizational threats and vulnerabilities' },\n    { type: 'pacing', content: '- Speedy: 3-4 weeks\n- Steady: 4-8 weeks\n- Deliberate: 8-10 weeks\n- Average time: 9 weeks' },\n    { type: 'cert', content: '- Cert: CompTIA CySA+\n- Goal: engage in all course materials, earn 90%+ on all practice sets, PBQs, assessments, labs\n- CertMaster Practice Test can be taken 2x -- different test generated on 2nd attempt\n- Uses CertMaster curriculum' },\n    { type: 'prereqs', content: '- Complete AFTER: D316, D317, D315, D325, D329, D829, C845, D830, D832, D522' },\n    { type: 'structure', content: '- 4 sections via CertMaster\n- Section 1: Threats and Security Intelligence\n- Section 2: Apply Security Solutions\n- Section 3: Demonstrating Incident Response Communication\n- Section 4: Cert Exam Practice with optional videos' },\n    { type: 'student_tips', content: '- Udemy: Jason Dion Complete Course and Practice Exams (7 total) -- take screenshots and email to instructor to request voucher\n- LinkedIn Learning and Pluralsite also have good training series and labs\n- TryHackMe: free version -- "Learn" tab and "Paths" tab\n- TryHackMe reduced cost with WGU email: $10/month' },\n    { type: 'cert', content: '- Exam: CompTIA CySA+ (CS0-003)\n- 85 questions max, 165 minutes\n- Passing score: 750/900\n- Exam location: Webcam or PearsonVUE\n- Renewal: Every 3 years via CE or retake\n- Waiting period: 0, 14, 14 days\n- Stackable cert earned: CompTIA Security Analytics Professional\n- Intense but less so than PenTest+ per Bridge the Cyber Gap session' },\n  ],\n  'D320': [\n    { type: 'competencies', content: '- Conducts risk analysis and risk management in alignment with disaster recovery and business continuity plans\n- Identifies legal, compliance, and ethical concerns within a cloud environment\n- Identifies security policies and procedures for cloud applications\n- Implements operational capabilities, procedures, and training in relation to organizational needs\n- Implements secure solutions in cloud service models\n- Safeguards cloud data with identity and access management' },\n    { type: 'pacing', content: '- Speedy: 4 weeks or less\n- Steady: 7 weeks\n- Deliberate: 7-8 weeks\n- Average time: 6 weeks' },\n    { type: 'cert', content: '- Optional CCSP voucher after passing OA -- only 1 voucher available\n- Lessons 1-10: Read CCSP Official Study Guide\n- Lessons 11-12: Review 6 video courses from LinkedIn Learning (cert prep)\n- Additional quizzes via Sybex Test Preparation on Wiley Efficient Learning app' },\n    { type: 'prereqs', content: '- Complete AFTER: D316, D317, D315, D325, D329, D829, C845, D830, D832, D522' },\n    { type: 'structure', content: '- 7 sections, each with learning objectives, readings, knowledge check, summary\n- Lessons 5 and 6 tend to require extra time\n- Per Robert: Nearly all material covered in previous courses -- students tend to do well quickly' },\n    { type: 'cert', content: '- Exam: ISC2 CCSP (Certified Cloud Security Professional)\n- 150 questions, 4 hours\n- Passing score: 700/1000\n- Computer adaptive testing (CAT format)\n- Voucher: optional, 1 voucher available after passing OA\n- Exam location: ISC2 / PearsonVUE\n- Renewal: Every 3 years -- requires 90 CPE credits\n- 5 years of paid work experience required for full CCSP designation' },\n  ],\n  'D332': [\n    { type: 'competencies', content: '- Defines the scope and planning for procurement of penetration testing engagements\n- Develops penetration testing techniques in exploitation of physical, digital, and social vulnerabilities\n- Performs cyber reconnaissance techniques for information gathering and vulnerability identification\n- Reports the results of cybersecurity assessments with recommended actions\n- Simulates attacks and responses on an organization\'s security infrastructure' },
-    { type: 'pacing', content: '- Speedy: 4 weeks\n- Steady: 4-6 weeks\n- Deliberate: 6-8 weeks\n- Average time: 7 weeks (top students with 5+ years experience: 45 days; typical: 80 days)\n- 68% pass rate at WGU (outside WGU: 65%)' },
-    { type: 'cert', content: '- Cert: CompTIA PenTest+\n- 90 questions, 165 minutes, score to pass: 750/900, PT0-003 version\n- Difficulty: intermediate -- best after 3-4 years industry experience\n- Retail: $470 / WGU: $250\n- Retake cost after failing 2nd attempt = WGU pays' },
-    { type: 'prereqs', content: '- Complete AFTER: D316, D317, D315, D325, D329, D829, C845, D830, D832, D522, D385, D831, D340, D320' },
-    { type: 'structure', content: '- 10 sections + Exam Readiness via CompTIA platform\n- Heavy reading, limited interactive activities, minimal videos\n- 37 labs total -- complete 95% with 90%+ scores\n- Students must know Linux command lines\n- Certmaster is good but use additional resources' },
-    { type: 'cert', content: '- VOUCHER REQUIREMENTS (effective Feb 2026):\n  1. Live call with any D332 instructor (required before voucher -- review exam rigor, not a quiz)\n  2. CertMaster Perform Labs: 90%+ overall completion\n  3. CertMaster Perform A.2.6 full-length practice exam: 90%+\n- This is cumulative: Security+, Linux+, CySA+ content' },
-    { type: 'student_tips', content: '- Start with CertMaster material and labs for foundation\n- Watch Hank Hackerson\'s Pentest playlist on YouTube\n- TryHackMe PenTest+ pathway (HTTP and nmap rooms)\n- All 6 Jason Dion PenTest+ 003 practice exams on Udemy (aim for 80%+)\n- ChatGPT for scripting practice questions with inputs/outputs\n- PocketPrep for drilling questions on the go (1,000 questions, costs money)\n- Per Jon Pham: tryhackme.com for more experience\n- Mental shift: from defense to offense' },\n    { type: 'cert', content: '- Exam: CompTIA PenTest+ (PT0-003)\n- 90 questions max, 165 minutes\n- Passing score: 750/900\n- Exam location: Webcam or PearsonVUE\n- Renewal: Every 3 years via CE or retake\n- Waiting period: 0, 14, 14 days\n- Difficulty: Intermediate -- best with 3-4 years industry experience\n- 68% pass rate at WGU (65% outside WGU -- DO NOT share with students)\n- WGU cost: $250 / Retail: $470 (do not tell students exact number)\n- Cumulative exam: pulls from Security+, Linux+, CySA+ content\n- Stackable certs: CompTIA Network Vulnerability Assessment Professional, CompTIA Network Security Professional' },\n  ],\n  'D833': [\n    { type: 'competencies', content: '- Creates a project proposal to convince stakeholders to implement the security solution\n- Creates a technical report for a fully functional system to solve real-world scenarios\n- Creates an executive summary of a security solution directed to IT and business professionals' },\n    { type: 'pacing', content: '- 4-6 weeks to complete\n- FINAL course in program -- should be completed LAST\n- V2 rolls out 6/29/26 for students starting on or after that date (4 job role scenarios)' },\n    { type: 'structure', content: '- 3 tasks:\n  - Task 1: Formal Proposal/Topic Selection (requires instructor approval)\n  - Task 2: Executive Summary/Project Proposal (has peer review -- can take up to 7 days)\n  - Task 3: Technical Report/Post-implementation Report\n- Must be written in proper APA format\n- Templates available' },\n    { type: 'student_tips', content: '- Join WGU Connect\n- Access Capstone Excellence Archive for examples\n- Technical Report Structure Overview available\n- Peer review piece added to Task 2\n- If former Capstone (C769) is completed, student does NOT do this one' },\n  ],\n  'D841': [\n    { type: 'general', content: '- Daggered course\n- 3 sections: Fundamental Issues, Laws Influencing Information Security, Security & Privacy in Organizations\n- Flow: Intro, Learning Objectives, Readings & Resources, Knowledge Check, Summary' },\n  ],\n  'C843': [\n    { type: 'structure', content: '- 2 sections: Welcome (must have Cengage Account), Info Security Management (5 lessons)\n- Has readings, some videos, and a PA' },\n  ],\n  'C844': [\n    { type: 'general', content: '- DAGGERED COURSE\n- 4 sections: Welcome, Cellular & Mobile Technologies, Wireless Technologies, Mapping & Monitoring\n- Content from digital textbook with supplemental videos and labs\n- 6 total labs\n- Flow: Intro, Learning Objectives, Readings & Resources, Knowledge Check, Summary' },\n  ],\n  'D334': [\n    { type: 'general', content: '- DAGGERED COURSE\n- 4 sections: Course overview, Foundations of Cryptography, Applications of Cryptography, Course Summary\n- Has videos, readings, knowledge checks' },\n    { type: 'student_tips', content: '- Per Bryan Gilmore: Lots of memorization -- digital flashcards helped\n- Upload picture with one place missing, try to remember what was missing\n- Use Anki (desktop app, similar to Quizlet but no ads)' },\n  ],\n  'D335': [\n    { type: 'general', content: '- DAGGERED COURSE\n- 30 sections via Zybooks\n- Sections 1-12: lessons with labs (required)\n- Sections 13-18: optional lessons with labs\n- Sections 19-28: optional labs\n- Sections 29-30: 2 practice tests\n- Interactive Kyron modules for programming practice via real-world scenarios and AI discussions' },\n    { type: 'student_tips', content: '- Do NOT memorize -- practice with programming techniques\n- Complete the optional labs too' },\n  ],\n  'D372': [\n    { type: 'general', content: '- DAGGERED COURSE with new migration\n- 3 sections: Theoretical Foundations, Developing a Systems Thinking Mindset, Solving Complex Problems in IT\n- Lessons include readings' },\n  ],\n  'D430': [\n    { type: 'general', content: '- DAGGERED COURSE\n- 7 sections via readings and videos\n- Instructor provides 4-week pacing plan\n- Flow: Intro, Learning, Knowledge Check, Summary' },\n  ],\n  'D427': [\n    { type: 'general', content: '- DAGGERED COURSE -- WGU OA with pre-assessment\n- 6 sections via Zybooks -- Section 1 is very long\n- V3: More streamlined resources, videos added, practice problems added\n- Pre-assessment and final assessment include a SQL Reference Sheet -- syntax does NOT need to be memorized\n- Student must understand WHICH command to use but not memorize all syntax' },\n    { type: 'student_tips', content: '- Some Cyber students may opt to wait and take D492 Data+ cert instead of attempting D427 this term\n- If student hasn\'t attempted OA and funding won\'t be impacted: consider dropping D427 and accelerating another course to stay above 12 CUs' },\n  ],\n  'D833_capstone': [],\n};\n
-// -- Note type labels ------------------------------------------------------
-
-const NOTE_TYPE_LABELS: Record<NoteType, string> = {
-  general:      '[General]',
-  pacing:       '[Pacing]',
-  structure:    '[Structure]',
-  cert:         '[Cert Info]',
-  student_tips: '[Student Tips]',
-  resources:    '[Resources]',
-  prereqs:      '[Prerequisites]',
-  competencies: '[Competencies]',
-};
-
-const NOTE_TYPE_COLORS: Record<NoteType, string> = {
-  general:      'var(--muted)',
-  pacing:       'var(--green)',
-  structure:    'var(--purple)',
-  cert:         '#d97706',
-  student_tips: 'var(--amber)',
-  resources:    '#0891b2',
-  prereqs:      'var(--red)',
-  competencies: '#0f766e',
-};
-
-// -- Main Component ---------------------------------------------------------
-
-export default function CourseNotes() {
-  const [selectedCode, setSelectedCode] = useState<string>('');
-  const [notes, setNotes]               = useState<CourseNote[]>([]);
-  const [loading, setLoading]           = useState(false);
-  const [showAdd, setShowAdd]           = useState(false);
-  const [newType, setNewType]           = useState<NoteType>('student_tips');
-  const [newContent, setNewContent]     = useState('');
-  const [saving, setSaving]             = useState(false);
-  const [preloaded, setPreloaded]       = useState(false);
-  const [editingId, setEditingId]       = useState<string | null>(null);
-  const [editContent, setEditContent]   = useState('');
-  const [searchTerm, setSearchTerm]     = useState('');
-  const [filterType, setFilterType]     = useState<NoteType | 'all'>('all');
-
-  const selectedCourse = COURSES.find(c => c.code === selectedCode);
-
-  // -- Load notes for selected course ---------------------------------------
-  const loadNotes = useCallback(async (code: string) => {
-    if (!supabase || !code) return;
-    setLoading(true);
-    const { data } = await supabase
-      .from('course_notes')
-      .select('*')
-      .eq('course_code', code)
-      .order('note_type')
-      .order('created_at');
-    setNotes((data as CourseNote[]) ?? []);
-    setLoading(false);
-  }, []);
-
-  // -- Seed pre-loaded notes if none exist -----------------------------------
-  const seedPreloaded = useCallback(async (code: string) => {
-    if (!supabase) return;
-    const { data: sessionData } = await supabase.auth.getSession();
-    const userId = sessionData.session?.user?.id;
-    if (!userId) return;
-
-    const { data: existing } = await supabase
-      .from('course_notes')
-      .select('id')
-      .eq('course_code', code)
-      .limit(1);
-
-    if (existing && existing.length > 0) return; // already seeded
-
-    const seeded = PRELOADED_NOTES[code];
-    if (!seeded || seeded.length === 0) return;
-
-    await supabase.from('course_notes').insert(
-      seeded.map(n => ({
-        user_id: userId,
-        course_code: code,
-        note_type: n.type,
-        content: n.content,
-      }))
-    );
-    setPreloaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (!selectedCode) return;
-    (async () => {
-      await seedPreloaded(selectedCode);
-      await loadNotes(selectedCode);
-    })();
-  }, [selectedCode, loadNotes, seedPreloaded]);
-
-  // -- Add note --------------------------------------------------------------
-  async function handleAdd() {
-    if (!supabase || !newContent.trim() || !selectedCode) return;
-    setSaving(true);
-    const { data: sessionData } = await supabase.auth.getSession();
-    const userId = sessionData.session?.user?.id;
-    if (!userId) { setSaving(false); return; }
-
-    await supabase.from('course_notes').insert({
-      user_id: userId,
-      course_code: selectedCode,
-      note_type: newType,
-      content: newContent.trim(),
-    });
-
-    setNewContent('');
-    setShowAdd(false);
-    await loadNotes(selectedCode);
-    setSaving(false);
-  }
-
-  // -- Edit note -------------------------------------------------------------
-  async function handleEdit(note: CourseNote) {
-    if (!supabase) return;
-    await supabase.from('course_notes').update({
-      content: editContent,
-      updated_at: new Date().toISOString(),
-    }).eq('id', note.id);
-    setEditingId(null);
-    await loadNotes(selectedCode);
-  }
-
-  // -- Delete note -----------------------------------------------------------
-  async function handleDelete(id: string) {
-    if (!supabase || !confirm('Delete this note?')) return;
-    await supabase.from('course_notes').delete().eq('id', id);
-    await loadNotes(selectedCode);
-  }
-
-  // -- Filter notes ----------------------------------------------------------
-  const filtered = notes.filter(n => {
-    const matchType = filterType === 'all' || n.note_type === filterType;
-    const matchSearch = !searchTerm || n.content.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchType && matchSearch;
-  });
-
-  // Group filtered notes by type for display
-  const grouped = filtered.reduce<Record<NoteType, CourseNote[]>>((acc, note) => {
-    const t = note.note_type as NoteType;
-    if (!acc[t]) acc[t] = [];
-    acc[t].push(note);
-    return acc;
-  }, {} as Record<NoteType, CourseNote[]>);
-
-  const termGroups = Array.from({ length: 11 }, (_, i) => i).map(term => ({
-    term,
-    courses: COURSES.filter(c => c.term === term),
-  }));
-
-  return (
-    <>
-      <div className="page-header">
-        <div>
-          <h1>Course Notes</h1>
-          <p>BSCSIA 202509 -- reference notes by course</p>
-        </div>
-      </div>
-
-      {/* Course selector */}
-      <section className="panel">
-        <div className="panel-head">
-          <h2><BookOpen size={15} style={{ verticalAlign: 'middle', marginRight: 6 }} />Select a Course</h2>
-          {selectedCode && (
-            <button className="btn ghost" onClick={() => { setSelectedCode(''); setNotes([]); }}>
-              <X size={13} /> Clear
-            </button>
-          )}
-        </div>
-        <select
-          value={selectedCode}
-          onChange={e => setSelectedCode(e.target.value)}
-          style={{ width: '100%', fontSize: 14 }}
-        >
-          <option value="">-- Choose a course --</option>
-          {termGroups.map(({ term, courses }) => (
-            <optgroup key={term} label={term === 0 ? ' Program Reference' : `Term ${term}`}>
-              {courses.map(c => (
-                <option key={c.code} value={c.code}>
-                  {c.code} -- {c.title}{c.cu > 0 ? ` (${c.type}, ${c.cu} CU)` : ''}{c.cert ? ` - ${c.cert}` : ''}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-      </section>
-
-      {/* Course info banner */}
-      {selectedCourse && (
-        <div className="brief-item" style={{
-          borderLeft: '4px solid var(--purple)',
-          display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center',
-          marginBottom: 12
-        }}>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>{selectedCourse.code} -- {selectedCourse.title}</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-              Term {selectedCourse.term} - {selectedCourse.type} - {selectedCourse.cu} CUs
-              {selectedCourse.cert && ` -  ${selectedCourse.cert}`}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Notes area */}
-      {selectedCode && (
-        <>
-          {/* Filter + search bar */}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12, alignItems: 'center' }}>
-            <input
-              placeholder="Search notes..."
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              style={{ flex: '1 1 200px' }}
-            />
-            <select value={filterType} onChange={e => setFilterType(e.target.value as NoteType | 'all')} style={{ flex: '0 0 auto' }}>
-              <option value="all">All categories</option>
-              {(Object.entries(NOTE_TYPE_LABELS) as [NoteType, string][]).map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
-              ))}
-            </select>
-            <button className="btn primary" onClick={() => setShowAdd(v => !v)}>
-              <Plus size={14} /> Add note
-            </button>
-          </div>
-
-          {/* Add note form */}
-          {showAdd && (
-            <section className="panel" style={{ borderLeft: '4px solid var(--purple)' }}>
-              <div className="panel-head">
-                <h2>Add a note for {selectedCode}</h2>
-                <button className="btn ghost" onClick={() => setShowAdd(false)}>Cancel</button>
-              </div>
-              <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>
-                Category
-              </label>
-              <select value={newType} onChange={e => setNewType(e.target.value as NoteType)} style={{ width: '100%', marginBottom: 10 }}>
-                {(Object.entries(NOTE_TYPE_LABELS) as [NoteType, string][]).map(([v, l]) => (
-                  <option key={v} value={v}>{l}</option>
-                ))}
-              </select>
-              <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>
-                Content -- use bullet points (- or -) for easy scanning
-              </label>
-              <textarea
-                value={newContent}
-                onChange={e => setNewContent(e.target.value)}
-                placeholder="- Key info here&#10;- Another point&#10;- Student tip or resource"
-                style={{ minHeight: 120, fontFamily: 'inherit' }}
-              />
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-                <button className="btn primary" onClick={handleAdd} disabled={saving || !newContent.trim()}>
-                  {saving ? <><RefreshCw size={13} className="spin" /> Saving...</> : <><Save size={13} /> Save note</>}
-                </button>
-              </div>
-            </section>
-          )}
-
-          {/* Notes display */}
-          {loading ? (
-            <div className="brief-item" style={{ color: 'var(--muted)' }}>
-              <RefreshCw size={13} className="spin" /> Loading notes...
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="brief-item" style={{ color: 'var(--muted)' }}>
-              No notes found for this course yet. Click "Add note" to start building your reference.
-            </div>
-          ) : (
-            (Object.entries(NOTE_TYPE_LABELS) as [NoteType, string][])
-              .filter(([type]) => grouped[type]?.length > 0)
-              .map(([type, label]) => (
-                <section key={type} className="panel" style={{ borderLeft: `4px solid ${NOTE_TYPE_COLORS[type]}` }}>
-                  <div className="panel-head">
-                    <h2 style={{ color: NOTE_TYPE_COLORS[type] }}>{label}</h2>
-                  </div>
-                  {grouped[type].map(note => (
-                    <div key={note.id} style={{ marginBottom: 12 }}>
-                      {editingId === note.id ? (
-                        <div>
-                          <textarea
-                            value={editContent}
-                            onChange={e => setEditContent(e.target.value)}
-                            style={{ width: '100%', minHeight: 100, fontFamily: 'inherit', marginBottom: 8 }}
-                          />
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button className="btn primary tiny" onClick={() => handleEdit(note)}>Save</button>
-                            <button className="btn ghost tiny" onClick={() => setEditingId(null)}>Cancel</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{ position: 'relative' }}>
-                          <div style={{
-                            fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap',
-                            background: 'var(--surface-1)', borderRadius: 8, padding: '8px 10px',
-                          }}>
-                            {note.content}
-                          </div>
-                          <div style={{ display: 'flex', gap: 4, marginTop: 4, justifyContent: 'flex-end' }}>
-                            <button
-                              className="btn ghost tiny"
-                              onClick={() => { setEditingId(note.id); setEditContent(note.content); }}
-                            >Edit</button>
-                            <button
-                              className="btn ghost tiny"
-                              onClick={() => handleDelete(note.id)}
-                              style={{ color: 'var(--red)' }}
-                            >Delete</button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </section>
-              ))
-          )}
-        </>
-      )}
-
-      {/* Empty state */}
-      {!selectedCode && (
-        <section className="panel" style={{ textAlign: 'center', padding: 40 }}>
-          <FileText size={32} style={{ color: 'var(--muted)', marginBottom: 12 }} />
-          <p style={{ color: 'var(--muted)', fontSize: 14 }}>
-            Select a course from the dropdown above to see your notes and tips for it.
-          </p>
-          <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>
-            All 38 BSCSIA 202509 courses are pre-loaded with notes from your course notes document.
-          </p>
-        </section>
-      )}
-    </>
-  );
-}
