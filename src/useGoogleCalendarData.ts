@@ -187,9 +187,16 @@ export function useGoogleCalendarData(options: UseGoogleCalendarDataOptions = {}
     if (!userId) return false;
 
     const { data: cacheRow, error } = await supabase
-      .from('google_calendar_cache')
-      .select('*')
-      .eq('user_id', userId)
+     const { data: cache } = await supabase
+  .from('google_calendar_cache')
+  .select('*')
+  .eq('user_id', userId)
+  .maybeSingle();
+
+// Fall back to any household cache if user has none (Adam viewing Kaylee's calendar)
+const { data: finalCache } = cache 
+  ? { data: cache }
+  : await supabase.from('google_calendar_cache').select('*').order('updated_at', { ascending: false }).limit(1).maybeSingle();
       .maybeSingle();
 
     if (error || !cacheRow) return false;
