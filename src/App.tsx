@@ -17,11 +17,12 @@ import MigraineTracker from './MigraineTracker';
 import Contacts from './Contacts';
 import Books from './Books';
 import FTOTracker from './FTOTracker';
+import CourseNotes from './CourseNotes';
 import WorkCalendar from './WorkCalendar';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'settings';
+type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -227,7 +228,8 @@ const workNav: readonly NavEntry[] = [
   ['calendar', 'Calendar', CalendarDays],
   ['students', 'Students', Users],
   ['outreach', 'Outreach Drafts', Mail],
-  ['fto', 'FTO Tracker', Clock]
+  ['fto', 'FTO Tracker', Clock],
+  ['course_notes', 'Course Notes', BookOpen]
 ];
 
 const moduleMeta: { page: Page; module_name: string; label: string; default_access: AccessLevel }[] = [
@@ -1620,6 +1622,7 @@ Kaylee`;
           {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
           {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
           {page === 'fto' && activeRole === 'admin' && <FTOTracker />}
+          {page === 'course_notes' && activeRole === 'admin' && <CourseNotes />}
           {page === 'outreach' && activeRole === 'admin' && <Outreach drafts={drafts} students={students} generateCohortDrafts={generateCohortDrafts} updateDraft={updateDraft} markDraftSent={markDraftSent} deleteDraft={deleteDraft} />}
           {page === 'settings' && activeRole === 'admin' && <SettingsPage permissions={permissions} updatePermission={updatePermission} />}
         </main>
