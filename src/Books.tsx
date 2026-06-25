@@ -1065,7 +1065,6 @@ export default function Books() {
   );
 }
 
-/
 // __ Cover URL helper ____________________________________________________
 // Returns the best cover URL instantly without fetching.
 // Priority: stored cover_url -> Open Library by ISBN -> null
@@ -1078,7 +1077,7 @@ function getCoverUrl(book: Book): string | null {
   return null;
 }
 
-/ ── BookCard (grid view) ───────────────────────────────────────────────────
+// ── BookCard (grid view) ───────────────────────────────────────────────────
 
 function BookCard({ book, onUpdate, onDelete }: { book: Book; onUpdate: (id: string, patch: Partial<Book>) => void; onDelete: (id: string) => void }) {
   const [hover, setHover] = useState(false);
