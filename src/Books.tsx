@@ -507,7 +507,7 @@ export default function Books() {
         const item = json.items?.[0];
         if (!item) continue;
         const info = item.volumeInfo ?? {};
-        const cover = info.imageLinks?.thumbnail?.replace('http://', 'https://') ?? null;
+        let cover = info.imageLinks?.thumbnail?.replace('http://', 'https://') ?? null;
         const genre = book.genre || (info.categories?.[0]?.split('/')[0]?.trim() ?? null);
         const description = book.description || info.description || null;
         const page_count = book.page_count || info.pageCount || null;
