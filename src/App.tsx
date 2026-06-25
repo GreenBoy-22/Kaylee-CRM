@@ -1,18 +1,18 @@
-import { Activity, Cloud, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import {
-  Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
+  Activity, Cloud, Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
   CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon
 } from 'lucide-react';
-import { Activity, Cloud, supabase, hasSupabase } from './lib/supabase';
+import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
 import GoogleCalendarToday from './GoogleCalendarToday';
 import Budget from './Budget';
 import Vehicles from './Vehicles';
 import Jules from './Jules';
-import { Activity, Cloud, useDailyBriefing, type BriefingLine } from './useDailyBriefing';
+import { useDailyBriefing, type BriefingLine } from './useDailyBriefing';
 import MigraineTracker from './MigraineTracker';
 import Contacts from './Contacts';
 import Books from './Books';
