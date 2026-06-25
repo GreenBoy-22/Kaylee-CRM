@@ -512,6 +512,13 @@ export default function Books() {
         const description = book.description || info.description || null;
         const page_count = book.page_count || info.pageCount || null;
         const google_books_id = item.id ?? null;
+        // Fallback: try Open Library cover if Google Books had no image
+        if (!cover && book.isbn) {
+          const cleanIsbn = book.isbn.replace(/[^0-9X]/gi, '');
+          if (cleanIsbn.length >= 10) {
+            cover = `https://covers.openlibrary.org/b/isbn/${cleanIsbn}-M.jpg`;
+          }
+        }
         if (cover || genre || description) {
           await supabase.from('books').update({
             cover_url: cover ?? book.cover_url,
@@ -952,8 +959,8 @@ export default function Books() {
 
           {suggestion && !suggesting && (
             <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-              {suggestion.book.cover_url
-                ? <img src={suggestion.book.cover_url} alt={suggestion.book.title} style={{ width: 56, height: 80, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }} />
+              {getCoverUrl(suggestion.book)
+                ? <img src={getCoverUrl(suggestion.book)!} alt={suggestion.book.title} style={{ width: 56, height: 80, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                 : <div style={{ width: 56, height: 80, background: 'var(--surface-2)', borderRadius: 4, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><BookOpen size={20} style={{ color: 'var(--muted)' }} /></div>
               }
               <div style={{ flex: 1 }}>
@@ -1058,7 +1065,20 @@ export default function Books() {
   );
 }
 
-// ── BookCard (grid view) ───────────────────────────────────────────────────
+/
+// __ Cover URL helper ____________________________________________________
+// Returns the best cover URL instantly without fetching.
+// Priority: stored cover_url -> Open Library by ISBN -> null
+function getCoverUrl(book: Book): string | null {
+  if (book.cover_url) return book.cover_url;
+  if (book.isbn) {
+    const clean = book.isbn.replace(/[^0-9X]/gi, '');
+    if (clean.length >= 10) return `https://covers.openlibrary.org/b/isbn/${clean}-M.jpg`;
+  }
+  return null;
+}
+
+/ ── BookCard (grid view) ───────────────────────────────────────────────────
 
 function BookCard({ book, onUpdate, onDelete }: { book: Book; onUpdate: (id: string, patch: Partial<Book>) => void; onDelete: (id: string) => void }) {
   const [hover, setHover] = useState(false);
@@ -1068,8 +1088,8 @@ function BookCard({ book, onUpdate, onDelete }: { book: Book; onUpdate: (id: str
       onMouseLeave={() => setHover(false)}
       style={{ borderRadius: 8, overflow: 'hidden', background: 'var(--surface, #fff)', border: '1px solid var(--border, rgba(0,0,0,0.07))', cursor: 'pointer', transition: 'box-shadow 120ms', boxShadow: hover ? '0 4px 12px rgba(0,0,0,0.12)' : 'none', position: 'relative' }}
     >
-      {book.cover_url
-        ? <img src={book.cover_url} alt={book.title} style={{ width: '100%', aspectRatio: '2/3', objectFit: 'cover', display: 'block' }} />
+      {getCoverUrl(book)
+        ? <img src={getCoverUrl(book)!} alt={book.title} style={{ width: '100%', aspectRatio: '2/3', objectFit: 'cover', display: 'block' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
         : <div style={{ width: '100%', aspectRatio: '2/3', background: `${STATUS_COLORS[book.status]}18`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 6px' }}>
             <BookOpen size={22} style={{ color: STATUS_COLORS[book.status], flexShrink: 0 }} />
             <span style={{ fontSize: 9, color: STATUS_COLORS[book.status], textAlign: 'center', lineHeight: 1.3, fontWeight: 600, wordBreak: 'break-word' }}>{book.title.slice(0,40)}</span>
@@ -1112,8 +1132,8 @@ function BookListRow({ book, expanded, onToggle, onUpdate, onDelete }: {
         onClick={onToggle}
         style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', background: 'none', border: 'none', padding: '9px 4px', borderBottom: expanded ? 'none' : '1px solid var(--border, rgba(0,0,0,0.07))', cursor: 'pointer', textAlign: 'left' }}
       >
-        {book.cover_url
-          ? <img src={book.cover_url} alt={book.title} style={{ width: 32, height: 46, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} />
+        {getCoverUrl(book)
+          ? <img src={getCoverUrl(book)!} alt={book.title} style={{ width: 32, height: 46, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
           : <div style={{ width: 32, height: 46, background: `${STATUS_COLORS[book.status]}22`, borderRadius: 3, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <BookOpen size={14} style={{ color: STATUS_COLORS[book.status] }} />
             </div>
