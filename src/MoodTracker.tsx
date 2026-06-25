@@ -239,11 +239,11 @@ export default function MoodTracker() {
 
       {/* Tabs */}
       <div className="tabs" style={{ marginBottom: 14 }}>
-        {(['log', 'history', 'calendar'] as const).map(t => (
-          <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
-            {t === 'log' ? 'Log Entry' : t === 'history' ? 'History' : 'Calendar'}
-          </button>
-        ))}
+        <button className={tab === 'log' ? 'active' : ''} onClick={() => setTab('log')}>Log Entry</button>
+        <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}>
+          History{entries.length > 0 ? ` (${entries.length})` : ''}
+        </button>
+        <button className={tab === 'calendar' ? 'active' : ''} onClick={() => setTab('calendar')}>Calendar</button>
       </div>
 
       {/* LOG ENTRY TAB */}
@@ -494,40 +494,48 @@ export default function MoodTracker() {
         </section>
       )}
 
-      {/* CALENDAR TAB - Annual view */}
+      {/* CALENDAR TAB -- migraine-tracker style with annual overview */}
       {tab === 'calendar' && (
         <div>
           {/* Year nav */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <button className="btn ghost" onClick={() => setCalYear(y => y - 1)}>Previous Year</button>
-            <span style={{ fontWeight: 800, fontSize: 18 }}>{calYear}</span>
-            <button className="btn ghost" onClick={() => setCalYear(y => y + 1)}>Next Year</button>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <button className="btn ghost" onClick={() => setCalYear(y => y - 1)}>&larr; {calYear - 1}</button>
+            <span style={{ fontWeight: 800, fontSize: 17 }}>{calYear}</span>
+            <button className="btn ghost" onClick={() => setCalYear(y => y + 1)}>{calYear + 1} &rarr;</button>
           </div>
 
           {/* Legend */}
-          <div style={{ display: 'flex', gap: 16, marginBottom: 14, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 14, marginBottom: 14, flexWrap: 'wrap' }}>
             {(['low', 'medium', 'high'] as Severity[]).map(s => (
               <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{ width: 12, height: 12, borderRadius: 3, background: SEVERITY_BG[s], border: `2px solid ${SEVERITY_COLORS[s]}` }} />
-                <span style={{ fontSize: 11, color: 'var(--muted)' }}>{SEVERITY_LABELS[s]}</span>
+                <div style={{ width: 13, height: 13, borderRadius: 3, background: SEVERITY_BG[s], border: `2px solid ${SEVERITY_COLORS[s]}` }} />
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{SEVERITY_LABELS[s]}</span>
               </div>
             ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 13, height: 13, borderRadius: 3, background: 'transparent', border: '2px solid #eab308', outline: '2px solid #eab308', outlineOffset: '-2px' }} />
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>Holiday / Special Event</span>
+            </div>
           </div>
 
-          {/* 12 months grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          {/* 12-month annual grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
             {Array.from({ length: 12 }).map((_, monthIdx) => {
-              const mName = new Date(calYear, monthIdx, 1).toLocaleDateString('en-US', { month: 'short' });
+              const mLabel = new Date(calYear, monthIdx, 1).toLocaleDateString('en-US', { month: 'long' });
               const firstDay = new Date(calYear, monthIdx, 1).getDay();
               const daysInMonth = new Date(calYear, monthIdx + 1, 0).getDate();
-              const hasEntries = Array.from({ length: daysInMonth }).some((_, d) => {
-                const k = `${calYear}-${pad(monthIdx + 1)}-${pad(d + 1)}`;
-                return !!entryMap[k];
-              });
+              const monthKey = `${calYear}-${pad(monthIdx + 1)}`;
+              const monthEntries = entries.filter(e => e.entry_date.startsWith(monthKey));
+
               return (
                 <section key={monthIdx} className="panel" style={{ padding: '10px 8px' }}>
-                  <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 6, color: hasEntries ? 'var(--text)' : 'var(--muted)', textAlign: 'center' }}>
-                    {mName}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <span style={{ fontWeight: 700, fontSize: 12 }}>{mLabel}</span>
+                    {monthEntries.length > 0 && (
+                      <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', background: 'var(--surface-2)', padding: '1px 5px', borderRadius: 999 }}>
+                        {monthEntries.length}
+                      </span>
+                    )}
                   </div>
                   {/* Day headers */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, marginBottom: 2 }}>
@@ -537,7 +545,7 @@ export default function MoodTracker() {
                   </div>
                   {/* Day cells */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1 }}>
-                    {Array.from({ length: firstDay }).map((_, i) => <div key={`e${i}`} />)}
+                    {Array.from({ length: firstDay }).map((_, i) => <div key={'e' + i} />)}
                     {Array.from({ length: daysInMonth }).map((_, i) => {
                       const dayNum = i + 1;
                       const key = `${calYear}-${pad(monthIdx + 1)}-${pad(dayNum)}`;
@@ -548,24 +556,25 @@ export default function MoodTracker() {
                       return (
                         <div
                           key={key}
-                          title={sev ? `${dayNum}: ${SEVERITY_LABELS[sev]}${entry?.event_name ? ' - ' + entry.event_name : ''}` : String(dayNum)}
-                          onClick={() => {
-                            if (entry) { setSelectedEntry(entry); setTab('history'); }
-                          }}
+                          title={sev ? `${new Date(key + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: ${SEVERITY_LABELS[sev]}${entry?.event_name ? ' - ' + entry.event_name : ''}` : undefined}
+                          onClick={() => { if (entry) { setSelectedEntry(entry); setTab('history'); } }}
                           style={{
                             aspectRatio: '1',
-                            borderRadius: 2,
+                            borderRadius: 3,
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             fontSize: 7,
                             fontWeight: isToday ? 800 : 400,
-                            background: sev ? SEVERITY_BG[sev] : isToday ? 'var(--surface-2)' : 'transparent',
-                            border: isToday ? '1px solid var(--purple)' : sev ? `1px solid ${SEVERITY_COLORS[sev]}` : '1px solid transparent',
+                            background: sev ? SEVERITY_BG[sev] : isToday ? 'var(--purple-bg)' : 'transparent',
+                            border: isToday
+                              ? '1px solid var(--purple)'
+                              : sev
+                              ? `1px solid ${SEVERITY_COLORS[sev]}`
+                              : '1px solid transparent',
                             color: sev ? SEVERITY_COLORS[sev] : isToday ? 'var(--purple)' : 'var(--muted)',
                             cursor: sev ? 'pointer' : 'default',
-                            position: 'relative',
-                            outline: hasEvent ? '2px solid #eab308' : 'none',
+                            outline: hasEvent ? '1px solid #eab308' : 'none',
                             outlineOffset: '-1px',
                           }}
                         >
@@ -579,7 +588,7 @@ export default function MoodTracker() {
             })}
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
-            Tip: Click any colored day to view that entry. Yellow outline = holiday or special event.
+            Click any colored day to view that entry in History. Yellow outline = holiday or special event.
           </div>
         </div>
       )}
