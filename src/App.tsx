@@ -1,18 +1,18 @@
-import { Activity, Cloud, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import {
-  Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
+  Activity, Cloud, Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
   CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon
 } from 'lucide-react';
-import { Activity, Cloud, supabase, hasSupabase } from './lib/supabase';
+import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
 import GoogleCalendarToday from './GoogleCalendarToday';
 import Budget from './Budget';
 import Vehicles from './Vehicles';
 import Jules from './Jules';
-import { Activity, Cloud, useDailyBriefing, type BriefingLine } from './useDailyBriefing';
+import { useDailyBriefing, type BriefingLine } from './useDailyBriefing';
 import MigraineTracker from './MigraineTracker';
 import Contacts from './Contacts';
 import Books from './Books';
@@ -1605,6 +1605,7 @@ Kaylee`;
           )}
           <div className="side-note"><strong>{activeRole === 'limited' ? 'Adam home mode' : mode === 'home' ? 'Canton tenant mode' : 'FERPA-safe mode'}</strong><p>{activeRole === 'limited' ? 'Home side only. Kaylee controls view/edit access by section.' : mode === 'home' ? 'Tenant-only suggestions. Adam access controlled in Settings.' : 'First name/nickname only. Clipboard copy only.'}</p></div>
           <div className="sync-note"><strong>{hasSupabase ? 'Supabase enabled' : 'Local demo mode'}</strong><p>{loading ? 'Loading...' : message}</p><button className="btn tiny" onClick={loadData}><RefreshCw size={13} /> Refresh</button></div>
+          <SidebarWeather onClick={() => setPage('weather')} />
         </aside>
         <main className="content">
           {!activeCanEdit && activeRole === 'limited' && page !== 'dashboard' && <ViewOnlyBanner />}
@@ -1962,6 +1963,131 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, 
   />;
 }
 
+
+// __ WeatherSnap: tiny weather card for dashboard _______________________
+
+function WeatherSnap() {
+  const [temp, setTemp]       = useState<number | null>(null);
+  const [desc, setDesc]       = useState<string>('');
+  const [alertCount, setAlertCount] = useState<number>(0);
+  const [wLoading, setWLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const stRes = await fetch('https://api.weather.gov/points/34.2370,-84.4913/stations', { headers: { 'User-Agent': 'KayleesHub/1.0' } });
+        if (stRes.ok) {
+          const stData = await stRes.json();
+          const stId = stData.features?.[0]?.properties?.stationIdentifier ?? 'KRYY';
+          const obsRes = await fetch(`https://api.weather.gov/stations/${stId}/observations/latest`, { headers: { 'User-Agent': 'KayleesHub/1.0' } });
+          if (obsRes.ok) {
+            const obs = await obsRes.json();
+            const c = obs.properties?.temperature?.value;
+            if (c != null && !cancelled) setTemp(Math.round((c * 9 / 5) + 32));
+            if (!cancelled) setDesc(obs.properties?.textDescription ?? '');
+          }
+        }
+        const alertRes = await fetch('https://api.weather.gov/alerts/active?area=GA&zone=GAZ016', { headers: { 'User-Agent': 'KayleesHub/1.0' } });
+        if (alertRes.ok && !cancelled) setAlertCount((await alertRes.json()).features?.length ?? 0);
+      } catch { /* ignore */ }
+      if (!cancelled) setWLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (wLoading) return <div style={{ fontSize: 12, color: 'var(--muted)' }}>Loading weather...</div>;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ fontSize: 32, fontWeight: 900, color: 'var(--purple)' }}>{temp !== null ? `${temp}F` : '--'}</div>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>{desc || 'Canton, GA'}</div>
+        {alertCount > 0
+          ? <div style={{ fontSize: 11, color: '#ef4444', fontWeight: 700, marginTop: 2 }}>{alertCount} active weather alert{alertCount !== 1 ? 's' : ''}</div>
+          : <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>No active alerts</div>
+        }
+      </div>
+    </div>
+  );
+}
+
+// __ SidebarWeather: sidebar weather card ________________________________
+
+function SidebarWeather({ onClick }: { onClick: () => void }) {
+  const [temp, setTemp]       = useState<number | null>(null);
+  const [feelsLike, setFeels] = useState<number | null>(null);
+  const [desc, setDesc]       = useState<string>('');
+  const [humidity, setHumidity] = useState<number | null>(null);
+  const [wind, setWind]       = useState<string>('');
+  const [alertCount, setAlertCount] = useState<number>(0);
+  const [loaded, setLoaded]   = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const stRes = await fetch('https://api.weather.gov/points/34.2370,-84.4913/stations', { headers: { 'User-Agent': 'KayleesHub/1.0' } });
+        if (stRes.ok) {
+          const stData = await stRes.json();
+          const stId = stData.features?.[0]?.properties?.stationIdentifier ?? 'KRYY';
+          const obsRes = await fetch(`https://api.weather.gov/stations/${stId}/observations/latest`, { headers: { 'User-Agent': 'KayleesHub/1.0' } });
+          if (obsRes.ok) {
+            const obs = await obsRes.json();
+            const p = obs.properties ?? {};
+            const c2f = (c: number | null) => c != null ? Math.round((c * 9 / 5) + 32) : null;
+            if (!cancelled) {
+              setTemp(c2f(p.temperature?.value));
+              setFeels(c2f(p.heatIndex?.value ?? p.windChill?.value));
+              setDesc(p.textDescription ?? '');
+              setHumidity(p.relativeHumidity?.value != null ? Math.round(p.relativeHumidity.value) : null);
+              const wMs = p.windSpeed?.value;
+              setWind(wMs != null ? `${Math.round(wMs * 2.237)} mph` : '');
+            }
+          }
+        }
+        const alertRes = await fetch('https://api.weather.gov/alerts/active?area=GA&zone=GAZ016', { headers: { 'User-Agent': 'KayleesHub/1.0' } });
+        if (alertRes.ok && !cancelled) setAlertCount((await alertRes.json()).features?.length ?? 0);
+      } catch { /* ignore */ }
+      if (!cancelled) setLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const hasAlerts = alertCount > 0;
+  return (
+    <div onClick={onClick} style={{ cursor: 'pointer', margin: '8px 0 4px', borderRadius: 10, background: hasAlerts ? '#fee2e2' : 'var(--surface-1)', border: `1px solid ${hasAlerts ? '#ef4444' : 'var(--border)'}`, overflow: 'hidden' }}>
+      <div style={{ padding: '8px 10px 4px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: hasAlerts ? '#ef4444' : 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          {hasAlerts ? 'Weather Alert' : 'Canton, GA Weather'}
+        </div>
+      </div>
+      <div style={{ padding: '8px 10px' }}>
+        {!loaded ? (
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>Loading...</div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+              <div>
+                <div style={{ fontSize: 26, fontWeight: 900, color: hasAlerts ? '#ef4444' : 'var(--purple)', lineHeight: 1 }}>{temp != null ? `${temp}F` : '--'}</div>
+                {feelsLike != null && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>Feels like {feelsLike}F</div>}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'right', maxWidth: 90, lineHeight: 1.4 }}>{desc || 'Canton, GA'}</div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, fontSize: 10 }}>
+              {humidity != null && <div style={{ color: 'var(--muted)' }}><span style={{ fontWeight: 600, color: 'var(--text)' }}>{humidity}%</span> humidity</div>}
+              {wind && <div style={{ color: 'var(--muted)' }}><span style={{ fontWeight: 600, color: 'var(--text)' }}>{wind}</span> wind</div>}
+            </div>
+            {hasAlerts && <div style={{ marginTop: 6, padding: '4px 6px', background: '#ef4444', borderRadius: 5, fontSize: 10, fontWeight: 700, color: '#fff', textAlign: 'center' }}>{alertCount} ACTIVE ALERT{alertCount !== 1 ? 'S' : ''}</div>}
+            <div onClick={e => { e.stopPropagation(); window.open('https://radar.weather.gov/station/KFFC/standard', '_blank'); }} style={{ marginTop: 6, fontSize: 10, color: 'var(--purple)', textAlign: 'center', textDecoration: 'underline', cursor: 'pointer' }}>
+              View NWS Radar (Atlanta)
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── HomeDashboard: command center grid ─────────────────────────────────────
 function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, setPage }: {
   role: Role;
@@ -1993,6 +2119,7 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
   // Supabase snapshot data
   const [migraineToday, setMigraineToday]       = useState<null | 'yes' | 'no'>(null);
   const [migraineSeverity, setMigraineSeverity] = useState<string>('');
+  const [moodToday, setMoodToday]               = useState<{ severity: string; targets?: string[]; event_name?: string | null; is_holiday?: boolean; is_special_event?: boolean } | null>(null);
   const [currentBook, setCurrentBook]           = useState<{ title: string; author: string | null } | null>(null);
   const [dueContacts, setDueContacts]           = useState<{ name: string; type: string }[]>([]);
   const [vehicleAlerts, setVehicleAlerts]       = useState<{ name: string; item: string; status: string }[]>([]);
@@ -2015,6 +2142,12 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
           const { data } = await supabase.from('migraine_log').select('severity, wong_baker_score').eq('entry_date', today).limit(1).maybeSingle();
           if (data) { setMigraineToday('yes'); setMigraineSeverity(data.severity ?? ''); }
           else setMigraineToday('no');
+        })(),
+
+        // 1b. Mood today
+        (async () => {
+          const { data } = await supabase.from('mood_log').select('severity, targets, event_name, is_holiday, is_special_event').eq('entry_date', today).limit(1).maybeSingle();
+          setMoodToday(data as any ?? null);
         })(),
 
         // 2. Current book
@@ -2277,6 +2410,37 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
               ))
           }
           <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Open Inventory →</div>
+        </section>
+
+        {/* Mood snapshot */}
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('mood')}>
+          <div className="panel-head"><h2>Mood Log</h2>
+            {moodToday && <span className="risk-pill high">Active today</span>}
+          </div>
+          {moodToday
+            ? <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <div style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, background: moodToday.severity === 'high' ? '#fee2e2' : moodToday.severity === 'medium' ? '#ffedd5' : '#fef9c3', border: `2px solid ${moodToday.severity === 'high' ? '#ef4444' : moodToday.severity === 'medium' ? '#f97316' : '#eab308'}` }} />
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: moodToday.severity === 'high' ? '#ef4444' : moodToday.severity === 'medium' ? '#f97316' : '#eab308' }}>
+                    {moodToday.severity === 'high' ? 'High -- Full Blowup' : moodToday.severity === 'medium' ? 'Medium -- Yelling / Hostile' : 'Low -- Grumpy / Cold'}
+                  </div>
+                  {moodToday.targets && moodToday.targets.length > 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Mad at: {moodToday.targets.join(', ')}</div>
+                  )}
+                </div>
+              </div>
+            : <div style={{ fontSize: 13, color: 'var(--green)', fontWeight: 600 }}>No incident logged today</div>
+          }
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>View log →</div>
+        </section>
+
+        {/* Weather snapshot */}
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('weather')}>
+          <div className="panel-head"><h2>Weather</h2>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Canton, GA</span>
+          </div>
+          <WeatherSnap />
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Full forecast →</div>
         </section>
       </div>
     </>
