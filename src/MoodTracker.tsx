@@ -61,6 +61,7 @@ const TARGET_OPTIONS = [
   'Me (Kaylee)',
   'Adam',
   'Mom',
+  'Texas / Chloe',
   'Everyone in the house',
   'The dogs',
   'Extended family',
@@ -91,6 +92,7 @@ export default function MoodTracker() {
   const [triggerNotes, setTriggerNotes] = useState('');
   const [additionalNotes, setAdditionalNotes] = useState('');
   const [targets, setTargets] = useState<string[]>([]);
+  const [otherTarget, setOtherTarget] = useState<string>('');  // free-text 'Other' person
   const [isHoliday, setIsHoliday] = useState(false);
   const [isSpecialEvent, setIsSpecialEvent] = useState(false);
   const [eventName, setEventName] = useState('');
@@ -137,7 +139,7 @@ export default function MoodTracker() {
       behaviors,
       trigger_notes: triggerNotes.trim() || null,
       additional_notes: additionalNotes.trim() || null,
-      targets,
+      targets: otherTarget.trim() ? [...targets, `Other: ${otherTarget.trim()}`] : targets,
       is_holiday: isHoliday,
       is_special_event: isSpecialEvent,
       event_name: (isHoliday || isSpecialEvent) ? (eventName.trim() || null) : null,
@@ -159,6 +161,7 @@ export default function MoodTracker() {
     setAdditionalNotes('');
     setSeverity('low');
     setTargets([]);
+    setOtherTarget('');
     setIsHoliday(false);
     setIsSpecialEvent(false);
     setEventName('');
@@ -296,16 +299,34 @@ export default function MoodTracker() {
             <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, fontWeight: 600 }}>Who is he mad at? (check all that apply)</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
               {TARGET_OPTIONS.map(t => (
-                <label key={t} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '6px 8px', borderRadius: 6, background: targets.includes(t) ? '#fee2e2' : 'transparent', border: `1px solid ${targets.includes(t) ? '#ef4444' : 'var(--border)'}`, color: targets.includes(t) ? '#7f1d1d' : 'var(--text)', fontWeight: targets.includes(t) ? 600 : 400 }}>
+                <label key={t} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '6px 10px', borderRadius: 6, background: targets.includes(t) ? '#fee2e2' : 'transparent', border: `1px solid ${targets.includes(t) ? '#ef4444' : 'var(--border)'}`, color: targets.includes(t) ? '#7f1d1d' : 'var(--text)', fontWeight: targets.includes(t) ? 600 : 400, justifyContent: 'flex-start' }}>
                   <input
                     type="checkbox"
                     checked={targets.includes(t)}
                     onChange={() => toggleTarget(t)}
-                    style={{ accentColor: '#ef4444' }}
+                    style={{ accentColor: '#ef4444', flexShrink: 0 }}
                   />
-                  {t}
+                  <span>{t}</span>
                 </label>
               ))}
+              {/* Other -- free text */}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '6px 10px', borderRadius: 6, background: otherTarget ? '#fee2e2' : 'transparent', border: `1px solid ${otherTarget ? '#ef4444' : 'var(--border)'}`, gridColumn: 'span 2', justifyContent: 'flex-start' }}>
+                <input
+                  type="checkbox"
+                  checked={!!otherTarget}
+                  onChange={() => { if (otherTarget) setOtherTarget(''); }}
+                  style={{ accentColor: '#ef4444', flexShrink: 0 }}
+                />
+                <span style={{ color: 'var(--muted)', marginRight: 6 }}>Other:</span>
+                <input
+                  type="text"
+                  value={otherTarget}
+                  onChange={e => setOtherTarget(e.target.value)}
+                  placeholder="Type a name..."
+                  onClick={e => e.stopPropagation()}
+                  style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: 13, color: '#7f1d1d' }}
+                />
+              </label>
             </div>
           </div>
 
@@ -314,14 +335,14 @@ export default function MoodTracker() {
             <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, fontWeight: 600 }}>Behaviors (check all that apply)</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
               {BEHAVIOR_OPTIONS.map(b => (
-                <label key={b} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '6px 8px', borderRadius: 6, background: behaviors.includes(b) ? 'var(--purple-bg)' : 'transparent', border: `1px solid ${behaviors.includes(b) ? 'var(--purple)' : 'var(--border)'}` }}>
+                <label key={b} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '6px 10px', borderRadius: 6, background: behaviors.includes(b) ? 'var(--purple-bg)' : 'transparent', border: `1px solid ${behaviors.includes(b) ? 'var(--purple)' : 'var(--border)'}`, justifyContent: 'flex-start' }}>
                   <input
                     type="checkbox"
                     checked={behaviors.includes(b)}
                     onChange={() => toggleBehavior(b)}
-                    style={{ accentColor: 'var(--purple)' }}
+                    style={{ accentColor: 'var(--purple)', flexShrink: 0 }}
                   />
-                  {b}
+                  <span>{b}</span>
                 </label>
               ))}
             </div>
