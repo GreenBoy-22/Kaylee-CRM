@@ -297,27 +297,27 @@ export default function MoodTracker() {
           {/* Who is he mad at */}
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, fontWeight: 600 }}>Who is he mad at? (check all that apply)</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {TARGET_OPTIONS.map(t => (
-                <label key={t} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '6px 10px', borderRadius: 6, background: targets.includes(t) ? '#fee2e2' : 'transparent', border: `1px solid ${targets.includes(t) ? '#ef4444' : 'var(--border)'}`, color: targets.includes(t) ? '#7f1d1d' : 'var(--text)', fontWeight: targets.includes(t) ? 600 : 400, justifyContent: 'flex-start' }}>
+                <label key={t} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, cursor: 'pointer', padding: '7px 12px', borderRadius: 6, background: targets.includes(t) ? '#fee2e2' : 'var(--surface-1)', border: `1px solid ${targets.includes(t) ? '#ef4444' : 'var(--border)'}`, color: targets.includes(t) ? '#7f1d1d' : 'var(--text)', fontWeight: targets.includes(t) ? 600 : 400 }}>
                   <input
                     type="checkbox"
                     checked={targets.includes(t)}
                     onChange={() => toggleTarget(t)}
-                    style={{ accentColor: '#ef4444', flexShrink: 0 }}
+                    style={{ accentColor: '#ef4444', flexShrink: 0, width: 15, height: 15 }}
                   />
                   <span>{t}</span>
                 </label>
               ))}
               {/* Other -- free text */}
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '6px 10px', borderRadius: 6, background: otherTarget ? '#fee2e2' : 'transparent', border: `1px solid ${otherTarget ? '#ef4444' : 'var(--border)'}`, gridColumn: 'span 2', justifyContent: 'flex-start' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, cursor: 'pointer', padding: '7px 12px', borderRadius: 6, background: otherTarget ? '#fee2e2' : 'var(--surface-1)', border: `1px solid ${otherTarget ? '#ef4444' : 'var(--border)'}` }}>
                 <input
                   type="checkbox"
                   checked={!!otherTarget}
                   onChange={() => { if (otherTarget) setOtherTarget(''); }}
-                  style={{ accentColor: '#ef4444', flexShrink: 0 }}
+                  style={{ accentColor: '#ef4444', flexShrink: 0, width: 15, height: 15 }}
                 />
-                <span style={{ color: 'var(--muted)', marginRight: 6 }}>Other:</span>
+                <span style={{ color: 'var(--muted)', flexShrink: 0 }}>Other:</span>
                 <input
                   type="text"
                   value={otherTarget}
@@ -333,14 +333,14 @@ export default function MoodTracker() {
           {/* Behaviors */}
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, fontWeight: 600 }}>Behaviors (check all that apply)</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {BEHAVIOR_OPTIONS.map(b => (
-                <label key={b} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '6px 10px', borderRadius: 6, background: behaviors.includes(b) ? 'var(--purple-bg)' : 'transparent', border: `1px solid ${behaviors.includes(b) ? 'var(--purple)' : 'var(--border)'}`, justifyContent: 'flex-start' }}>
+                <label key={b} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, cursor: 'pointer', padding: '7px 12px', borderRadius: 6, background: behaviors.includes(b) ? 'var(--purple-bg)' : 'var(--surface-1)', border: `1px solid ${behaviors.includes(b) ? 'var(--purple)' : 'var(--border)'}`, color: behaviors.includes(b) ? 'var(--purple)' : 'var(--text)', fontWeight: behaviors.includes(b) ? 600 : 400 }}>
                   <input
                     type="checkbox"
                     checked={behaviors.includes(b)}
                     onChange={() => toggleBehavior(b)}
-                    style={{ accentColor: 'var(--purple)', flexShrink: 0 }}
+                    style={{ accentColor: 'var(--purple)', flexShrink: 0, width: 15, height: 15 }}
                   />
                   <span>{b}</span>
                 </label>
