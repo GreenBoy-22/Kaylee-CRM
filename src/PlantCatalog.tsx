@@ -524,7 +524,7 @@ export default function PlantCatalog() {
           {/* Plant cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
             {filteredPlants.map(p => {
-              const care = lastCareMap[p.id] ?? {};
+              const care = lastCareMap[p.id] ?? ({} as Record<LogType, string>);
               const plantLogs = logs.filter(l => l.plant_id === p.id).slice(0, 3);
               const plantTasks = tasks.filter(t => t.plant_id === p.id && !t.is_done);
               const isExpanded = expandedPlant === p.id;
@@ -812,7 +812,7 @@ export default function PlantCatalog() {
                 {(() => {
                   const p = plants.find(pl => pl.id === aiPlantId);
                   if (!p) return null;
-                  const care = lastCareMap[p.id] ?? {};
+                  const care = lastCareMap[p.id] ?? ({} as Record<LogType, string>);
                   return (
                     <div style={{ background: 'var(--surface-1)', borderRadius: 8, padding: '10px 12px' }}>
                       <div style={{ fontWeight: 600, marginBottom: 6 }}>{p.nickname || p.name} -- Quick Summary</div>
