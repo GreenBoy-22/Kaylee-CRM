@@ -227,15 +227,18 @@ export default function Inventory() {
     const existing = items.find(i => i.barcode === code);
 
     if (bulkMode) {
-      // In bulk mode: just tally scans, save all at once
+      // In bulk mode: tally scans, save all at once
+      // Unknown barcodes still get queued — user can resolve at Save All time
       setPendingBulk(prev => {
         const found = prev.find(p => p.barcode === code);
         if (found) {
           return prev.map(p => p.barcode === code ? { ...p, count: p.count + 1 } : p);
         }
-        return [...prev, { barcode: code, name: existing?.name ?? `Unknown (${code})`, count: 1 }];
+        return [...prev, { barcode: code, name: existing?.name ?? `⚠️ Unknown (${code})`, count: 1 }];
       });
-      setScanStatus(`📦 Bulk: ${existing?.name ?? code} scanned — tap Save All when done`);
+      setScanStatus(`📦 ${existing?.name ?? 'Unknown item'} — queued. Keep scanning!`);
+      // Refocus immediately — no async delay needed in bulk mode
+      scanRef.current?.focus();
       return;
     }
 
@@ -256,6 +259,8 @@ export default function Inventory() {
         quantity_change: qtyChange,
         barcode: code,
       });
+      // Update local state immediately (no full reload needed)
+      setItems(prev => prev.map(i => i.id === existing.id ? { ...i, quantity: newQty, scan_count: (i.scan_count ?? 0) + 1 } : i));
       setScanStatus(`✅ ${scanMode === 'in' ? '↑ Added' : '↓ Removed'}: ${existing.name} → Qty: ${newQty}`);
       setScanLog(prev => [{
         barcode: code, name: existing.name,
@@ -264,15 +269,14 @@ export default function Inventory() {
       }, ...prev.slice(0, 29)]);
     } else {
       // Unknown barcode — prompt to add
-      setScanStatus(`⚠️ Unknown barcode: ${code} — not in inventory. Add it below.`);
+      setScanStatus(`⚠️ Unknown barcode: ${code} — fill in the form below and save.`);
       setFBarcode(code);
       setTab('add');
       return;
     }
 
-    await load();
-    // Keep focus on scan input
-    setTimeout(() => scanRef.current?.focus(), 100);
+    // Refocus for next scan
+    requestAnimationFrame(() => scanRef.current?.focus());
   }
 
   // Save all bulk pending scans
@@ -281,6 +285,10 @@ export default function Inventory() {
     const { data: sessionData } = await supabase.auth.getSession();
     const userId = sessionData.session?.user?.id;
     if (!userId) return;
+
+    const totalScans = pendingBulk.reduce((s, p) => s + p.count, 0);
+    let saved = 0;
+    const unknown: string[] = [];
 
     for (const pending of pendingBulk) {
       const item = items.find(i => i.barcode === pending.barcode);
@@ -301,11 +309,19 @@ export default function Inventory() {
           barcode: pending.barcode,
           notes: `Bulk ${scanMode}: ${pending.count} units`,
         });
+        saved += pending.count;
+      } else {
+        unknown.push(pending.barcode);
       }
     }
+
     setPendingBulk([]);
-    setScanStatus(`✅ Bulk save complete — ${pendingBulk.length} item(s) updated`);
+    const msg = unknown.length > 0
+      ? `✅ Saved ${saved} scans. ⚠️ ${unknown.length} unknown barcode(s) skipped: ${unknown.join(', ')}`
+      : `✅ Bulk save complete — ${saved} scan(s) across ${pendingBulk.length} item(s) updated`;
+    setScanStatus(msg);
     await load();
+    scanRef.current?.focus();
   }
 
   // __ AI recipe generator ________________________________________________
@@ -608,6 +624,16 @@ Quick tip: [1-sentence cooking note]`;
                   if (e.key === 'Enter' && scanInput.trim()) {
                     handleScanSubmit(scanInput.trim());
                   }
+                }}
+                onBlur={() => {
+                  // Auto-refocus after a short delay so clicks on buttons still work
+                  setTimeout(() => {
+                    if (document.activeElement?.tagName !== 'BUTTON' &&
+                        document.activeElement?.tagName !== 'INPUT' &&
+                        document.activeElement?.tagName !== 'SELECT') {
+                      scanRef.current?.focus();
+                    }
+                  }, 150);
                 }}
                 placeholder="Click here, then scan a barcode — or type and press Enter"
                 style={{ fontSize: 16, fontWeight: 600, background: 'var(--surface-1)', border: '2px solid var(--green)', letterSpacing: 2 }}
