@@ -3040,9 +3040,11 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     </div>}
 
     {tab==='add'&&<section className="panel" style={{borderLeft:'4px solid var(--green)'}}>
-      <div className="panel-head"><h2>{editItem?`Edit — ${editItem.name}`:'Add Item'}</h2><button className="btn ghost" onClick={()=>{resetInvForm();setTab('items');}}><X size={14}/> Cancel</button></div>
+      <div className="panel-head"><h2>{editItem?`Edit — ${editItem.name}`:'Add Item'}</h2><button className="btn ghost" onClick={()=>{resetInvForm();setTab('items');}}><XIcon size={14}/> Cancel</button></div>
       <div className="form-grid" style={{marginBottom:12}}>
-        {([['Item name *',fName,setFName,'e.g. Canned Tomatoes'],['Brand',fBrand,setFBrand,'e.g. Hunt\'s'],['Barcode',fBarcode,setFBarcode,'UPC / EAN']]) .map(([l,v,s,p])=><label key={String(l)} style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>{l}<input value={String(v)} onChange={e=>(s as (v:string)=>void)(e.target.value)} placeholder={String(p)}/></label>)}
+        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Item name *<input value={fName} onChange={e=>setFName(e.target.value)} placeholder="e.g. Canned Tomatoes"/></label>
+        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Brand<input value={fBrand} onChange={e=>setFBrand(e.target.value)} placeholder="e.g. Hunt's"/></label>
+        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Barcode<input value={fBarcode} onChange={e=>setFBarcode(e.target.value)} placeholder="UPC / EAN"/></label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Category<select value={fCat} onChange={e=>setFCat(e.target.value)}>{INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Location<select value={fLoc} onChange={e=>setFLoc(e.target.value)}>{INV_LOCS.map(l=><option key={l} value={l}>{l}</option>)}</select></label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Quantity<input type="number" min={0} value={fQty} onChange={e=>setFQty(parseInt(e.target.value)||0)}/></label>
