@@ -367,7 +367,10 @@ ${fileText.slice(0, 6000)}`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
       max_tokens: 4000,
@@ -486,27 +489,91 @@ export default function CourseNotes() {
   async function handleDocumentScan() {
     if (!uploadFile || !supabase) return;
     setUploadStatus('scanning');
-    setUploadLog(['Reading document...']);
+
+    const fileName = uploadFile.name.toLowerCase();
+    const isDocx = fileName.endsWith('.docx') || fileName.endsWith('.doc');
+    const isPdf  = fileName.endsWith('.pdf') || uploadFile.type === 'application/pdf';
 
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const userId = sessionData.session?.user?.id;
       if (!userId) { setUploadStatus('error'); return; }
 
-      // Read file as text
-      const fileText = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = e => resolve(e.target?.result as string ?? '');
-        reader.onerror = reject;
-        if (uploadFile.type === 'application/pdf') {
-          // For PDFs we read as text — basic extraction
-          reader.readAsText(uploadFile);
-        } else {
-          reader.readAsText(uploadFile);
-        }
-      });
+      let fileText = '';
 
-      setUploadLog(prev => [...prev, 'Sending to AI for analysis...']);
+      if (isDocx) {
+        // .docx is a ZIP/XML — we can extract raw text from the XML inside
+        setUploadLog(['Reading .docx file...']);
+        try {
+          const arrayBuffer = await uploadFile.arrayBuffer();
+          // Use JSZip-style manual extraction — get word/document.xml text
+          const uint8 = new Uint8Array(arrayBuffer);
+          const textDecoder = new TextDecoder('utf-8', { fatal: false });
+          const raw = textDecoder.decode(uint8);
+          // Extract text between XML tags — strip all XML tags
+          const xmlMatch = raw.match(/<w:t[^>]*>([^<]*)<\/w:t>/g);
+          if (xmlMatch && xmlMatch.length > 0) {
+            fileText = xmlMatch
+              .map(m => m.replace(/<[^>]+>/g, ''))
+              .join(' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+          } else {
+            // Fallback: extract any readable ASCII text from the binary
+            fileText = raw.replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
+          }
+          if (fileText.length < 50) {
+            setUploadLog(['⚠️ Could not extract text from .docx. Try saving as .txt or .pdf first.']);
+            setUploadStatus('error');
+            return;
+          }
+        } catch {
+          setUploadLog(['⚠️ Could not read .docx file. Try saving as .txt or copy-pasting the content into a .txt file.']);
+          setUploadStatus('error');
+          return;
+        }
+      } else if (isPdf) {
+        setUploadLog(['Reading PDF... (tip: text-based PDFs work best)']);
+        try {
+          fileText = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = e => {
+              const result = e.target?.result as string ?? '';
+              // Extract readable text from PDF binary
+              const textMatches = result.match(/\(([^\)]{2,})\)/g);
+              if (textMatches && textMatches.length > 20) {
+                resolve(textMatches.map(m => m.slice(1,-1)).join(' '));
+              } else {
+                // Try plain text extraction
+                resolve(result.replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim());
+              }
+            };
+            reader.onerror = reject;
+            reader.readAsBinaryString(uploadFile);
+          });
+        } catch {
+          setUploadLog(['⚠️ Could not read PDF. Try copying the text into a .txt file instead.']);
+          setUploadStatus('error');
+          return;
+        }
+      } else {
+        // Plain text / markdown / csv
+        setUploadLog(['Reading document...']);
+        fileText = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = e => resolve(e.target?.result as string ?? '');
+          reader.onerror = reject;
+          reader.readAsText(uploadFile);
+        });
+      }
+
+      if (!fileText || fileText.trim().length < 30) {
+        setUploadLog(['⚠️ File appears empty or unreadable. Best results: save as .txt or .md first.']);
+        setUploadStatus('error');
+        return;
+      }
+
+      setUploadLog(prev => [...prev, `Extracted ${fileText.length.toLocaleString()} characters. Sending to AI...`]);
 
       const extracted = await scanDocumentWithAI(fileText, COURSES);
 
@@ -603,7 +670,8 @@ export default function CourseNotes() {
             </button>
           </div>
           <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
-            Upload a study guide, PDF, or text document. AI will read it, figure out which courses it relates to, and save the key info directly into your notes — formatted short and clean.
+            Upload a study guide or document. AI will read it, figure out which courses it relates to, and save the key info directly into your notes — formatted short and clean.
+            <br /><strong>Best formats: .txt or .md</strong> (copy/paste from Word/PDF into Notepad and save as .txt for most reliable results). .docx and .pdf are supported but may have limited extraction.
           </p>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12 }}>
             <input
