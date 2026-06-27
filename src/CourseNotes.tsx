@@ -336,34 +336,29 @@ const NOTE_TYPE_COLORS: Record<NoteType, string> = {
 async function scanDocumentWithAI(
   fileText: string,
   courses: typeof COURSES,
-): Promise<{ course_code: string; note_type: NoteType; content: string }[]> {
+): Promise<{ course_code: string; note_type: NoteType; content: string; _rawResponse?: string }[]> {
   const courseList = courses
     .filter(c => c.code !== 'PROGRAM')
     .map(c => `${c.code}: ${c.title}`)
     .join('\n');
 
-  const prompt = `You are a course notes assistant for a WGU BSCSIA student's study app.
+  const prompt = `You are extracting study notes from a WGU BSCSIA student document.
 
-Here is a list of all courses in the program:
+COURSE LIST:
 ${courseList}
 
-The student has uploaded a document. Read it carefully and extract useful study notes from it.
-For each piece of useful information, determine:
-1. Which course it belongs to (use the exact course code like D325, C458, etc.)
-2. Which category it fits (pacing, structure, cert, student_tips, resources, prereqs, competencies, or general)
-3. Write a clean, concise version of the note in the same style as the existing notes: short, bullet-pointed, easy to scan. Use "- " for bullets.
+TASK: Read the document below and extract every useful piece of study information. For each note:
+- Assign it to the closest matching course code (e.g. D833, C458, D325)
+- Pick the best category: pacing, structure, cert, student_tips, resources, prereqs, competencies, or general
+- Write it as short, scannable bullet points using "- " prefix
 
-Return ONLY valid JSON array, no markdown, no explanation. Format:
-[
-  {"course_code": "D325", "note_type": "student_tips", "content": "- Tip here\n- Another tip"},
-  ...
-]
+YOU MUST respond with ONLY a raw JSON array. No preamble, no markdown fences, no explanation. Start your response with [ and end with ].
 
-If you cannot confidently assign something to a specific course, use course_code "PROGRAM".
-Only include genuinely useful study notes — skip filler text, headers, and repetitive content.
+Example output:
+[{"course_code":"D833","note_type":"structure","content":"- Task 1: Formal Proposal\\n- Task 2: Executive Summary\\n- Task 3: Technical Report"},{"course_code":"D833","note_type":"student_tips","content":"- Join WGU Connect for peer support\\n- Access Capstone Excellence Archive for examples"}]
 
-Document content:
-${fileText.slice(0, 6000)}`;
+DOCUMENT:
+${fileText.slice(0, 8000)}`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -378,12 +373,27 @@ ${fileText.slice(0, 6000)}`;
     }),
   });
   const data = await response.json();
-  const text = data.content?.[0]?.text ?? '[]';
+  if (data.error) {
+    console.error('Claude API error:', JSON.stringify(data.error));
+    // Return a special marker so the UI can show the error
+    return [{ course_code: '_ERROR', note_type: 'general', content: JSON.stringify(data.error), _rawResponse: JSON.stringify(data.error) }];
+  }
+  const raw = data.content?.[0]?.text ?? '';
+  console.log('AI response (first 500):', raw.slice(0, 500));
   try {
-    const clean = text.replace(/```json|```/g, '').trim();
-    return JSON.parse(clean);
-  } catch {
-    return [];
+    // Strip any accidental markdown fences
+    const clean = raw.replace(/^```(?:json)?|```$/gm, '').trim();
+    // Find the JSON array even if there's preamble text
+    const arrayStart = clean.indexOf('[');
+    const arrayEnd = clean.lastIndexOf(']');
+    if (arrayStart === -1 || arrayEnd === -1) {
+      console.error('No JSON array found in response:', raw.slice(0, 300));
+      return [{ course_code: '_ERROR', note_type: 'general', content: 'AI did not return JSON. Raw: ' + raw.slice(0, 200), _rawResponse: raw }];
+    }
+    return JSON.parse(clean.slice(arrayStart, arrayEnd + 1));
+  } catch (e) {
+    console.error('JSON parse error:', e, 'Raw:', raw.slice(0, 300));
+    return [{ course_code: '_ERROR', note_type: 'general', content: 'Parse error. Raw: ' + raw.slice(0, 200), _rawResponse: raw }];
   }
 }
 
@@ -392,7 +402,7 @@ async function scanDocumentWithAIBinary(
   base64Data: string,
   mediaType: string,
   courses: typeof COURSES,
-): Promise<{ course_code: string; note_type: NoteType; content: string }[]> {
+): Promise<{ course_code: string; note_type: NoteType; content: string; _rawResponse?: string }[]> {
 
   // DOCX: Claude API doesn't support .docx — extract text from the ZIP/XML ourselves
   if (mediaType.includes('wordprocessingml')) {
@@ -673,10 +683,15 @@ export default function CourseNotes() {
         : await scanDocumentWithAI(fileText, COURSES);
 
       if (extracted.length === 0) {
-        setUploadLog(prev => [...prev,
-          '⚠️ No notes found. For .docx files, try: open the document → Select All → Copy → paste into Notepad → save as .txt → upload that instead.',
-          'Check browser console (F12) for API error details.',
-        ]);
+        setUploadLog(prev => [...prev, '⚠️ No notes found. Check browser console (F12) for details. Try saving as .txt if using .docx.']);
+        setUploadStatus('error');
+        return;
+      }
+
+      // Check if AI returned an error marker
+      const errorEntry = extracted.find(e => e.course_code === '_ERROR');
+      if (errorEntry) {
+        setUploadLog(prev => [...prev, `⚠️ AI error: ${errorEntry.content.slice(0, 150)}`]);
         setUploadStatus('error');
         return;
       }
