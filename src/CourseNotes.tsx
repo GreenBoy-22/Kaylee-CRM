@@ -336,6 +336,7 @@ const NOTE_TYPE_COLORS: Record<NoteType, string> = {
 async function scanDocumentWithAI(
   fileText: string,
   courses: typeof COURSES,
+  authToken: string,
 ): Promise<{ course_code: string; note_type: NoteType; content: string; _rawResponse?: string }[]> {
   const courseList = courses
     .filter(c => c.code !== 'PROGRAM')
@@ -360,17 +361,21 @@ Example output:
 DOCUMENT:
 ${fileText.slice(0, 8000)}`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4000,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
+  const response = await fetch(
+    'https://uccehajbwxzqdzvexzuc.supabase.co/functions/v1/ai-proxy',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4000,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    }
+  );
   const data = await response.json();
   if (data.error) {
     console.error('Claude API error:', JSON.stringify(data.error));
@@ -401,6 +406,7 @@ async function scanDocumentWithAIBinary(
   base64Data: string,
   mediaType: string,
   courses: typeof COURSES,
+  authToken: string,
 ): Promise<{ course_code: string; note_type: NoteType; content: string; _rawResponse?: string }[]> {
 
   // DOCX: Claude API doesn't support .docx — extract text from the ZIP/XML ourselves
@@ -447,7 +453,7 @@ async function scanDocumentWithAIBinary(
           .slice(0, 12000);
       }
 
-      return scanDocumentWithAI(extractedText, courses);
+      return scanDocumentWithAI(extractedText, courses, authToken);
     } catch {
       return [];
     }
@@ -479,10 +485,13 @@ Return ONLY valid JSON array, no markdown, no explanation. Format:
 If you cannot confidently assign something to a specific course, use course_code "PROGRAM".
 Only include genuinely useful study notes — skip filler, headers, and repetitive content.`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch(
+    'https://uccehajbwxzqdzvexzuc.supabase.co/functions/v1/ai-proxy',
+    {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'Authorization': `Bearer ${authToken}`,
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
@@ -506,11 +515,14 @@ Only include genuinely useful study notes — skip filler, headers, and repetiti
       }],
     }),
   });
-  const data = await response.json(); if (data.error) console.error("Claude API error:", JSON.stringify(data.error)); console.log("AI raw (first 200):", (data.content?.[0]?.text ?? "").slice(0,200));
+  const data = await response.json();
   const text = data.content?.[0]?.text ?? '[]';
   try {
     const clean = text.replace(/```json|```/g, '').trim();
-    return JSON.parse(clean);
+    const arrayStart = clean.indexOf('[');
+    const arrayEnd = clean.lastIndexOf(']');
+    if (arrayStart === -1 || arrayEnd === -1) return [];
+    return JSON.parse(clean.slice(arrayStart, arrayEnd + 1));
   } catch {
     return [];
   }
@@ -626,6 +638,7 @@ export default function CourseNotes() {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const userId = sessionData.session?.user?.id;
+      const authToken = sessionData.session?.access_token ?? '';
       if (!userId) { setUploadStatus('error'); return; }
 
       let fileText = '';
@@ -677,8 +690,8 @@ export default function CourseNotes() {
       setUploadLog(prev => [...prev, 'Sending to AI for analysis...']);
 
       const extracted = (base64Data && mediaType)
-        ? await scanDocumentWithAIBinary(base64Data, mediaType, COURSES)
-        : await scanDocumentWithAI(fileText, COURSES);
+        ? await scanDocumentWithAIBinary(base64Data, mediaType, COURSES, authToken)
+        : await scanDocumentWithAI(fileText, COURSES, authToken);
 
       if (extracted.length === 0) {
         setUploadLog(prev => [...prev, '⚠️ No notes found. Check browser console (F12) for details. Try saving as .txt if using .docx.']);
