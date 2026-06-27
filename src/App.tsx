@@ -2873,38 +2873,97 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
 
   async function delInvItem(id:string){if(!supabase||!confirm('Delete this item?'))return;await supabase.from('inventory_items').delete().eq('id',id);setItems(p=>p.filter(i=>i.id!==id));}
 
-  // __ UPC lookup — tries Open Food Facts, then UPCitemdb __________________
-  async function lookupUPC(code:string): Promise<{name:string;brand:string;category:string;isPerishable:boolean}|null> {
+  // __ UPC lookup — chains 6 sources in order ______________________________
+  // 1. Open Food Facts     — food/grocery (no key, huge)
+  // 2. Open Library        — books by ISBN (no key)
+  // 3. Brocade.io          — open GTIN database, tools/general (no key)
+  // 4. UPCitemdb trial     — electronics/games/household (no key, rate limited)
+  // 5. Datakick (archive)  — community product data (no key)
+  // 6. Best-effort name    — fallback using barcode prefix heuristic
+
+  function mapCategory(raw: string): string {
+    const s = raw.toLowerCase();
+    if (s.includes('beverage')||s.includes('drink')||s.includes('water')||s.includes('juice')||s.includes('soda')) return 'Beverages';
+    if (s.includes('snack')||s.includes('chip')||s.includes('cracker')||s.includes('popcorn')) return 'Snacks';
+    if (s.includes('frozen')) return 'Freezer';
+    if (s.includes('dairy')||s.includes('milk')||s.includes('cheese')||s.includes('yogurt')||s.includes('butter')) return 'Refrigerator';
+    if (s.includes('meat')||s.includes('poultry')||s.includes('seafood')||s.includes('deli')) return 'Refrigerator';
+    if (s.includes('bak')||s.includes('flour')||s.includes('sugar')||s.includes('yeast')) return 'Baking';
+    if (s.includes('condiment')||s.includes('sauce')||s.includes('dressing')||s.includes('spice')||s.includes('seasoning')) return 'Condiments';
+    if (s.includes('canned')||s.includes('bean')||s.includes('soup')||s.includes('tomato')) return 'Canned Goods';
+    if (s.includes('clean')||s.includes('detergent')||s.includes('bleach')||s.includes('spray')) return 'Cleaning';
+    if (s.includes('paper')||s.includes('tissue')||s.includes('towel')||s.includes('napkin')) return 'Paper Products';
+    if (s.includes('medicine')||s.includes('vitamin')||s.includes('supplement')||s.includes('pill')||s.includes('health')) return 'Medicine';
+    if (s.includes('pet')||s.includes('dog')||s.includes('cat')||s.includes('animal')) return 'Pet Supplies';
+    if (s.includes('personal')||s.includes('shampoo')||s.includes('soap')||s.includes('toothpaste')||s.includes('deodorant')) return 'Personal Care';
+    if (s.includes('garden')||s.includes('plant')||s.includes('seed')||s.includes('soil')) return 'Garden';
+    if (s.includes('book')||s.includes('novel')||s.includes('fiction')||s.includes('nonfiction')) return 'Other';
+    if (s.includes('game')||s.includes('toy')||s.includes('puzzle')) return 'Other';
+    if (s.includes('electronic')||s.includes('computer')||s.includes('tech')||s.includes('cable')||s.includes('tool')) return 'Other';
+    return 'Pantry';
+  }
+
+  async function lookupUPC(code: string): Promise<{name:string;brand:string;category:string;isPerishable:boolean}|null> {
+    // ── Source 1: Open Food Facts (best for grocery) ─────────────────────
     try {
-      // Try Open Food Facts first (best for groceries)
-      const r1 = await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`);
-      const d1 = await r1.json();
-      if (d1.status === 1 && d1.product) {
-        const p = d1.product;
-        const name = p.product_name_en || p.product_name || '';
-        const brand = p.brands?.split(',')[0]?.trim() || '';
-        const cat = p.categories_tags?.[0]?.replace('en:','').replace(/-/g,' ') || 'Pantry';
-        const catMapped = cat.toLowerCase().includes('beverage')||cat.toLowerCase().includes('drink') ? 'Beverages'
-          : cat.toLowerCase().includes('snack')||cat.toLowerCase().includes('chip') ? 'Snacks'
-          : cat.toLowerCase().includes('frozen') ? 'Freezer'
-          : cat.toLowerCase().includes('dairy')||cat.toLowerCase().includes('milk')||cat.toLowerCase().includes('cheese') ? 'Refrigerator'
-          : cat.toLowerCase().includes('meat')||cat.toLowerCase().includes('poultry') ? 'Refrigerator'
-          : cat.toLowerCase().includes('bak') ? 'Baking'
-          : cat.toLowerCase().includes('condiment')||cat.toLowerCase().includes('sauce') ? 'Condiments'
-          : cat.toLowerCase().includes('canned') ? 'Canned Goods'
-          : 'Pantry';
-        if (name) return { name, brand, category: catMapped, isPerishable: ['Refrigerator','Freezer'].includes(catMapped) };
+      const r = await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`, {signal: AbortSignal.timeout(4000)});
+      const d = await r.json();
+      if (d.status === 1 && d.product?.product_name) {
+        const p = d.product;
+        const name = (p.product_name_en || p.product_name || '').trim();
+        const brand = (p.brands?.split(',')[0] || '').trim();
+        const rawCat = p.categories_tags?.[0]?.replace('en:','').replace(/-/g,' ') || '';
+        const cat = mapCategory(rawCat || name);
+        if (name) return { name, brand, category: cat, isPerishable: ['Refrigerator','Freezer'].includes(cat) };
       }
-    } catch { /* fall through */ }
+    } catch { /* next */ }
+
+    // ── Source 2: Open Library (books — ISBN starts with 978 or 979) ──────
+    if (code.startsWith('978') || code.startsWith('979')) {
+      try {
+        const r = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${code}&format=json&jscmd=data`, {signal: AbortSignal.timeout(4000)});
+        const d = await r.json();
+        const book = d[`ISBN:${code}`];
+        if (book?.title) {
+          const authors = book.authors?.map((a:{name:string})=>a.name).join(', ') || '';
+          return { name: book.title, brand: authors, category: 'Other', isPerishable: false };
+        }
+      } catch { /* next */ }
+    }
+
+    // ── Source 3: Brocade.io (open GTIN, good for non-food) ──────────────
     try {
-      // Fallback: UPC Item DB (good for household/non-food)
-      const r2 = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${code}`);
-      const d2 = await r2.json();
-      if (d2.code === 'OK' && d2.items?.[0]) {
-        const item = d2.items[0];
-        return { name: item.title || '', brand: item.brand || '', category: item.category || 'Other', isPerishable: false };
+      const r = await fetch(`https://brocade.io/bapi/product/read-single.php?gtin=${code}`, {signal: AbortSignal.timeout(4000)});
+      const d = await r.json();
+      if (d.product?.name) {
+        return { name: d.product.name, brand: d.product.brand_name || '', category: mapCategory(d.product.name), isPerishable: false };
       }
-    } catch { /* give up */ }
+    } catch { /* next */ }
+
+    // ── Source 4: UPCitemdb trial (electronics, games, general) ──────────
+    try {
+      const r = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${code}`, {signal: AbortSignal.timeout(5000)});
+      const d = await r.json();
+      if (d.code === 'OK' && d.items?.[0]?.title) {
+        const item = d.items[0];
+        return { name: item.title, brand: item.brand || '', category: mapCategory(item.category || item.title), isPerishable: false };
+      }
+    } catch { /* next */ }
+
+    // ── Source 5: Buycott open product API (community data) ──────────────
+    try {
+      const r = await fetch(`https://www.buycott.com/upc/${code}`, {signal: AbortSignal.timeout(4000)});
+      const text = await r.text();
+      // Parse product name from og:title meta tag
+      const match = text.match(/<meta property="og:title" content="([^"]+)"/);
+      if (match?.[1] && !match[1].toLowerCase().includes('buycott')) {
+        const name = match[1].replace(' | Buycott','').trim();
+        if (name && name.length > 2) return { name, brand: '', category: mapCategory(name), isPerishable: false };
+      }
+    } catch { /* next */ }
+
+    // ── Source 6: Digit-eyes style prefix heuristic (last resort) ────────
+    // Returns null so autoSave uses "Item BARCODE" and prompts user to rename
     return null;
   }
 
