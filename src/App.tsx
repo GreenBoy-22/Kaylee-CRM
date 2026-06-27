@@ -2830,7 +2830,12 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
 
   const INV_CATS = ['Pantry','Refrigerator','Freezer','Cleaning','Personal Care','Pet Supplies','Medicine','Garden','Paper Products','Beverages','Snacks','Baking','Canned Goods','Condiments','Other'];
   const INV_UNITS = ['each','oz','lbs','gal','qt','pint','fl oz','cups','count','pkg','box','can','jar','bottle'];
-  const INV_LOCS = ['Pantry','Refrigerator','Freezer','Cabinet','Bathroom','Laundry Room','Garage','Storage'];
+  const INV_LOCS = [
+    'Kitchen','Pantry','Refrigerator','Freezer','Backstock Closet',
+    'Living Room','Master Bedroom','Library','Office','Jules\' Room',
+    'Bathroom','Laundry Room','Clothes Closet',
+    'Garage','Basement','Storage',
+  ];
 
   function invDays(iso:string){const e=new Date(iso+'T00:00:00'),n=new Date();n.setHours(0,0,0,0);return Math.round((e.getTime()-n.getTime())/(86400000));}
   function invFmt(iso:string){return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}
@@ -2852,7 +2857,8 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   type ReceiptLine = {barcode:string;name:string;brand:string;category:string;location:string;qty:number;marketPrice:number|null;isNew:boolean;looking:boolean;id:string|null};
   const [receiptLines, setReceiptLines] = useState<ReceiptLine[]>([]);
   const [receiptSaving, setReceiptSaving] = useState(false);
-  const [scanLocation, setScanLocation] = useState('Pantry'); // default room for all scans
+  const [scanLocation, setScanLocation] = useState('Kitchen'); // default room for all scans
+  const [useAIFallback, setUseAIFallback] = useState(false); // opt-in AI barcode lookup
   const scanRef = useRef<HTMLInputElement>(null);
 
   const loadInv = useCallback(async()=>{
@@ -2891,20 +2897,14 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
       const { data: sd } = await supabase!.auth.getSession();
       const token = sd.session?.access_token;
       if (!token) return null;
-
       const resp = await fetch('https://uccehajbwxzqdzvexzuc.supabase.co/functions/v1/ai-proxy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ _upc_lookup: true, barcode: rawCode }),
+        body: JSON.stringify({ _upc_lookup: true, barcode: rawCode, use_ai: useAIFallback }),
       });
       const d = await resp.json();
       if (d.product?.name) {
-        return {
-          name: d.product.name,
-          brand: d.product.brand || '',
-          category: d.product.category || 'Other',
-          isPerishable: d.product.is_perishable ?? false,
-        };
+        return { name: d.product.name, brand: d.product.brand || '', category: d.product.category || 'Other', isPerishable: d.product.is_perishable ?? false };
       }
     } catch { /* give up */ }
     return null;
@@ -3126,18 +3126,37 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
         {(['in','out'] as const).map(m=><button key={m} onClick={()=>setScanMode(m)} style={{flex:1,padding:'10px',borderRadius:10,cursor:'pointer',fontWeight:700,fontSize:14,border:`2px solid ${scanMode===m?(m==='in'?'#16a34a':'#ef4444'):'var(--border)'}`,background:scanMode===m?(m==='in'?'#dcfce7':'#fee2e2'):'transparent',color:scanMode===m?(m==='in'?'#16a34a':'#ef4444'):'var(--muted)'}}>{m==='in'?'↑ Adding to Stock':'↓ Removing from Stock'}</button>)}
       </div>
 
-      {/* Room picker — applies to all new scanned items */}
-      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10,background:'var(--surface-1)',borderRadius:10,padding:'10px 14px'}}>
-        <span style={{fontSize:13,fontWeight:600,color:'var(--muted)',flexShrink:0}}>📍 Room:</span>
-        <div style={{display:'flex',gap:6,flexWrap:'wrap',flex:1}}>
+      {/* Room picker + AI toggle */}
+      <div style={{background:'var(--surface-1)',borderRadius:10,padding:'10px 14px',marginBottom:10}}>
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+          <span style={{fontSize:12,fontWeight:700,color:'var(--muted)',flexShrink:0}}>📍 ROOM</span>
+          <span style={{fontSize:11,color:'var(--muted)'}}>All scanned items will be saved to this room</span>
+        </div>
+        <div style={{display:'flex',gap:5,flexWrap:'wrap'}}>
           {INV_LOCS.map(loc=>(
             <button key={loc} onClick={()=>setScanLocation(loc)} style={{
-              padding:'5px 12px',borderRadius:8,cursor:'pointer',fontSize:12,fontWeight:600,
+              padding:'5px 10px',borderRadius:8,cursor:'pointer',fontSize:11,fontWeight:600,
               border:`2px solid ${scanLocation===loc?'var(--purple)':'var(--border)'}`,
-              background:scanLocation===loc?'var(--purple-bg)':'transparent',
+              background:scanLocation===loc?'var(--purple-bg)':'var(--surface-0)',
               color:scanLocation===loc?'var(--purple-dark)':'var(--muted)',
             }}>{loc}</button>
           ))}
+        </div>
+        <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <div>
+            <div style={{fontSize:12,fontWeight:700,color:useAIFallback?'var(--purple)':'var(--muted)'}}>
+              ✨ AI Barcode Lookup {useAIFallback ? 'ON' : 'OFF'}
+            </div>
+            <div style={{fontSize:11,color:'var(--muted)'}}>
+              {useAIFallback ? 'Claude AI will look up unknown barcodes (~$0.02/scan)' : 'Free databases only — no API cost'}
+            </div>
+          </div>
+          <button onClick={()=>setUseAIFallback(p=>!p)} style={{
+            padding:'6px 14px',borderRadius:8,cursor:'pointer',fontSize:12,fontWeight:700,
+            border:`2px solid ${useAIFallback?'var(--purple)':'var(--border)'}`,
+            background:useAIFallback?'var(--purple-bg)':'var(--surface-0)',
+            color:useAIFallback?'var(--purple-dark)':'var(--muted)',
+          }}>{useAIFallback ? 'Turn Off' : 'Turn On'}</button>
         </div>
       </div>
 
