@@ -364,7 +364,6 @@ ${fileText.slice(0, 8000)}`;
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
@@ -484,7 +483,6 @@ Only include genuinely useful study notes — skip filler, headers, and repetiti
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
