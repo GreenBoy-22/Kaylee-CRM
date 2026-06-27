@@ -1,10 +1,13 @@
-// src/PlantCatalog.tsx
+// src/PlantCatalog.tsx  (Outdoor Guide)
 //
-// Plant Catalog -- accordion-style plant list with full care guide sections,
-// household history, inline AI suggestions, care log, and tasks.
+// Outdoor Guide -- toggle between: Plants | Moisture Meter | Reference Library | Birds
+// Plants: accordion list with care guide sections, household history, inline AI, care log, tasks.
+// Moisture Meter: log a reading for any plant and get instant water/wait advice.
+// Reference Library: composting, herb harvest, propagation, and general guides.
+// Birds: Canton GA backyard bird info.
 
 import { useCallback, useEffect, useState, useMemo } from 'react';
-import { Plus, X, Save, RefreshCw, Leaf, ChevronDown, ChevronRight, Sparkles, CheckCircle2, Circle, Trash2, Edit2, Droplets, Sun, Thermometer, Bug, Scissors, FlaskConical } from 'lucide-react';
+import { Plus, X, Save, RefreshCw, Leaf, ChevronDown, ChevronRight, Sparkles, CheckCircle2, Circle, Trash2, Edit2, Droplets, Sun, Thermometer, Bug, Scissors, FlaskConical, BookOpen, Gauge } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
 // __ Types _______________________________________________________________
@@ -219,6 +222,9 @@ Be specific and practical. Format as bullet points starting with -.`;
 // __ Main component ______________________________________________________
 
 export default function PlantCatalog() {
+  // Top-level section toggle
+  const [section, setSection] = useState<'plants' | 'moisture' | 'library' | 'birds'>('plants');
+
   const [plants, setPlants]   = useState<Plant[]>([]);
   const [logs, setLogs]       = useState<PlantLog[]>([]);
   const [tasks, setTasks]     = useState<PlantTask[]>([]);
@@ -265,6 +271,18 @@ export default function PlantCatalog() {
   const [aiResult, setAiResult]   = useState('');
   const [aiLoading, setAiLoading] = useState(false);
 
+  // Moisture Meter state
+  const [moisturePlantId, setMoisturePlantId]   = useState('');
+  const [moistureReading, setMoistureReading]   = useState<number>(5);
+  const [moistureSaving, setMoistureSaving]     = useState(false);
+  const [moistureHistory, setMoistureHistory]   = useState<{plant_id:string;reading:number;logged_at:string;notes:string|null}[]>([]);
+
+  // Reference Library state
+  const [libSection, setLibSection] = useState<string>('all');
+  const [libArticles, setLibArticles] = useState<{id:string;section:string;title:string;content:string;tags:string[]}[]>([]);
+  const [libLoading, setLibLoading]   = useState(false);
+  const [libExpanded, setLibExpanded] = useState<string | null>(null);
+
   // Filters
   const [filterLoc, setFilterLoc]     = useState<Location | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -299,7 +317,108 @@ export default function PlantCatalog() {
 
   useEffect(() => { load(); }, [load]);
 
-  function resetPlantForm() {
+  // Load reference library articles
+  const loadLibrary = useCallback(async () => {
+    if (!supabase) return;
+    setLibLoading(true);
+    const { data } = await supabase
+      .from('outdoor_guide_articles')
+      .select('*')
+      .order('section')
+      .order('title');
+    setLibArticles((data as typeof libArticles) ?? []);
+    setLibLoading(false);
+  }, []);
+
+  // Load moisture history
+  const loadMoistureHistory = useCallback(async () => {
+    if (!supabase) return;
+    const { data } = await supabase
+      .from('plant_moisture_log')
+      .select('*')
+      .order('logged_at', { ascending: false })
+      .limit(50);
+    setMoistureHistory((data as typeof moistureHistory) ?? []);
+  }, []);
+
+  useEffect(() => {
+    if (section === 'library') loadLibrary();
+    if (section === 'moisture') loadMoistureHistory();
+  }, [section, loadLibrary, loadMoistureHistory]);
+
+  // Moisture meter advice engine
+  function getMoistureAdvice(reading: number, plant: Plant): { action: string; color: string; targetRange: string; detail: string } {
+    const guide = plant.care_guide?.toUpperCase() ?? '';
+
+    // Detect plant type from name/guide for targeted advice
+    const isDrought = /succulent|cactus|snake plant|zz plant|string of pearl|lavender|rosemary|thyme/i.test(plant.name + plant.care_guide);
+    const isMoist   = /monstera|philodendron|fern|mint|basil|strawberry|tomato|calla/i.test(plant.name + plant.care_guide);
+
+    // Parse ideal range from care guide if present
+    const rangeMatch = guide.match(/IDEAL[^\d]*(\d)[^\d]*[–-](\d)/);
+    const waterMatch = guide.match(/WATER (?:AT|WHEN)[^\d]*(\d)/);
+    const guideTarget = rangeMatch ? `${rangeMatch[1]}–${rangeMatch[2]}` : null;
+    const guideWaterAt = waterMatch ? parseInt(waterMatch[1]) : null;
+
+    const droughtRange = '1–3';
+    const normalRange  = '4–6';
+    const moistRange   = '4–6';
+    const targetRange  = guideTarget ?? (isDrought ? droughtRange : isMoist ? moistRange : normalRange);
+    const waterAt      = guideWaterAt ?? (isDrought ? 2 : 3);
+
+    if (reading <= waterAt) {
+      return {
+        action: '💧 WATER NOW',
+        color: '#ef4444',
+        targetRange,
+        detail: `Reading of ${reading} is at or below the water threshold (${waterAt}) for ${plant.name}. Water thoroughly until drainage flows. Target range: ${targetRange}.`,
+      };
+    } else if (reading <= parseInt(targetRange.split('–')[0]) + 1) {
+      return {
+        action: '💧 WATER SOON',
+        color: '#f97316',
+        targetRange,
+        detail: `Reading of ${reading} is getting low. Check again in 1–2 days. Water when it drops to ${waterAt}. Target range: ${targetRange}.`,
+      };
+    } else if (reading <= parseInt(targetRange.split('–')[1] ?? '6')) {
+      return {
+        action: '✅ ALL GOOD',
+        color: '#16a34a',
+        targetRange,
+        detail: `Reading of ${reading} is in the ideal range for ${plant.name}. No action needed. Target range: ${targetRange}.`,
+      };
+    } else if (reading <= 7) {
+      return {
+        action: '⏳ WAIT — SLIGHTLY WET',
+        color: '#eab308',
+        targetRange,
+        detail: `Reading of ${reading} is a bit high. Skip watering and check again in 2–3 days. Target range: ${targetRange}.`,
+      };
+    } else {
+      return {
+        action: '🚫 DO NOT WATER — TOO WET',
+        color: '#dc2626',
+        targetRange,
+        detail: `Reading of ${reading} indicates overwatering risk. Allow soil to dry significantly before watering again. Check for drainage issues. Target range: ${targetRange}.`,
+      };
+    }
+  }
+
+  async function saveMoistureReading() {
+    if (!supabase || !moisturePlantId) return;
+    setMoistureSaving(true);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const userId = sessionData.session?.user?.id;
+    if (!userId) { setMoistureSaving(false); return; }
+    await supabase.from('plant_moisture_log').insert({
+      plant_id: moisturePlantId,
+      user_id: userId,
+      reading: moistureReading,
+      logged_at: new Date().toISOString(),
+    });
+    await loadMoistureHistory();
+    setMoistureSaving(false);
+  }
     setPName(''); setPSci(''); setPNick(''); setPLoc('indoor');
     setPSpot(''); setPPot(''); setPNotes(''); setPGuide('');
   }
@@ -443,6 +562,269 @@ export default function PlantCatalog() {
           <Plus size={14} /> Add Plant
         </button>
       </div>
+
+  // __ Render ______________________________________________________________
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <h1>Outdoor Guide</h1>
+          <p>{section === 'plants' ? `${plants.length} plants · ` : ''}{currentMonth} · Canton, GA Zone 7b</p>
+        </div>
+        {section === 'plants' && (
+          <button className="btn primary" onClick={() => { resetPlantForm(); setEditingPlant(null); setShowAddPlant(true); }}>
+            <Plus size={14} /> Add Plant
+          </button>
+        )}
+      </div>
+
+      {/* ── Top-level section toggle ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 16 }}>
+        {[
+          { key: 'plants',   label: '🌿 Plants',            color: '#16a34a' },
+          { key: 'moisture', label: '💧 Moisture Meter',     color: '#0891b2' },
+          { key: 'library',  label: '📚 Reference Library',  color: '#7c3aed' },
+          { key: 'birds',    label: '🐦 Birds',              color: '#d97706' },
+        ].map(s => (
+          <button
+            key={s.key}
+            onClick={() => setSection(s.key as typeof section)}
+            style={{
+              padding: '10px 8px', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+              border: `2px solid ${section === s.key ? s.color : 'var(--border)'}`,
+              background: section === s.key ? `${s.color}18` : 'transparent',
+              color: section === s.key ? s.color : 'var(--muted)',
+              transition: 'all 0.15s',
+            }}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── MOISTURE METER SECTION ── */}
+      {section === 'moisture' && (
+        <div>
+          <section className="panel" style={{ borderTop: '3px solid #0891b2', marginBottom: 14 }}>
+            <div className="panel-head">
+              <h2><Gauge size={15} style={{ verticalAlign: 'middle', marginRight: 6, color: '#0891b2' }} />Log a Moisture Reading</h2>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+              Select a plant, enter the current moisture meter reading (1–10), and get instant advice on whether to water.
+            </p>
+            <div className="form-grid" style={{ marginBottom: 14 }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
+                Plant
+                <select value={moisturePlantId} onChange={e => { setMoisturePlantId(e.target.value); }} style={{ fontSize: 13 }}>
+                  <option value="">-- Select a plant --</option>
+                  {plants.map(p => <option key={p.id} value={p.id}>{p.nickname || p.name} ({LOCATION_LABELS[p.location]})</option>)}
+                </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
+                Meter Reading (1–10)
+                <input
+                  type="number" min={1} max={10} value={moistureReading}
+                  onChange={e => { setMoistureReading(Math.min(10, Math.max(1, parseInt(e.target.value) || 1))); }}
+                  style={{ fontSize: 20, fontWeight: 800, textAlign: 'center', color: moistureReading <= 2 ? '#ef4444' : moistureReading <= 4 ? '#f97316' : moistureReading <= 6 ? '#16a34a' : moistureReading <= 7 ? '#eab308' : '#dc2626' }}
+                />
+              </label>
+            </div>
+
+            {/* Visual meter */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+                {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+                  <div
+                    key={n}
+                    onClick={() => { setMoistureReading(n); }}
+                    style={{
+                      flex: 1, height: 32, borderRadius: 4, cursor: 'pointer',
+                      background: n <= moistureReading
+                        ? n <= 2 ? '#ef4444' : n <= 3 ? '#f97316' : n <= 6 ? '#16a34a' : n <= 7 ? '#eab308' : '#dc2626'
+                        : 'var(--surface-2)',
+                      border: n === moistureReading ? '2px solid var(--text)' : '2px solid transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 10, fontWeight: 700,
+                      color: n <= moistureReading ? '#fff' : 'var(--muted)',
+                      transition: 'all 0.1s',
+                    }}
+                  >
+                    {n}
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--muted)' }}>
+                <span>DRY</span>
+                <span>← IDEAL ZONE →</span>
+                <span>WET</span>
+              </div>
+            </div>
+
+            {/* Instant advice */}
+            {moisturePlantId && (() => {
+              const plant = plants.find(p => p.id === moisturePlantId);
+              if (!plant) return null;
+              const advice = getMoistureAdvice(moistureReading, plant);
+              return (
+                <div style={{ background: `${advice.color}15`, border: `2px solid ${advice.color}`, borderRadius: 10, padding: '14px 16px', marginBottom: 14 }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: advice.color, marginBottom: 6 }}>{advice.action}</div>
+                  <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text)' }}>{advice.detail}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
+                    Target range for {plant.name}: <strong>{advice.targetRange}</strong>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <button
+              className="btn primary"
+              onClick={saveMoistureReading}
+              disabled={moistureSaving || !moisturePlantId}
+            >
+              {moistureSaving ? 'Saving...' : '💾 Save Reading to Log'}
+            </button>
+          </section>
+
+          {/* Moisture quick reference */}
+          <section className="panel" style={{ marginBottom: 14 }}>
+            <div className="panel-head"><h2>Moisture Meter Scale Reference</h2></div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {[
+                { range: '1–2', label: 'DRY', detail: 'Water thoroughly — plant is moisture stressed', bg: '#fee2e2', color: '#ef4444' },
+                { range: '3–5', label: 'SLIGHTLY MOIST', detail: 'Generally suitable — monitor and check again soon', bg: '#ffedd5', color: '#f97316' },
+                { range: '6–8', label: 'MOIST', detail: 'Ideal for most houseplants — keep up your routine', bg: '#dcfce7', color: '#16a34a' },
+                { range: '9–10', label: 'WET', detail: 'Do not water — risk of root rot and fungal issues', bg: '#dbeafe', color: '#1d4ed8' },
+              ].map(r => (
+                <div key={r.range} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '8px 12px', background: r.bg, borderRadius: 8, borderLeft: `4px solid ${r.color}` }}>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: r.color, minWidth: 36 }}>{r.range}</div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: r.color }}>{r.label}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text)' }}>{r.detail}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Recent moisture history */}
+          {moistureHistory.length > 0 && (
+            <section className="panel">
+              <div className="panel-head"><h2>Recent Readings</h2><span className="readonly-pill">{moistureHistory.length}</span></div>
+              {moistureHistory.slice(0, 20).map((r, i) => {
+                const plant = plants.find(p => p.id === r.plant_id);
+                const color = r.reading <= 2 ? '#ef4444' : r.reading <= 4 ? '#f97316' : r.reading <= 6 ? '#16a34a' : r.reading <= 7 ? '#eab308' : '#dc2626';
+                return (
+                  <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 20, fontWeight: 800, color, minWidth: 30, textAlign: 'center' }}>{r.reading}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{plant?.nickname || plant?.name || 'Unknown plant'}</div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(r.logged_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>
+                    </div>
+                    {r.notes && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.notes}</div>}
+                  </div>
+                );
+              })}
+            </section>
+          )}
+        </div>
+      )}
+
+      {/* ── REFERENCE LIBRARY SECTION ── */}
+      {section === 'library' && (
+        <div>
+          {/* Section filter pills */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+            {[
+              { key: 'all',           label: 'All' },
+              { key: 'composting',    label: '♻️ Composting' },
+              { key: 'moisture_meter',label: '💧 Moisture Meter' },
+              { key: 'herb_harvest',  label: '🌿 Herb Harvest & Drying' },
+              { key: 'propagation',   label: '✂️ Propagation' },
+              { key: 'birds',         label: '🐦 Birds' },
+            ].map(s => (
+              <button key={s.key} onClick={() => setLibSection(s.key)} style={{
+                padding: '5px 14px', borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                border: `2px solid ${libSection === s.key ? 'var(--purple)' : 'var(--border)'}`,
+                background: libSection === s.key ? 'var(--purple-bg)' : 'transparent',
+                color: libSection === s.key ? 'var(--purple)' : 'var(--muted)',
+              }}>{s.label}</button>
+            ))}
+          </div>
+
+          {libLoading && <div style={{ color: 'var(--muted)', fontSize: 13, padding: 20 }}>Loading library...</div>}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {libArticles
+              .filter(a => libSection === 'all' || a.section === libSection)
+              .map(a => (
+                <section key={a.id} className="panel" style={{ padding: 0, overflow: 'hidden' }}>
+                  <div
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer' }}
+                    onClick={() => setLibExpanded(libExpanded === a.id ? null : a.id)}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{a.title}</div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, textTransform: 'capitalize' }}>
+                        {a.section.replace(/_/g, ' ')}
+                        {a.tags?.length > 0 && ` · ${a.tags.slice(0, 3).join(', ')}`}
+                      </div>
+                    </div>
+                    {libExpanded === a.id ? <ChevronDown size={16} color="var(--muted)" /> : <ChevronRight size={16} color="var(--muted)" />}
+                  </div>
+                  {libExpanded === a.id && (
+                    <div style={{ borderTop: '1px solid var(--border)', padding: '14px 16px', fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', color: 'var(--text)' }}>
+                      {a.content}
+                    </div>
+                  )}
+                </section>
+              ))}
+            {libArticles.filter(a => libSection === 'all' || a.section === libSection).length === 0 && !libLoading && (
+              <section className="panel" style={{ textAlign: 'center', padding: 40 }}>
+                <BookOpen size={32} style={{ color: 'var(--muted)', marginBottom: 12 }} />
+                <p style={{ color: 'var(--muted)' }}>No articles in this section yet.</p>
+              </section>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── BIRDS SECTION ── */}
+      {section === 'birds' && (
+        <div>
+          <section className="panel" style={{ borderTop: '3px solid #d97706', marginBottom: 14 }}>
+            <div className="panel-head">
+              <h2>🐦 Canton GA Backyard Birds</h2>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+              Bird info for Canton, GA (Zone 7b) — species, feeders, and habitat plants. Expand the Reference Library for full details.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+              {[
+                { name: 'Northern Cardinal', status: '🟢 Year-round', feeder: 'Sunflower seeds', color: '#dc2626' },
+                { name: 'Carolina Chickadee', status: '🟢 Year-round', feeder: 'Sunflower, suet', color: '#374151' },
+                { name: 'Ruby-throated Hummingbird', status: '🟡 Apr–Oct', feeder: '4:1 sugar water', color: '#059669' },
+                { name: 'Tufted Titmouse', status: '🟢 Year-round', feeder: 'Sunflower, peanuts', color: '#6b7280' },
+                { name: 'Downy Woodpecker', status: '🟢 Year-round', feeder: 'Suet, sunflower', color: '#1f2937' },
+                { name: 'American Goldfinch', status: '🔵 Winter visitor', feeder: 'Nyjer/thistle', color: '#eab308' },
+                { name: 'Eastern Bluebird', status: '🟢 Year-round', feeder: 'Mealworms, nest box', color: '#1d4ed8' },
+                { name: 'Carolina Wren', status: '🟢 Year-round', feeder: 'Suet, peanut butter', color: '#92400e' },
+              ].map(b => (
+                <div key={b.name} style={{ background: 'var(--surface-1)', borderRadius: 8, padding: '10px 12px', borderLeft: `3px solid ${b.color}` }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{b.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{b.status}</div>
+                  <div style={{ fontSize: 11, marginTop: 4 }}>🪺 {b.feeder}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 14, fontSize: 13, color: 'var(--muted)', background: 'var(--surface-1)', borderRadius: 8, padding: '10px 12px' }}>
+              💡 See Reference Library → Birds for full Canton GA species list, feeder types, and plants that attract birds.
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* ── PLANTS SECTION ── */}
+      {section === 'plants' && (<>
 
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
@@ -937,6 +1319,8 @@ export default function PlantCatalog() {
           </section>
         </div>
       )}
+
+      </>)} {/* end plants section */}
     </>
   );
 }
