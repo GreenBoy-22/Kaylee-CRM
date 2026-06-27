@@ -1609,7 +1609,7 @@ Kaylee`;
           <div className="sync-note"><strong>{hasSupabase ? 'Supabase enabled' : 'Local demo mode'}</strong><p>{loading ? 'Loading...' : message}</p><button className="btn tiny" onClick={loadData}><RefreshCw size={13} /> Refresh</button></div>
           <SidebarWeather onClick={() => setPage('weather')} />
         </aside>
-        <main className="content">
+        <main className="content" style={{ paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 16px))' }}>
           {!activeCanEdit && activeRole === 'limited' && page !== 'dashboard' && <ViewOnlyBanner />}
           {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} choreTasks={choreTasks} householdUsers={householdUsers} role={activeRole} setPage={setPage} />}
           {page === 'today' && <Today tasks={tasks.filter((task) => activeRole === 'admin' || task.mode === 'home')} choreTasks={choreTasks} householdUsers={householdUsers} completeTask={completeTask} completeChore={completeChore} editable={canEdit('today') && canEdit('chores')} />}
@@ -3023,8 +3023,8 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
           <div style={{display:'flex',flexDirection:'column',gap:4,marginBottom:10}}>
             {pendingBulk.map(p=><div key={p.barcode} style={{display:'flex',justifyContent:'space-between',padding:'6px 10px',background:'var(--surface-1)',borderRadius:6,fontSize:13}}><span>{p.name}</span><span style={{fontWeight:700}}>×{p.count}</span></div>)}
           </div>
-          <div style={{display:'flex',gap:8}}>
-            <button className="btn primary" onClick={saveBulk}>✅ Save All ({pendingBulk.reduce((s,p)=>s+p.count,0)} scans)</button>
+          <div style={{display:'flex',gap:8,position:'sticky',bottom:'calc(80px + env(safe-area-inset-bottom,16px))',background:'var(--surface-0)',padding:'10px 0',zIndex:10}}>
+            <button className="btn primary" onClick={saveBulk} style={{flex:1,fontSize:15,padding:'12px 0'}}>✅ Save All ({pendingBulk.reduce((s,p)=>s+p.count,0)} scans)</button>
             <button className="btn ghost" onClick={()=>{setPendingBulk([]);setScanStatus('');}}>Clear</button>
           </div>
         </div>}
