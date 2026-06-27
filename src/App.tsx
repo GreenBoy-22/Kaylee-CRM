@@ -2849,7 +2849,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   const [aiRecipes,setAiRecipes]=useState('');const [aiLoading,setAiLoading]=useState(false);
 
   // Receipt-style scan list
-  type ReceiptLine = {barcode:string;name:string;brand:string;category:string;qty:number;marketPrice:number|null;isNew:boolean;looking:boolean;id:string|null};
+  type ReceiptLine = {barcode:string;name:string;brand:string;category:string;location:string;qty:number;marketPrice:number|null;isNew:boolean;looking:boolean;id:string|null};
   const [receiptLines, setReceiptLines] = useState<ReceiptLine[]>([]);
   const [receiptSaving, setReceiptSaving] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
@@ -2878,97 +2878,83 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
 
   async function delInvItem(id:string){if(!supabase||!confirm('Delete this item?'))return;await supabase.from('inventory_items').delete().eq('id',id);setItems(p=>p.filter(i=>i.id!==id));}
 
-  // __ UPC lookup — chains 6 sources in order ______________________________
-  // 1. Open Food Facts     — food/grocery (no key, huge)
-  // 2. Open Library        — books by ISBN (no key)
-  // 3. Brocade.io          — open GTIN database, tools/general (no key)
-  // 4. UPCitemdb trial     — electronics/games/household (no key, rate limited)
-  // 5. Datakick (archive)  — community product data (no key)
-  // 6. Best-effort name    — fallback using barcode prefix heuristic
-
+  // __ UPC lookup — robust chain with proper timeouts ______________________
   function mapCategory(raw: string): string {
     const s = raw.toLowerCase();
-    if (s.includes('beverage')||s.includes('drink')||s.includes('water')||s.includes('juice')||s.includes('soda')) return 'Beverages';
+    if (s.includes('beverage')||s.includes('drink')||s.includes('water')||s.includes('juice')||s.includes('soda')||s.includes('sprite')||s.includes('cola')) return 'Beverages';
     if (s.includes('snack')||s.includes('chip')||s.includes('cracker')||s.includes('popcorn')) return 'Snacks';
     if (s.includes('frozen')) return 'Freezer';
     if (s.includes('dairy')||s.includes('milk')||s.includes('cheese')||s.includes('yogurt')||s.includes('butter')) return 'Refrigerator';
     if (s.includes('meat')||s.includes('poultry')||s.includes('seafood')||s.includes('deli')) return 'Refrigerator';
-    if (s.includes('bak')||s.includes('flour')||s.includes('sugar')||s.includes('yeast')) return 'Baking';
-    if (s.includes('condiment')||s.includes('sauce')||s.includes('dressing')||s.includes('spice')||s.includes('seasoning')) return 'Condiments';
-    if (s.includes('canned')||s.includes('bean')||s.includes('soup')||s.includes('tomato')) return 'Canned Goods';
-    if (s.includes('clean')||s.includes('detergent')||s.includes('bleach')||s.includes('spray')) return 'Cleaning';
-    if (s.includes('paper')||s.includes('tissue')||s.includes('towel')||s.includes('napkin')) return 'Paper Products';
-    if (s.includes('medicine')||s.includes('vitamin')||s.includes('supplement')||s.includes('pill')||s.includes('health')) return 'Medicine';
-    if (s.includes('pet')||s.includes('dog')||s.includes('cat')||s.includes('animal')) return 'Pet Supplies';
-    if (s.includes('personal')||s.includes('shampoo')||s.includes('soap')||s.includes('toothpaste')||s.includes('deodorant')) return 'Personal Care';
-    if (s.includes('garden')||s.includes('plant')||s.includes('seed')||s.includes('soil')) return 'Garden';
-    if (s.includes('book')||s.includes('novel')||s.includes('fiction')||s.includes('nonfiction')) return 'Other';
-    if (s.includes('game')||s.includes('toy')||s.includes('puzzle')) return 'Other';
-    if (s.includes('electronic')||s.includes('computer')||s.includes('tech')||s.includes('cable')||s.includes('tool')) return 'Other';
+    if (s.includes('bak')||s.includes('flour')||s.includes('sugar')) return 'Baking';
+    if (s.includes('condiment')||s.includes('sauce')||s.includes('dressing')||s.includes('spice')) return 'Condiments';
+    if (s.includes('canned')||s.includes('bean')||s.includes('soup')) return 'Canned Goods';
+    if (s.includes('clean')||s.includes('detergent')||s.includes('bleach')) return 'Cleaning';
+    if (s.includes('paper')||s.includes('tissue')||s.includes('towel')) return 'Paper Products';
+    if (s.includes('medicine')||s.includes('vitamin')||s.includes('supplement')) return 'Medicine';
+    if (s.includes('pet')||s.includes('dog')||s.includes('cat')) return 'Pet Supplies';
+    if (s.includes('shampoo')||s.includes('soap')||s.includes('toothpaste')||s.includes('deodorant')) return 'Personal Care';
+    if (s.includes('garden')||s.includes('plant')||s.includes('seed')) return 'Garden';
     return 'Pantry';
   }
 
+  async function fetchWithTimeout(url: string, ms = 5000): Promise<Response> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timeout')), ms);
+      fetch(url).then(r => { clearTimeout(timer); resolve(r); }).catch(e => { clearTimeout(timer); reject(e); });
+    });
+  }
+
   async function lookupUPC(code: string): Promise<{name:string;brand:string;category:string;isPerishable:boolean}|null> {
-    // ── Source 1: Open Food Facts (best for grocery) ─────────────────────
+    // ── 1. Open Food Facts ───────────────────────────────────────────────
     try {
-      const r = await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`, {signal: AbortSignal.timeout(4000)});
+      const r = await fetchWithTimeout(`https://world.openfoodfacts.org/api/v0/product/${code}.json`, 6000);
       const d = await r.json();
-      if (d.status === 1 && d.product?.product_name) {
+      if (d.status === 1 && d.product) {
         const p = d.product;
         const name = (p.product_name_en || p.product_name || '').trim();
         const brand = (p.brands?.split(',')[0] || '').trim();
         const rawCat = p.categories_tags?.[0]?.replace('en:','').replace(/-/g,' ') || '';
-        const cat = mapCategory(rawCat || name);
-        if (name) return { name, brand, category: cat, isPerishable: ['Refrigerator','Freezer'].includes(cat) };
+        if (name) {
+          const cat = mapCategory(rawCat + ' ' + name);
+          return { name, brand, category: cat, isPerishable: ['Refrigerator','Freezer'].includes(cat) };
+        }
       }
     } catch { /* next */ }
 
-    // ── Source 2: Open Library (books — ISBN starts with 978 or 979) ──────
+    // ── 2. Open Library (ISBN — starts with 978/979) ─────────────────────
     if (code.startsWith('978') || code.startsWith('979')) {
       try {
-        const r = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${code}&format=json&jscmd=data`, {signal: AbortSignal.timeout(4000)});
+        const r = await fetchWithTimeout(`https://openlibrary.org/api/books?bibkeys=ISBN:${code}&format=json&jscmd=data`, 6000);
         const d = await r.json();
         const book = d[`ISBN:${code}`];
         if (book?.title) {
-          const authors = book.authors?.map((a:{name:string})=>a.name).join(', ') || '';
+          const authors = (book.authors||[]).map((a:{name:string})=>a.name).join(', ');
           return { name: book.title, brand: authors, category: 'Other', isPerishable: false };
         }
       } catch { /* next */ }
     }
 
-    // ── Source 3: Brocade.io (open GTIN, good for non-food) ──────────────
+    // ── 3. UPCitemdb (electronics, games, household) ─────────────────────
     try {
-      const r = await fetch(`https://brocade.io/bapi/product/read-single.php?gtin=${code}`, {signal: AbortSignal.timeout(4000)});
+      const r = await fetchWithTimeout(`https://api.upcitemdb.com/prod/trial/lookup?upc=${code}`, 6000);
+      const d = await r.json();
+      if (d.code === 'OK' && d.items?.[0]?.title) {
+        const item = d.items[0];
+        const cat = mapCategory((item.category || '') + ' ' + item.title);
+        return { name: item.title, brand: item.brand || '', category: cat, isPerishable: false };
+      }
+    } catch { /* next */ }
+
+    // ── 4. Brocade.io ────────────────────────────────────────────────────
+    try {
+      const r = await fetchWithTimeout(`https://brocade.io/bapi/product/read-single.php?gtin=${code}`, 5000);
       const d = await r.json();
       if (d.product?.name) {
         return { name: d.product.name, brand: d.product.brand_name || '', category: mapCategory(d.product.name), isPerishable: false };
       }
     } catch { /* next */ }
 
-    // ── Source 4: UPCitemdb trial (electronics, games, general) ──────────
-    try {
-      const r = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${code}`, {signal: AbortSignal.timeout(5000)});
-      const d = await r.json();
-      if (d.code === 'OK' && d.items?.[0]?.title) {
-        const item = d.items[0];
-        return { name: item.title, brand: item.brand || '', category: mapCategory(item.category || item.title), isPerishable: false };
-      }
-    } catch { /* next */ }
-
-    // ── Source 5: Buycott open product API (community data) ──────────────
-    try {
-      const r = await fetch(`https://www.buycott.com/upc/${code}`, {signal: AbortSignal.timeout(4000)});
-      const text = await r.text();
-      // Parse product name from og:title meta tag
-      const match = text.match(/<meta property="og:title" content="([^"]+)"/);
-      if (match?.[1] && !match[1].toLowerCase().includes('buycott')) {
-        const name = match[1].replace(' | Buycott','').trim();
-        if (name && name.length > 2) return { name, brand: '', category: mapCategory(name), isPerishable: false };
-      }
-    } catch { /* next */ }
-
-    // ── Source 6: Digit-eyes style prefix heuristic (last resort) ────────
-    // Returns null so autoSave uses "Item BARCODE" and prompts user to rename
     return null;
   }
 
@@ -3000,12 +2986,12 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     }
 
     // Add placeholder line immediately so user sees feedback
-    const placeholder:ReceiptLine = {barcode:code,name:'',brand:'',category:'Pantry',qty:1,marketPrice:null,isNew:false,looking:true,id:null};
+    const placeholder:ReceiptLine = {barcode:code,name:'',brand:'',category:'Pantry',location:'Pantry',qty:1,marketPrice:null,isNew:false,looking:true,id:null};
 
     // Check if already in inventory
     const existing = items.find(i=>i.barcode===code);
     if(existing){
-      setReceiptLines(prev=>[{...placeholder,name:existing.name,brand:existing.brand??'',category:existing.category??'Pantry',looking:false,id:existing.id},...prev]);
+      setReceiptLines(prev=>[{...placeholder,name:existing.name,brand:existing.brand??'',category:existing.category??'Pantry',location:existing.location??'Pantry',looking:false,id:existing.id},...prev]);
       setScanStatus(`✅ ${existing.name} added to list`);
       scanRef.current?.focus();
       return;
@@ -3019,9 +3005,10 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     const name = product?.name || `Unknown item (${code})`;
     const brand = product?.brand || '';
     const category = product?.category || 'Pantry';
+    const location = ['Refrigerator','Freezer'].includes(category) ? category : 'Pantry';
 
     setReceiptLines(prev=>prev.map(r=>r.barcode===code
-      ? {...r, name, brand, category, looking:false, isNew:true}
+      ? {...r, name, brand, category, location, looking:false, isNew:true}
       : r
     ));
     setScanStatus(product ? `✅ Found: ${name}` : `⚠️ ${code} not in database — scan added, edit name below`);
@@ -3047,7 +3034,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
         await supabase.from('inventory_transactions').insert({item_id:line.id,user_id:uid,transaction_type:scanMode==='in'?'scan_in':'scan_out',quantity_change:qtyChange,barcode:line.barcode,notes:`Receipt scan`});
       } else {
         // New item — create it
-        const payload={name:line.name||`Item ${line.barcode}`,brand:line.brand||null,category:line.category,location:'Pantry',quantity:Math.max(0,qtyChange),unit:'each',expires:null,import_date:invKey(new Date()),avg_cost_canton:line.marketPrice,barcode:line.barcode,notes:null,is_perishable:['Refrigerator','Freezer'].includes(line.category),user_id:uid,updated_at:new Date().toISOString()};
+        const payload={name:line.name||`Item ${line.barcode}`,brand:line.brand||null,category:line.category,location:line.location||'Pantry',quantity:Math.max(0,qtyChange),unit:'each',expires:null,import_date:invKey(new Date()),avg_cost_canton:line.marketPrice,barcode:line.barcode,notes:null,is_perishable:['Refrigerator','Freezer'].includes(line.category),user_id:uid,updated_at:new Date().toISOString()};
         const{data:ni}=await supabase.from('inventory_items').insert([payload]).select().single();
         if(ni) await supabase.from('inventory_transactions').insert({item_id:ni.id,user_id:uid,transaction_type:'scan_in',quantity_change:Math.max(0,qtyChange),barcode:line.barcode,notes:'Auto-added via scan'});
       }
@@ -3203,11 +3190,23 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
                       style={{border:'none',background:'transparent',fontWeight:700,fontSize:14,padding:0,width:'100%',color:'var(--text)'}}
                       placeholder="Item name (tap to edit)"
                     />
-                    <div style={{fontSize:11,color:'var(--muted)',marginTop:2,display:'flex',gap:8,flexWrap:'wrap'}}>
-                      {line.brand&&<span>{line.brand}</span>}
-                      <span style={{background:'var(--surface-1)',padding:'1px 6px',borderRadius:4}}>{line.category}</span>
-                      {line.isNew&&<span style={{color:'#16a34a',fontWeight:600}}>NEW</span>}
-                      {line.marketPrice&&<span style={{color:'var(--green)',fontWeight:600}}>${line.marketPrice.toFixed(2)}</span>}
+                    {line.brand&&<div style={{fontSize:11,color:'var(--muted)'}}>{line.brand}</div>}
+                    <div style={{display:'flex',gap:6,marginTop:4,flexWrap:'wrap'}}>
+                      <select
+                        value={line.location}
+                        onChange={e=>setReceiptLines(prev=>prev.map(r=>r.barcode===line.barcode?{...r,location:e.target.value}:r))}
+                        style={{fontSize:11,padding:'3px 6px',borderRadius:6,border:'1px solid var(--border)',background:'var(--surface-1)',color:'var(--text)',flex:1}}
+                      >
+                        {INV_LOCS.map(l=><option key={l} value={l}>{l}</option>)}
+                      </select>
+                      <select
+                        value={line.category}
+                        onChange={e=>setReceiptLines(prev=>prev.map(r=>r.barcode===line.barcode?{...r,category:e.target.value}:r))}
+                        style={{fontSize:11,padding:'3px 6px',borderRadius:6,border:'1px solid var(--border)',background:'var(--surface-1)',color:'var(--text)',flex:1}}
+                      >
+                        {INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}
+                      </select>
+                      {line.isNew&&<span style={{fontSize:10,color:'#16a34a',fontWeight:700,padding:'3px 6px',background:'#dcfce7',borderRadius:6}}>NEW</span>}
                     </div>
                   </>
                 }
