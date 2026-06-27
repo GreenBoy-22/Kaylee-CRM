@@ -6,7 +6,7 @@
 // Reference Library: composting, herb harvest, propagation, and general guides.
 // Birds: Canton GA backyard bird info.
 
-import { useCallback, useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useState, useMemo } from 'react';
 import { Plus, X, Save, RefreshCw, Leaf, ChevronDown, ChevronRight, Sparkles, CheckCircle2, Circle, Trash2, Edit2, Droplets, Sun, Thermometer, Bug, Scissors, FlaskConical, BookOpen, Gauge } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
@@ -811,8 +811,7 @@ export default function PlantCatalog() {
       )}
 
       {/* ── PLANTS SECTION ── */}
-      {section === 'plants' && (
-      <div className="plants-section-wrapper">
+      {section === 'plants' && <React.Fragment>
 
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
@@ -1308,8 +1307,8 @@ export default function PlantCatalog() {
         </div>
       )}
 
-      </div>
-      )} {/* end plants section */}
+      </React.Fragment>
+      } {/* end plants section */}
     </>
   );
 }
