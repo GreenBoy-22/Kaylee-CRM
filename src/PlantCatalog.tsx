@@ -811,7 +811,7 @@ export default function PlantCatalog() {
       )}
 
       {/* ── PLANTS SECTION ── */}
-      {section === 'plants' && (<>
+      {section === 'plants' && (<div>
 
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
@@ -1307,7 +1307,7 @@ export default function PlantCatalog() {
         </div>
       )}
 
-      </>)} {/* end plants section */}
+      </div>)} {/* end plants section */}
     </>
   );
 }
