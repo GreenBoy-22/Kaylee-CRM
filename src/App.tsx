@@ -2879,23 +2879,34 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   async function delInvItem(id:string){if(!supabase||!confirm('Delete this item?'))return;await supabase.from('inventory_items').delete().eq('id',id);setItems(p=>p.filter(i=>i.id!==id));}
 
   // __ UPC lookup — robust chain with proper timeouts ______________________
+  // __ Barcode normalization — handles UPC/EAN/JAN/ITF-14/ISBN/EAN-8 ______
+  function normalizeBarcode(code: string): { gtin14:string; gtin13:string; gtin12:string; type:string } {
+    const c = code.replace(/\D/g,'');
+    if (c.length===14) return { gtin14:c, gtin13:c.slice(1), gtin12:c.slice(2), type:'ITF-14' };
+    if (c.length===13) { const isJAN=c.startsWith('45')||c.startsWith('49'); return { gtin14:'0'+c, gtin13:c, gtin12:c.slice(1), type:isJAN?'JAN':'EAN-13' }; }
+    if (c.length===12) return { gtin14:'00'+c, gtin13:'0'+c, gtin12:c, type:'UPC-A' };
+    if (c.length===8)  return { gtin14:'000000'+c, gtin13:'00000'+c, gtin12:'0000'+c, type:'EAN-8' };
+    if (c.length===10) { const b='978'+c.slice(0,9); const ck=(10-([...b].reduce((s,d,i)=>s+(i%2===0?parseInt(d):parseInt(d)*3),0)%10))%10; const full=b+ck; return { gtin14:'0'+full, gtin13:full, gtin12:full.slice(1), type:'ISBN-10' }; }
+    return { gtin14:'0'+c, gtin13:c, gtin12:c.slice(1), type:c.startsWith('978')||c.startsWith('979')?'ISBN-13':'GTIN' };
+  }
+
   function mapCategory(raw: string): string {
     const s = raw.toLowerCase();
-    if (s.includes('beverage')||s.includes('drink')||s.includes('water')||s.includes('juice')||s.includes('soda')||s.includes('sprite')||s.includes('cola')) return 'Beverages';
-    if (s.includes('snack')||s.includes('chip')||s.includes('cracker')||s.includes('popcorn')) return 'Snacks';
-    if (s.includes('frozen')) return 'Freezer';
-    if (s.includes('dairy')||s.includes('milk')||s.includes('cheese')||s.includes('yogurt')||s.includes('butter')) return 'Refrigerator';
-    if (s.includes('meat')||s.includes('poultry')||s.includes('seafood')||s.includes('deli')) return 'Refrigerator';
-    if (s.includes('bak')||s.includes('flour')||s.includes('sugar')) return 'Baking';
-    if (s.includes('condiment')||s.includes('sauce')||s.includes('dressing')||s.includes('spice')) return 'Condiments';
-    if (s.includes('canned')||s.includes('bean')||s.includes('soup')) return 'Canned Goods';
-    if (s.includes('clean')||s.includes('detergent')||s.includes('bleach')) return 'Cleaning';
-    if (s.includes('paper')||s.includes('tissue')||s.includes('towel')) return 'Paper Products';
-    if (s.includes('medicine')||s.includes('vitamin')||s.includes('supplement')) return 'Medicine';
-    if (s.includes('pet')||s.includes('dog')||s.includes('cat')) return 'Pet Supplies';
-    if (s.includes('shampoo')||s.includes('soap')||s.includes('toothpaste')||s.includes('deodorant')) return 'Personal Care';
-    if (s.includes('garden')||s.includes('plant')||s.includes('seed')) return 'Garden';
-    return 'Pantry';
+    if (s.includes('beverage')||s.includes('drink')||s.includes('water')||s.includes('juice')||s.includes('soda')||s.includes('sprite')||s.includes('cola')||s.includes('coffee')||s.includes('tea')||s.includes('beer')||s.includes('wine')) return 'Beverages';
+    if (s.includes('snack')||s.includes('chip')||s.includes('cracker')||s.includes('popcorn')||s.includes('candy')||s.includes('cookie')||s.includes('pretzel')) return 'Snacks';
+    if (s.includes('frozen')||s.includes('ice cream')||s.includes('popsicle')) return 'Freezer';
+    if (s.includes('dairy')||s.includes('milk')||s.includes('cheese')||s.includes('yogurt')||s.includes('butter')||s.includes('cream')||s.includes('egg')) return 'Refrigerator';
+    if (s.includes('meat')||s.includes('poultry')||s.includes('chicken')||s.includes('beef')||s.includes('pork')||s.includes('seafood')||s.includes('deli')||s.includes('bacon')||s.includes('sausage')) return 'Refrigerator';
+    if (s.includes('bak')||s.includes('flour')||s.includes('sugar')||s.includes('yeast')||s.includes('biscuit mix')) return 'Baking';
+    if (s.includes('condiment')||s.includes('ketchup')||s.includes('mustard')||s.includes('mayo')||s.includes('sauce')||s.includes('dressing')||s.includes('spice')||s.includes('seasoning')||s.includes('salt')||s.includes('pepper shaker')||s.includes('vinegar')) return 'Condiments';
+    if (s.includes('canned')||s.includes('bean')||s.includes('soup')||s.includes('tomato paste')||s.includes('broth')||s.includes('tuna can')) return 'Canned Goods';
+    if (s.includes('clean')||s.includes('detergent')||s.includes('bleach')||s.includes('disinfect')||s.includes('wipe')||s.includes('scrub')||s.includes('sponge')||s.includes('mop')||s.includes('broom')) return 'Cleaning';
+    if (s.includes('paper')||s.includes('tissue')||s.includes('towel')||s.includes('napkin')||s.includes('toilet')||s.includes('foil')||s.includes('wrap')||s.includes('bag ')) return 'Paper Products';
+    if (s.includes('medicine')||s.includes('vitamin')||s.includes('supplement')||s.includes('pill')||s.includes('tablet')||s.includes('capsule')||s.includes('pain relief')||s.includes('antibiotic')||s.includes('bandage')||s.includes('first aid')) return 'Medicine';
+    if (s.includes('pet')||s.includes('dog')||s.includes('cat')||s.includes('puppy')||s.includes('kitten')||s.includes('bird food')||s.includes('fish food')) return 'Pet Supplies';
+    if (s.includes('shampoo')||s.includes('conditioner')||s.includes('soap')||s.includes('toothpaste')||s.includes('toothbrush')||s.includes('deodorant')||s.includes('lotion')||s.includes('razor')||s.includes('feminine')||s.includes('sunscreen')) return 'Personal Care';
+    if (s.includes('garden')||s.includes('plant')||s.includes('seed')||s.includes('soil')||s.includes('fertilizer')||s.includes('pesticide')||s.includes('mulch')||s.includes('hose')||s.includes('sprinkler')||s.includes('trowel')) return 'Garden';
+    return 'Other';
   }
 
   async function fetchWithTimeout(url: string, ms = 5000): Promise<Response> {
@@ -2905,58 +2916,115 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     });
   }
 
-  async function lookupUPC(code: string): Promise<{name:string;brand:string;category:string;isPerishable:boolean}|null> {
-    // ── 1. Open Food Facts ───────────────────────────────────────────────
-    try {
-      const r = await fetchWithTimeout(`https://world.openfoodfacts.org/api/v0/product/${code}.json`, 6000);
-      const d = await r.json();
-      if (d.status === 1 && d.product) {
-        const p = d.product;
-        const name = (p.product_name_en || p.product_name || '').trim();
-        const brand = (p.brands?.split(',')[0] || '').trim();
-        const rawCat = p.categories_tags?.[0]?.replace('en:','').replace(/-/g,' ') || '';
-        if (name) {
-          const cat = mapCategory(rawCat + ' ' + name);
-          return { name, brand, category: cat, isPerishable: ['Refrigerator','Freezer'].includes(cat) };
-        }
-      }
-    } catch { /* next */ }
+  async function lookupUPC(rawCode: string): Promise<{name:string;brand:string;category:string;isPerishable:boolean}|null> {
+    const { gtin13, gtin12, gtin14, type } = normalizeBarcode(rawCode);
+    const isISBN = type.includes('ISBN') || gtin13.startsWith('978') || gtin13.startsWith('979');
+    const isITF14 = type === 'ITF-14';
 
-    // ── 2. Open Library (ISBN — starts with 978/979) ─────────────────────
-    if (code.startsWith('978') || code.startsWith('979')) {
+    // ── 1. Open Food Facts (UPC-A, EAN-13, JAN, EAN-8) ───────────────────
+    if (!isISBN) {
+      for (const code of [gtin13, gtin12]) {
+        try {
+          const r = await fetchWithTimeout(`https://world.openfoodfacts.org/api/v0/product/${code}.json`, 6000);
+          const d = await r.json();
+          if (d.status === 1 && d.product) {
+            const p = d.product;
+            const name = (p.product_name_en || p.product_name || '').trim();
+            const brand = (p.brands?.split(',')[0] || '').trim();
+            const rawCat = p.categories_tags?.[0]?.replace('en:','').replace(/-/g,' ') || '';
+            if (name) { const cat = mapCategory(rawCat+' '+name); return { name, brand, category:cat, isPerishable:['Refrigerator','Freezer'].includes(cat) }; }
+          }
+        } catch { /* next */ }
+      }
+    }
+
+    // ── 2. Open Library (ISBN-10, ISBN-13, EAN books) ────────────────────
+    if (isISBN) {
       try {
-        const r = await fetchWithTimeout(`https://openlibrary.org/api/books?bibkeys=ISBN:${code}&format=json&jscmd=data`, 6000);
+        const r = await fetchWithTimeout(`https://openlibrary.org/api/books?bibkeys=ISBN:${gtin13}&format=json&jscmd=data`, 6000);
         const d = await r.json();
-        const book = d[`ISBN:${code}`];
+        const book = d[`ISBN:${gtin13}`];
         if (book?.title) {
           const authors = (book.authors||[]).map((a:{name:string})=>a.name).join(', ');
-          return { name: book.title, brand: authors, category: 'Other', isPerishable: false };
+          return { name:book.title, brand:authors, category:'Other', isPerishable:false };
         }
       } catch { /* next */ }
     }
 
-    // ── 3. UPCitemdb (electronics, games, household) ─────────────────────
+    // ── 3. UPCitemdb trial (UPC-A, EAN-13, ISBN — games, electronics) ────
+    for (const code of [gtin12, gtin13]) {
+      try {
+        const r = await fetchWithTimeout(`https://api.upcitemdb.com/prod/trial/lookup?upc=${code}`, 6000);
+        const d = await r.json();
+        if (d.code === 'OK' && d.items?.[0]?.title) {
+          const item = d.items[0];
+          return { name:item.title, brand:item.brand||'', category:mapCategory((item.category||'')+' '+item.title), isPerishable:false };
+        }
+      } catch { /* next */ }
+    }
+
+    // ── 4. Brocade.io (GTIN-14/13/12 — open community database) ─────────
+    for (const code of [gtin14, gtin13, gtin12]) {
+      try {
+        const r = await fetchWithTimeout(`https://brocade.io/bapi/product/read-single.php?gtin=${code}`, 5000);
+        const d = await r.json();
+        if (d.product?.name) return { name:d.product.name, brand:d.product.brand_name||'', category:mapCategory(d.product.name), isPerishable:false };
+      } catch { /* next */ }
+    }
+
+    // ── 5. Open Food Facts search fallback (EAN-8, partial matches) ───────
     try {
-      const r = await fetchWithTimeout(`https://api.upcitemdb.com/prod/trial/lookup?upc=${code}`, 6000);
+      const r = await fetchWithTimeout(`https://world.openfoodfacts.org/cgi/search.pl?code=${gtin13}&action=process&json=true&page_size=1`, 5000);
       const d = await r.json();
-      if (d.code === 'OK' && d.items?.[0]?.title) {
-        const item = d.items[0];
-        const cat = mapCategory((item.category || '') + ' ' + item.title);
-        return { name: item.title, brand: item.brand || '', category: cat, isPerishable: false };
+      const p = d.products?.[0];
+      if (p?.product_name) {
+        const name = (p.product_name_en||p.product_name||'').trim();
+        if (name) return { name, brand:p.brands?.split(',')[0]?.trim()||'', category:mapCategory(name), isPerishable:false };
       }
     } catch { /* next */ }
 
-    // ── 4. Brocade.io ────────────────────────────────────────────────────
+    // ── 6. Go-UPC via CORS proxy (tools, office, hardware, household) ─────
     try {
-      const r = await fetchWithTimeout(`https://brocade.io/bapi/product/read-single.php?gtin=${code}`, 5000);
-      const d = await r.json();
-      if (d.product?.name) {
-        return { name: d.product.name, brand: d.product.brand_name || '', category: mapCategory(d.product.name), isPerishable: false };
+      const r = await fetchWithTimeout(`https://corsproxy.io/?url=${encodeURIComponent('https://go-upc.com/barcode/'+gtin13)}`, 7000);
+      const text = await r.text();
+      const nameMatch = text.match(/class="product-name"[^>]*>([^<]{3,80})</i)
+        || text.match(/<h1[^>]*>([A-Za-z0-9][^<]{2,79})<\/h1>/i);
+      const brandMatch = text.match(/class="[^"]*brand[^"]*"[^>]*>([^<]{2,50})</i);
+      if (nameMatch?.[1] && !nameMatch[1].toLowerCase().includes('go-upc')) {
+        return { name:nameMatch[1].trim(), brand:brandMatch?.[1]?.trim()||'', category:mapCategory(nameMatch[1]), isPerishable:false };
       }
     } catch { /* next */ }
+
+    // ── 7. ITF-14 specific — strip to inner GTIN-13 and retry ────────────
+    if (isITF14) {
+      try {
+        const r = await fetchWithTimeout(`https://api.upcitemdb.com/prod/trial/lookup?upc=${gtin13}`, 5000);
+        const d = await r.json();
+        if (d.code==='OK' && d.items?.[0]?.title) {
+          const item = d.items[0];
+          return { name:item.title+' (multi-pack)', brand:item.brand||'', category:mapCategory(item.title), isPerishable:false };
+        }
+      } catch { /* next */ }
+    }
+
+    // ── 8. Claude AI + web search (ultimate fallback — finds anything) ────
+    try {
+      const { data: sd } = await supabase!.auth.getSession();
+      const token = sd.session?.access_token;
+      if (token) {
+        const resp = await fetch('https://uccehajbwxzqdzvexzuc.supabase.co/functions/v1/ai-proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ _upc_lookup: true, barcode: rawCode }),
+        });
+        const d = await resp.json();
+        if (d.product?.name) return { name:d.product.name, brand:d.product.brand||'', category:d.product.category||'Other', isPerishable:d.product.is_perishable??false };
+      }
+    } catch { /* give up */ }
 
     return null;
   }
+
 
   // __ Fetch market price via Open Food Facts (ecoscore/price data) _________
   async function fetchMarketPrice(code:string): Promise<number|null> {
@@ -2999,7 +3067,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
 
     // New item — add looking placeholder, then lookup
     setReceiptLines(prev=>[placeholder,...prev]);
-    setScanStatus(`🔍 Looking up ${code}...`);
+    setScanStatus(`🔍 Looking up ${code} in product databases...`);
 
     const product = await lookupUPC(code);
     const name = product?.name || `Unknown item (${code})`;
@@ -3011,7 +3079,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
       ? {...r, name, brand, category, location, looking:false, isNew:true}
       : r
     ));
-    setScanStatus(product ? `✅ Found: ${name}` : `⚠️ ${code} not in database — scan added, edit name below`);
+    setScanStatus(product ? `✅ Found: ${name}` : `⚠️ Not found — added as "${name}", tap to rename`);
     scanRef.current?.focus();
   }
 
