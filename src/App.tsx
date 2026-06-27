@@ -2866,7 +2866,9 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     const p={name:fName.trim(),brand:fBrand.trim()||null,category:fCat,location:fLoc,quantity:fQty,unit:fUnit,expires:fExp||null,import_date:fImp||null,avg_cost_canton:fCost?parseFloat(fCost):null,barcode:fBarcode.trim()||null,notes:fNotes.trim()||null,is_perishable:fPerish,user_id:uid,updated_at:new Date().toISOString()};
     if(editItem){await supabase.from('inventory_items').update(p).eq('id',editItem.id);if(editItem.quantity!==fQty)await supabase.from('inventory_transactions').insert({item_id:editItem.id,user_id:uid,transaction_type:'manual_adjust',quantity_change:fQty-editItem.quantity,notes:'Manual edit'});}
     else{const{data:ni}=await supabase.from('inventory_items').insert([p]).select().single();if(ni)await supabase.from('inventory_transactions').insert({item_id:ni.id,user_id:uid,transaction_type:'manual_adjust',quantity_change:fQty,notes:'Item added'});}
-    await loadInv();resetInvForm();setSaving(false);setTab('items');
+    const hadBarcode = fBarcode.trim().length > 0;
+    await loadInv();resetInvForm();setSaving(false);
+    setTab(hadBarcode ? 'scan' : 'items');
   }
 
   async function delInvItem(id:string){if(!supabase||!confirm('Delete this item?'))return;await supabase.from('inventory_items').delete().eq('id',id);setItems(p=>p.filter(i=>i.id!==id));}
@@ -2876,8 +2878,16 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     const{data:sd}=await supabase.auth.getSession();const uid=sd.session?.user?.id;if(!uid)return;
     const existing=items.find(i=>i.barcode===code);
     if(bulkMode){
-      setPendingBulk(prev=>{const f=prev.find(p=>p.barcode===code);if(f)return prev.map(p=>p.barcode===code?{...p,count:p.count+1}:p);return[...prev,{barcode:code,name:existing?.name??`⚠️ Unknown (${code})`,count:1}];});
-      setScanStatus(`📦 ${existing?.name??'Unknown item'} queued. Keep scanning!`);
+      if(!existing){
+        // Unknown barcode in bulk mode — go add it first, then come back
+        setScanStatus(`⚠️ Unknown barcode: ${code} — add it first, then scan again.`);
+        setFBarcode(code);
+        setBulkMode(false);
+        setTab('add');
+        return;
+      }
+      setPendingBulk(prev=>{const f=prev.find(p=>p.barcode===code);if(f)return prev.map(p=>p.barcode===code?{...p,count:p.count+1}:p);return[...prev,{barcode:code,name:existing.name,count:1}];});
+      setScanStatus(`📦 ${existing.name} queued. Keep scanning!`);
       scanRef.current?.focus();return;
     }
     if(existing){

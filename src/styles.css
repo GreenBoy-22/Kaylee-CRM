@@ -640,10 +640,12 @@ td small { display: block; margin-top: 2px; color: var(--muted); }
     padding-top: 10px !important;
     padding-left: 12px !important;
     padding-right: 12px !important;
-    padding-bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + 24px) !important;
-    overflow-y: auto !important;
+    padding-bottom: 100px !important;
+    overflow-y: scroll !important;
     -webkit-overflow-scrolling: touch;
-    flex: 1 !important;
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
+    height: 100% !important;
   }
 
   /* Bottom navigation bar */
@@ -655,6 +657,7 @@ td small { display: block; margin-top: 2px; color: var(--muted); }
     right: 0;
     height: calc(var(--bottom-nav-height) + var(--safe-bottom));
     padding-bottom: var(--safe-bottom);
+    padding-right: 44px;
     background: var(--card);
     border-top: 1px solid var(--border);
     z-index: 200;
