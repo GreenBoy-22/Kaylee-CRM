@@ -555,19 +555,6 @@ export default function PlantCatalog() {
     <>
       <div className="page-header">
         <div>
-          <h1>Plant Catalog</h1>
-          <p>{plants.length} plants · {currentMonth} · Canton, GA Zone 7b</p>
-        </div>
-        <button className="btn primary" onClick={() => { resetPlantForm(); setEditingPlant(null); setShowAddPlant(true); }}>
-          <Plus size={14} /> Add Plant
-        </button>
-      </div>
-
-  // __ Render ______________________________________________________________
-  return (
-    <>
-      <div className="page-header">
-        <div>
           <h1>Outdoor Guide</h1>
           <p>{section === 'plants' ? `${plants.length} plants · ` : ''}{currentMonth} · Canton, GA Zone 7b</p>
         </div>
