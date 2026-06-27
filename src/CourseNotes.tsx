@@ -387,6 +387,75 @@ ${fileText.slice(0, 6000)}`;
   }
 }
 
+// Binary document version — sends PDF/DOCX as base64 to Claude's document API
+async function scanDocumentWithAIBinary(
+  base64Data: string,
+  mediaType: string,
+  courses: typeof COURSES,
+): Promise<{ course_code: string; note_type: NoteType; content: string }[]> {
+  const courseList = courses
+    .filter(c => c.code !== 'PROGRAM')
+    .map(c => `${c.code}: ${c.title}`)
+    .join('\n');
+
+  const instruction = `You are a course notes assistant for a WGU BSCSIA student's study app.
+
+Here is a list of all courses in the program:
+${courseList}
+
+Read the attached document carefully and extract useful study notes from it.
+For each piece of useful information, determine:
+1. Which course it belongs to (use the exact course code like D325, C458, etc.)
+2. Which category it fits (pacing, structure, cert, student_tips, resources, prereqs, competencies, or general)
+3. Write a clean, concise version of the note in the same style: short, bullet-pointed, easy to scan. Use "- " for bullets.
+
+Return ONLY valid JSON array, no markdown, no explanation. Format:
+[
+  {"course_code": "D833", "note_type": "structure", "content": "- Task 1: ...\n- Task 2: ..."},
+  ...
+]
+
+If you cannot confidently assign something to a specific course, use course_code "PROGRAM".
+Only include genuinely useful study notes — skip filler, headers, and repetitive content.`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4000,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'document',
+            source: {
+              type: 'base64',
+              media_type: mediaType,
+              data: base64Data,
+            },
+          },
+          {
+            type: 'text',
+            text: instruction,
+          },
+        ],
+      }],
+    }),
+  });
+  const data = await response.json();
+  const text = data.content?.[0]?.text ?? '[]';
+  try {
+    const clean = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(clean);
+  } catch {
+    return [];
+  }
+}
+
 // __ Main Component ______________________________________________________
 
 export default function CourseNotes() {
@@ -500,59 +569,32 @@ export default function CourseNotes() {
       if (!userId) { setUploadStatus('error'); return; }
 
       let fileText = '';
+      let base64Data = '';
+      let mediaType = '';
 
-      if (isDocx) {
-        // .docx is a ZIP/XML — we can extract raw text from the XML inside
-        setUploadLog(['Reading .docx file...']);
+      if (isDocx || isPdf) {
+        // Send as base64 document directly to Claude API
+        setUploadLog([`Reading ${isDocx ? '.docx' : '.pdf'} file...`]);
         try {
-          const arrayBuffer = await uploadFile.arrayBuffer();
-          // Use JSZip-style manual extraction — get word/document.xml text
-          const uint8 = new Uint8Array(arrayBuffer);
-          const textDecoder = new TextDecoder('utf-8', { fatal: false });
-          const raw = textDecoder.decode(uint8);
-          // Extract text between XML tags — strip all XML tags
-          const xmlMatch = raw.match(/<w:t[^>]*>([^<]*)<\/w:t>/g);
-          if (xmlMatch && xmlMatch.length > 0) {
-            fileText = xmlMatch
-              .map(m => m.replace(/<[^>]+>/g, ''))
-              .join(' ')
-              .replace(/\s+/g, ' ')
-              .trim();
-          } else {
-            // Fallback: extract any readable ASCII text from the binary
-            fileText = raw.replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
-          }
-          if (fileText.length < 50) {
-            setUploadLog(['⚠️ Could not extract text from .docx. Try saving as .txt or .pdf first.']);
+          base64Data = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = e => {
+              const result = e.target?.result as string;
+              // result is "data:...;base64,XXXXX" — grab just the base64 part
+              resolve(result.split(',')[1] ?? '');
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(uploadFile);
+          });
+          mediaType = isPdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+          if (!base64Data || base64Data.length < 100) {
+            setUploadLog(['⚠️ Could not read file. Try saving as .txt instead.']);
             setUploadStatus('error');
             return;
           }
+          setUploadLog(prev => [...prev, `File loaded (${Math.round(base64Data.length * 0.75 / 1024)}KB). Sending to AI...`]);
         } catch {
-          setUploadLog(['⚠️ Could not read .docx file. Try saving as .txt or copy-pasting the content into a .txt file.']);
-          setUploadStatus('error');
-          return;
-        }
-      } else if (isPdf) {
-        setUploadLog(['Reading PDF... (tip: text-based PDFs work best)']);
-        try {
-          fileText = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = e => {
-              const result = e.target?.result as string ?? '';
-              // Extract readable text from PDF binary
-              const textMatches = result.match(/\(([^\)]{2,})\)/g);
-              if (textMatches && textMatches.length > 20) {
-                resolve(textMatches.map(m => m.slice(1,-1)).join(' '));
-              } else {
-                // Try plain text extraction
-                resolve(result.replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim());
-              }
-            };
-            reader.onerror = reject;
-            reader.readAsBinaryString(uploadFile);
-          });
-        } catch {
-          setUploadLog(['⚠️ Could not read PDF. Try copying the text into a .txt file instead.']);
+          setUploadLog(['⚠️ Could not read file. Try saving as .txt instead.']);
           setUploadStatus('error');
           return;
         }
@@ -565,17 +607,18 @@ export default function CourseNotes() {
           reader.onerror = reject;
           reader.readAsText(uploadFile);
         });
+        if (!fileText || fileText.trim().length < 30) {
+          setUploadLog(['⚠️ File appears empty or unreadable. Best results: save as .txt or .md first.']);
+          setUploadStatus('error');
+          return;
+        }
       }
 
-      if (!fileText || fileText.trim().length < 30) {
-        setUploadLog(['⚠️ File appears empty or unreadable. Best results: save as .txt or .md first.']);
-        setUploadStatus('error');
-        return;
-      }
+      setUploadLog(prev => [...prev, 'Sending to AI for analysis...']);
 
-      setUploadLog(prev => [...prev, `Extracted ${fileText.length.toLocaleString()} characters. Sending to AI...`]);
-
-      const extracted = await scanDocumentWithAI(fileText, COURSES);
+      const extracted = (base64Data && mediaType)
+        ? await scanDocumentWithAIBinary(base64Data, mediaType, COURSES)
+        : await scanDocumentWithAI(fileText, COURSES);
 
       if (extracted.length === 0) {
         setUploadLog(prev => [...prev, 'No notes found in this document. Try a different file.']);
