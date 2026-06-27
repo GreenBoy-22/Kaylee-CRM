@@ -306,6 +306,7 @@ const PRELOADED_NOTES: Record<string, { type: NoteType; content: string }[]> = {
   ],
 };
 
+
 // __ Note type labels ____________________________________________________
 
 const NOTE_TYPE_LABELS: Record<NoteType, string> = {
@@ -330,6 +331,59 @@ const NOTE_TYPE_COLORS: Record<NoteType, string> = {
   competencies: '#0f766e',
 };
 
+// __ AI document scanner _________________________________________________
+
+async function scanDocumentWithAI(
+  fileText: string,
+  courses: typeof COURSES,
+): Promise<{ course_code: string; note_type: NoteType; content: string }[]> {
+  const courseList = courses
+    .filter(c => c.code !== 'PROGRAM')
+    .map(c => `${c.code}: ${c.title}`)
+    .join('\n');
+
+  const prompt = `You are a course notes assistant for a WGU BSCSIA student's study app.
+
+Here is a list of all courses in the program:
+${courseList}
+
+The student has uploaded a document. Read it carefully and extract useful study notes from it.
+For each piece of useful information, determine:
+1. Which course it belongs to (use the exact course code like D325, C458, etc.)
+2. Which category it fits (pacing, structure, cert, student_tips, resources, prereqs, competencies, or general)
+3. Write a clean, concise version of the note in the same style as the existing notes: short, bullet-pointed, easy to scan. Use "- " for bullets.
+
+Return ONLY valid JSON array, no markdown, no explanation. Format:
+[
+  {"course_code": "D325", "note_type": "student_tips", "content": "- Tip here\n- Another tip"},
+  ...
+]
+
+If you cannot confidently assign something to a specific course, use course_code "PROGRAM".
+Only include genuinely useful study notes — skip filler text, headers, and repetitive content.
+
+Document content:
+${fileText.slice(0, 6000)}`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4000,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  const data = await response.json();
+  const text = data.content?.[0]?.text ?? '[]';
+  try {
+    const clean = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(clean);
+  } catch {
+    return [];
+  }
+}
+
 // __ Main Component ______________________________________________________
 
 export default function CourseNotes() {
@@ -344,6 +398,12 @@ export default function CourseNotes() {
   const [editContent, setEditContent]   = useState('');
   const [searchTerm, setSearchTerm]     = useState('');
   const [filterType, setFilterType]     = useState<NoteType | 'all'>('all');
+
+  // Document upload state
+  const [showUpload, setShowUpload]       = useState(false);
+  const [uploadFile, setUploadFile]       = useState<File | null>(null);
+  const [uploadStatus, setUploadStatus]   = useState<'idle' | 'scanning' | 'done' | 'error'>('idle');
+  const [uploadLog, setUploadLog]         = useState<string[]>([]);
 
   const selectedCourse = COURSES.find(c => c.code === selectedCode);
 
@@ -422,6 +482,87 @@ export default function CourseNotes() {
     await loadNotes(selectedCode);
   }
 
+  // __ Document upload + AI scan __________________________________________
+  async function handleDocumentScan() {
+    if (!uploadFile || !supabase) return;
+    setUploadStatus('scanning');
+    setUploadLog(['Reading document...']);
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData.session?.user?.id;
+      if (!userId) { setUploadStatus('error'); return; }
+
+      // Read file as text
+      const fileText = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target?.result as string ?? '');
+        reader.onerror = reject;
+        if (uploadFile.type === 'application/pdf') {
+          // For PDFs we read as text — basic extraction
+          reader.readAsText(uploadFile);
+        } else {
+          reader.readAsText(uploadFile);
+        }
+      });
+
+      setUploadLog(prev => [...prev, 'Sending to AI for analysis...']);
+
+      const extracted = await scanDocumentWithAI(fileText, COURSES);
+
+      if (extracted.length === 0) {
+        setUploadLog(prev => [...prev, 'No notes found in this document. Try a different file.']);
+        setUploadStatus('error');
+        return;
+      }
+
+      setUploadLog(prev => [...prev, `Found ${extracted.length} notes across ${new Set(extracted.map(e => e.course_code)).size} courses. Saving...`]);
+
+      // Save each extracted note, but first check for duplicates by content
+      let saved = 0;
+      for (const note of extracted) {
+        const validCode = COURSES.find(c => c.code === note.course_code)?.code ?? 'PROGRAM';
+        // Check if a very similar note already exists
+        const { data: existing } = await supabase
+          .from('course_notes')
+          .select('id, content')
+          .eq('course_code', validCode)
+          .eq('note_type', note.note_type)
+          .eq('user_id', userId);
+
+        // Check for near-duplicate (first 80 chars match)
+        const isDuplicate = existing?.some(e =>
+          e.content.slice(0, 80).toLowerCase() === note.content.slice(0, 80).toLowerCase()
+        );
+
+        if (!isDuplicate) {
+          await supabase.from('course_notes').insert({
+            user_id: userId,
+            course_code: validCode,
+            note_type: note.note_type,
+            content: note.content.trim(),
+          });
+          saved++;
+        }
+      }
+
+      setUploadLog(prev => [
+        ...prev,
+        `Saved ${saved} new notes (${extracted.length - saved} duplicates skipped).`,
+        'Done! Select a course to see your new notes.',
+      ]);
+      setUploadStatus('done');
+      setUploadFile(null);
+
+      // Refresh current course if open
+      if (selectedCode) await loadNotes(selectedCode);
+
+    } catch (err) {
+      setUploadLog(prev => [...prev, `Error: ${String(err)}`]);
+      setUploadStatus('error');
+    }
+  }
+
   const filtered = notes.filter(n => {
     const matchType = filterType === 'all' || n.note_type === filterType;
     const matchSearch = !searchTerm || n.content.toLowerCase().includes(searchTerm.toLowerCase());
@@ -447,7 +588,57 @@ export default function CourseNotes() {
           <h1>Course Notes</h1>
           <p>BSCSIA 202509 -- reference notes by course</p>
         </div>
+        <button className="btn primary" onClick={() => { setShowUpload(v => !v); setUploadStatus('idle'); setUploadLog([]); setUploadFile(null); }}>
+          <Upload size={14} /> Scan Document
+        </button>
       </div>
+
+      {/* ── Document Upload Panel ── */}
+      {showUpload && (
+        <section className="panel" style={{ borderLeft: '4px solid var(--purple)', marginBottom: 14 }}>
+          <div className="panel-head">
+            <h2><Upload size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Scan a Document into Notes</h2>
+            <button className="btn ghost" onClick={() => { setShowUpload(false); setUploadStatus('idle'); setUploadLog([]); }}>
+              <X size={13} /> Close
+            </button>
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
+            Upload a study guide, PDF, or text document. AI will read it, figure out which courses it relates to, and save the key info directly into your notes — formatted short and clean.
+          </p>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12 }}>
+            <input
+              type="file"
+              accept=".txt,.md,.pdf,.doc,.docx,.csv"
+              onChange={e => { setUploadFile(e.target.files?.[0] ?? null); setUploadStatus('idle'); setUploadLog([]); }}
+              style={{ flex: 1, fontSize: 13 }}
+            />
+            <button
+              className="btn primary"
+              onClick={handleDocumentScan}
+              disabled={!uploadFile || uploadStatus === 'scanning'}
+            >
+              {uploadStatus === 'scanning'
+                ? <><Loader size={13} className="spin" /> Scanning...</>
+                : 'Scan & Save Notes'}
+            </button>
+          </div>
+          {uploadLog.length > 0 && (
+            <div style={{ background: 'var(--surface-1)', borderRadius: 8, padding: '10px 12px', fontSize: 12, lineHeight: 1.8 }}>
+              {uploadLog.map((line, i) => (
+                <div key={i} style={{ color: uploadStatus === 'error' && i === uploadLog.length - 1 ? 'var(--red)' : uploadStatus === 'done' && i === uploadLog.length - 1 ? 'var(--green)' : 'var(--text)' }}>
+                  {i === uploadLog.length - 1 && uploadStatus === 'scanning' && <Loader size={11} className="spin" style={{ verticalAlign: 'middle', marginRight: 6 }} />}
+                  {line}
+                </div>
+              ))}
+            </div>
+          )}
+          {uploadStatus === 'done' && (
+            <div style={{ marginTop: 10, fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>
+              ✅ Notes saved! Select a course below to see them.
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="panel">
         <div className="panel-head">
@@ -518,9 +709,7 @@ export default function CourseNotes() {
                 <h2>Add a note for {selectedCode}</h2>
                 <button className="btn ghost" onClick={() => setShowAdd(false)}>Cancel</button>
               </div>
-              <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>
-                Category
-              </label>
+              <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>Category</label>
               <select value={newType} onChange={e => setNewType(e.target.value as NoteType)} style={{ width: '100%', marginBottom: 10 }}>
                 {(Object.entries(NOTE_TYPE_LABELS) as [NoteType, string][]).map(([v, l]) => (
                   <option key={v} value={v}>{l}</option>
@@ -547,7 +736,7 @@ export default function CourseNotes() {
             <div className="brief-item" style={{ color: 'var(--muted)' }}>Loading notes...</div>
           ) : filtered.length === 0 ? (
             <div className="brief-item" style={{ color: 'var(--muted)' }}>
-              No notes found. Click "Add note" to start building your reference.
+              No notes found. Click "Add note" to start building your reference, or use "Scan Document" to upload study materials.
             </div>
           ) : (
             (Object.entries(NOTE_TYPE_LABELS) as [NoteType, string][])
@@ -580,15 +769,8 @@ export default function CourseNotes() {
                             {note.content}
                           </div>
                           <div style={{ display: 'flex', gap: 4, marginTop: 4, justifyContent: 'flex-end' }}>
-                            <button
-                              className="btn ghost tiny"
-                              onClick={() => { setEditingId(note.id); setEditContent(note.content); }}
-                            >Edit</button>
-                            <button
-                              className="btn ghost tiny"
-                              onClick={() => handleDelete(note.id)}
-                              style={{ color: 'var(--red)' }}
-                            >Delete</button>
+                            <button className="btn ghost tiny" onClick={() => { setEditingId(note.id); setEditContent(note.content); }}>Edit</button>
+                            <button className="btn ghost tiny" onClick={() => handleDelete(note.id)} style={{ color: 'var(--red)' }}>Delete</button>
                           </div>
                         </div>
                       )}
@@ -608,6 +790,9 @@ export default function CourseNotes() {
           </p>
           <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>
             All 38 BSCSIA 202509 courses are pre-loaded with notes from your course notes document.
+          </p>
+          <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>
+            Use <strong>Scan Document</strong> at the top to upload study materials and let AI sort them into the right courses automatically.
           </p>
         </section>
       )}
