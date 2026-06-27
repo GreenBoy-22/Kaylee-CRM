@@ -501,6 +501,7 @@ export default function PlantCatalog() {
   }
 
   async function generateInlineAI(plant: Plant) {
+    if (!confirm(`Get AI care tips for ${plant.nickname || plant.name}?\n\nThis uses your Anthropic API credits (~$0.01). Press OK to continue.`)) return;
     setPlantAiLoading(prev => ({ ...prev, [plant.id]: true }));
     try {
       const result = await getAISuggestions(plant, logs.filter(l => l.plant_id === plant.id));
@@ -513,6 +514,7 @@ export default function PlantCatalog() {
 
   async function generateSuggestions() {
     if (!aiPlantId) return;
+    if (!confirm('Get AI care suggestions?\n\nThis uses your Anthropic API credits (~$0.01). Press OK to continue.')) return;
     setAiLoading(true); setAiResult('');
     try {
       const plant = plants.find(p => p.id === aiPlantId);

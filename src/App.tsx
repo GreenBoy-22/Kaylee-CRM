@@ -2910,17 +2910,6 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     return null;
   }
 
-  // __ Fetch market price via Open Food Facts (ecoscore/price data) _________
-  async function fetchMarketPrice(code:string): Promise<number|null> {
-    try {
-      const r = await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`,{signal:AbortSignal.timeout(4000)});
-      const d = await r.json();
-      // OFF sometimes has price_per_unit — usually not, so we skip
-      if (d.status===1 && d.product?.product_quantity) return null; // no price data typically
-    } catch { /* */ }
-    return null; // Market price lookup is best-effort
-  }
-
   // __ Main scan handler — builds receipt list _____________________________
   async function handleScan(barcode:string){
     if(!supabase||!barcode.trim())return;
@@ -3040,6 +3029,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
 
   async function genRecipes(){
     const exp=filteredExpiring.filter(i=>(i._days??99)<=7);if(!exp.length)return;
+    if(!confirm('Generate AI recipe ideas using your Anthropic API credits?\n\nThis costs ~$0.01 from your API balance. Press OK to continue.'))return;
     setAiLoading(true);setAiRecipes('');
     try{const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,messages:[{role:'user',content:`Suggest 3-4 simple weeknight recipes for a family in Canton GA using these expiring items:\n${exp.map(i=>`${i.name} (${i._days}d left)`).join('\n')}\nFormat: 🍽️ Name\nUses: items\nTip: note`}]})});const d=await r.json();setAiRecipes(d.content?.[0]?.text??'Could not generate.');}catch{setAiRecipes('Error. Try again.');}
     setAiLoading(false);
