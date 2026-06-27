@@ -387,12 +387,63 @@ ${fileText.slice(0, 6000)}`;
   }
 }
 
-// Binary document version — sends PDF/DOCX as base64 to Claude's document API
+// Binary document version — PDF goes as base64, DOCX gets text extracted via ZIP
 async function scanDocumentWithAIBinary(
   base64Data: string,
   mediaType: string,
   courses: typeof COURSES,
 ): Promise<{ course_code: string; note_type: NoteType; content: string }[]> {
+
+  // DOCX: Claude API doesn't support .docx — extract text from the ZIP/XML ourselves
+  if (mediaType.includes('wordprocessingml')) {
+    // Convert base64 back to binary and unzip to get word/document.xml
+    try {
+      const binary = atob(base64Data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+      // Find "word/document.xml" inside the ZIP by looking for its local file header
+      // ZIP local file header signature: PK\x03\x04
+      const decoder = new TextDecoder('utf-8', { fatal: false });
+      const raw = decoder.decode(bytes);
+
+      // Look for word/document.xml content — it's stored uncompressed in many docx files
+      // Find the XML content starting with <?xml or <w:document
+      const xmlStartIdx = raw.indexOf('<w:document');
+      const xmlAltIdx = raw.indexOf('<?xml');
+      const startIdx = xmlStartIdx !== -1 ? xmlStartIdx : xmlAltIdx;
+
+      let extractedText = '';
+      if (startIdx !== -1) {
+        const xmlChunk = raw.slice(startIdx, startIdx + 200000);
+        // Extract all <w:t> text nodes
+        const matches = xmlChunk.match(/<w:t[^>]*>([^<]+)<\/w:t>/g);
+        if (matches && matches.length > 10) {
+          extractedText = matches
+            .map(m => m.replace(/<[^>]+>/g, '').trim())
+            .filter(t => t.length > 0)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        }
+      }
+
+      if (extractedText.length < 100) {
+        // Last resort: grab any readable ASCII runs of 4+ chars
+        extractedText = raw
+          .replace(/[^\x20-\x7E\n]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .replace(/ {3,}/g, ' ')
+          .trim()
+          .slice(0, 12000);
+      }
+
+      return scanDocumentWithAI(extractedText, courses);
+      return [];
+    }
+  }
+
+  // PDF: send as base64 document — Claude natively supports PDF
   const courseList = courses
     .filter(c => c.code !== 'PROGRAM')
     .map(c => `${c.code}: ${c.title}`)
@@ -446,7 +497,7 @@ Only include genuinely useful study notes — skip filler, headers, and repetiti
       }],
     }),
   });
-  const data = await response.json();
+  const data = await response.json(); if (data.error) console.error("Claude API error:", JSON.stringify(data.error)); console.log("AI raw (first 200):", (data.content?.[0]?.text ?? "").slice(0,200));
   const text = data.content?.[0]?.text ?? '[]';
   try {
     const clean = text.replace(/```json|```/g, '').trim();
@@ -621,7 +672,10 @@ export default function CourseNotes() {
         : await scanDocumentWithAI(fileText, COURSES);
 
       if (extracted.length === 0) {
-        setUploadLog(prev => [...prev, 'No notes found in this document. Try a different file.']);
+        setUploadLog(prev => [...prev,
+          '⚠️ No notes found. For .docx files, try: open the document → Select All → Copy → paste into Notepad → save as .txt → upload that instead.',
+          'Check browser console (F12) for API error details.',
+        ]);
         setUploadStatus('error');
         return;
       }
