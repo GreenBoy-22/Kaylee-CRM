@@ -439,6 +439,7 @@ async function scanDocumentWithAIBinary(
       }
 
       return scanDocumentWithAI(extractedText, courses);
+    } catch {
       return [];
     }
   }
