@@ -2873,23 +2873,104 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
 
   async function delInvItem(id:string){if(!supabase||!confirm('Delete this item?'))return;await supabase.from('inventory_items').delete().eq('id',id);setItems(p=>p.filter(i=>i.id!==id));}
 
+  // __ UPC lookup — tries Open Food Facts, then UPCitemdb __________________
+  async function lookupUPC(code:string): Promise<{name:string;brand:string;category:string;isPerishable:boolean}|null> {
+    try {
+      // Try Open Food Facts first (best for groceries)
+      const r1 = await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`);
+      const d1 = await r1.json();
+      if (d1.status === 1 && d1.product) {
+        const p = d1.product;
+        const name = p.product_name_en || p.product_name || '';
+        const brand = p.brands?.split(',')[0]?.trim() || '';
+        const cat = p.categories_tags?.[0]?.replace('en:','').replace(/-/g,' ') || 'Pantry';
+        const catMapped = cat.toLowerCase().includes('beverage')||cat.toLowerCase().includes('drink') ? 'Beverages'
+          : cat.toLowerCase().includes('snack')||cat.toLowerCase().includes('chip') ? 'Snacks'
+          : cat.toLowerCase().includes('frozen') ? 'Freezer'
+          : cat.toLowerCase().includes('dairy')||cat.toLowerCase().includes('milk')||cat.toLowerCase().includes('cheese') ? 'Refrigerator'
+          : cat.toLowerCase().includes('meat')||cat.toLowerCase().includes('poultry') ? 'Refrigerator'
+          : cat.toLowerCase().includes('bak') ? 'Baking'
+          : cat.toLowerCase().includes('condiment')||cat.toLowerCase().includes('sauce') ? 'Condiments'
+          : cat.toLowerCase().includes('canned') ? 'Canned Goods'
+          : 'Pantry';
+        if (name) return { name, brand, category: catMapped, isPerishable: ['Refrigerator','Freezer'].includes(catMapped) };
+      }
+    } catch { /* fall through */ }
+    try {
+      // Fallback: UPC Item DB (good for household/non-food)
+      const r2 = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${code}`);
+      const d2 = await r2.json();
+      if (d2.code === 'OK' && d2.items?.[0]) {
+        const item = d2.items[0];
+        return { name: item.title || '', brand: item.brand || '', category: item.category || 'Other', isPerishable: false };
+      }
+    } catch { /* give up */ }
+    return null;
+  }
+
+  // __ Auto-save a scanned item after UPC lookup ___________________________
+  async function autoSaveFromUPC(code:string, uid:string, qty:number, txType:'scan_in'|'bulk_add') {
+    setScanStatus(`🔍 Looking up ${code}...`);
+    const product = await lookupUPC(code);
+    if (!supabase) return false;
+
+    const name = product?.name || `Item ${code}`;
+    const payload = {
+      name,
+      brand: product?.brand || null,
+      category: product?.category || 'Pantry',
+      location: 'Pantry',
+      quantity: qty,
+      unit: 'each',
+      expires: null,
+      import_date: invKey(new Date()),
+      avg_cost_canton: null,
+      barcode: code,
+      notes: product ? null : 'Added by scan — please update name',
+      is_perishable: product?.isPerishable ?? false,
+      user_id: uid,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: newItem } = await supabase.from('inventory_items').insert([payload]).select().single();
+    if (newItem) {
+      await supabase.from('inventory_transactions').insert({
+        item_id: newItem.id, user_id: uid,
+        transaction_type: txType,
+        quantity_change: qty,
+        barcode: code,
+        notes: product ? `Auto-added via UPC lookup` : `Auto-added (no product data found)`,
+      });
+      await loadInv();
+      setScanStatus(`✅ Auto-added: ${name}${product ? '' : ' (no product data — tap to edit name)'}`);
+      return true;
+    }
+    return false;
+  }
+
   async function handleScan(barcode:string){
     if(!supabase||!barcode.trim())return;const code=barcode.trim();setScanInput('');
     const{data:sd}=await supabase.auth.getSession();const uid=sd.session?.user?.id;if(!uid)return;
     const existing=items.find(i=>i.barcode===code);
+
     if(bulkMode){
       if(!existing){
-        // Unknown barcode in bulk mode — go add it first, then come back
-        setScanStatus(`⚠️ Unknown barcode: ${code} — add it first, then scan again.`);
-        setFBarcode(code);
-        setBulkMode(false);
-        setTab('add');
-        return;
+        // Auto-lookup and save unknown item, then queue it
+        setScanStatus(`🔍 New item — looking up ${code}...`);
+        const saved = await autoSaveFromUPC(code, uid, 0, 'bulk_add');
+        if(saved){
+          // Now find it in freshly loaded items and queue it
+          const found = items.find(i=>i.barcode===code);
+          if(found) setPendingBulk(prev=>[...prev,{barcode:code,name:found.name,count:1}]);
+          else setPendingBulk(prev=>[...prev,{barcode:code,name:`Item ${code}`,count:1}]);
+        }
+        scanRef.current?.focus();return;
       }
       setPendingBulk(prev=>{const f=prev.find(p=>p.barcode===code);if(f)return prev.map(p=>p.barcode===code?{...p,count:p.count+1}:p);return[...prev,{barcode:code,name:existing.name,count:1}];});
       setScanStatus(`📦 ${existing.name} queued. Keep scanning!`);
       scanRef.current?.focus();return;
     }
+
     if(existing){
       const newQty=Math.max(0,existing.quantity+(scanMode==='in'?1:-1));
       await supabase.from('inventory_items').update({quantity:newQty,scan_count:(existing.scan_count??0)+1,last_scanned_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('id',existing.id);
@@ -2897,7 +2978,11 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
       setItems(p=>p.map(i=>i.id===existing.id?{...i,quantity:newQty,scan_count:(i.scan_count??0)+1}:i));
       setScanStatus(`✅ ${scanMode==='in'?'↑ Added':'↓ Removed'}: ${existing.name} → Qty: ${newQty}`);
       setScanLog(p=>[{barcode:code,name:existing.name,qty:newQty,action:scanMode==='in'?'Scanned In':'Scanned Out',time:new Date().toLocaleTimeString()},...p.slice(0,29)]);
-    }else{setScanStatus(`⚠️ Unknown: ${code} — add it below.`);setFBarcode(code);setTab('add');return;}
+    } else {
+      // Auto-lookup and save, then count it
+      const saved = await autoSaveFromUPC(code, uid, 1, 'scan_in');
+      if(!saved) { setScanStatus(`⚠️ Could not save ${code}. Try adding manually.`); }
+    }
     requestAnimationFrame(()=>scanRef.current?.focus());
   }
 
