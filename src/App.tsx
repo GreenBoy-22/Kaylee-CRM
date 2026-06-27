@@ -2847,6 +2847,11 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   const [fName,setFName]=useState('');const [fBrand,setFBrand]=useState('');const [fCat,setFCat]=useState('Pantry');const [fLoc,setFLoc]=useState('Pantry');const [fQty,setFQty]=useState(1);const [fUnit,setFUnit]=useState('each');const [fExp,setFExp]=useState('');const [fImp,setFImp]=useState(invKey(new Date()));const [fCost,setFCost]=useState('');const [fBarcode,setFBarcode]=useState('');const [fNotes,setFNotes]=useState('');const [fPerish,setFPerish]=useState(false);const [saving,setSaving]=useState(false);
   const [scanMode,setScanMode]=useState<'in'|'out'>('in');const [bulkMode,setBulkMode]=useState(false);const [scanInput,setScanInput]=useState('');const [scanLog,setScanLog]=useState<{barcode:string;name:string;qty:number;action:string;time:string}[]>([]);const [scanStatus,setScanStatus]=useState('');const [pendingBulk,setPendingBulk]=useState<{barcode:string;name:string;count:number}[]>([]);
   const [aiRecipes,setAiRecipes]=useState('');const [aiLoading,setAiLoading]=useState(false);
+
+  // Receipt-style scan list
+  type ReceiptLine = {barcode:string;name:string;brand:string;category:string;qty:number;marketPrice:number|null;isNew:boolean;looking:boolean;id:string|null};
+  const [receiptLines, setReceiptLines] = useState<ReceiptLine[]>([]);
+  const [receiptSaving, setReceiptSaving] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
 
   const loadInv = useCallback(async()=>{
@@ -2967,82 +2972,91 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     return null;
   }
 
-  // __ Auto-save a scanned item after UPC lookup ___________________________
-  async function autoSaveFromUPC(code:string, uid:string, qty:number, txType:'scan_in'|'bulk_add') {
-    setScanStatus(`🔍 Looking up ${code}...`);
-    const product = await lookupUPC(code);
-    if (!supabase) return false;
-
-    const name = product?.name || `Item ${code}`;
-    const payload = {
-      name,
-      brand: product?.brand || null,
-      category: product?.category || 'Pantry',
-      location: 'Pantry',
-      quantity: qty,
-      unit: 'each',
-      expires: null,
-      import_date: invKey(new Date()),
-      avg_cost_canton: null,
-      barcode: code,
-      notes: product ? null : 'Added by scan — please update name',
-      is_perishable: product?.isPerishable ?? false,
-      user_id: uid,
-      updated_at: new Date().toISOString(),
-    };
-
-    const { data: newItem } = await supabase.from('inventory_items').insert([payload]).select().single();
-    if (newItem) {
-      await supabase.from('inventory_transactions').insert({
-        item_id: newItem.id, user_id: uid,
-        transaction_type: txType,
-        quantity_change: qty,
-        barcode: code,
-        notes: product ? `Auto-added via UPC lookup` : `Auto-added (no product data found)`,
-      });
-      await loadInv();
-      setScanStatus(`✅ Auto-added: ${name}${product ? '' : ' (no product data — tap to edit name)'}`);
-      return true;
-    }
-    return false;
+  // __ Fetch market price via Open Food Facts (ecoscore/price data) _________
+  async function fetchMarketPrice(code:string): Promise<number|null> {
+    try {
+      const r = await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`,{signal:AbortSignal.timeout(4000)});
+      const d = await r.json();
+      // OFF sometimes has price_per_unit — usually not, so we skip
+      if (d.status===1 && d.product?.product_quantity) return null; // no price data typically
+    } catch { /* */ }
+    return null; // Market price lookup is best-effort
   }
 
+  // __ Main scan handler — builds receipt list _____________________________
   async function handleScan(barcode:string){
-    if(!supabase||!barcode.trim())return;const code=barcode.trim();setScanInput('');
-    const{data:sd}=await supabase.auth.getSession();const uid=sd.session?.user?.id;if(!uid)return;
-    const existing=items.find(i=>i.barcode===code);
+    if(!supabase||!barcode.trim())return;
+    const code=barcode.trim();
+    setScanInput('');
 
-    if(bulkMode){
-      if(!existing){
-        // Auto-lookup and save unknown item, then queue it
-        setScanStatus(`🔍 New item — looking up ${code}...`);
-        const saved = await autoSaveFromUPC(code, uid, 0, 'bulk_add');
-        if(saved){
-          // Now find it in freshly loaded items and queue it
-          const found = items.find(i=>i.barcode===code);
-          if(found) setPendingBulk(prev=>[...prev,{barcode:code,name:found.name,count:1}]);
-          else setPendingBulk(prev=>[...prev,{barcode:code,name:`Item ${code}`,count:1}]);
-        }
-        scanRef.current?.focus();return;
-      }
-      setPendingBulk(prev=>{const f=prev.find(p=>p.barcode===code);if(f)return prev.map(p=>p.barcode===code?{...p,count:p.count+1}:p);return[...prev,{barcode:code,name:existing.name,count:1}];});
-      setScanStatus(`📦 ${existing.name} queued. Keep scanning!`);
-      scanRef.current?.focus();return;
+    // Check if already on receipt
+    const onReceipt = receiptLines.find(r=>r.barcode===code);
+    if(onReceipt){
+      // Just bump qty on receipt
+      setReceiptLines(prev=>prev.map(r=>r.barcode===code?{...r,qty:r.qty+1}:r));
+      setScanStatus(`📦 ${onReceipt.name} → ×${onReceipt.qty+1}`);
+      scanRef.current?.focus();
+      return;
     }
 
+    // Add placeholder line immediately so user sees feedback
+    const placeholder:ReceiptLine = {barcode:code,name:'',brand:'',category:'Pantry',qty:1,marketPrice:null,isNew:false,looking:true,id:null};
+
+    // Check if already in inventory
+    const existing = items.find(i=>i.barcode===code);
     if(existing){
-      const newQty=Math.max(0,existing.quantity+(scanMode==='in'?1:-1));
-      await supabase.from('inventory_items').update({quantity:newQty,scan_count:(existing.scan_count??0)+1,last_scanned_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('id',existing.id);
-      await supabase.from('inventory_transactions').insert({item_id:existing.id,user_id:uid,transaction_type:scanMode==='in'?'scan_in':'scan_out',quantity_change:scanMode==='in'?1:-1,barcode:code});
-      setItems(p=>p.map(i=>i.id===existing.id?{...i,quantity:newQty,scan_count:(i.scan_count??0)+1}:i));
-      setScanStatus(`✅ ${scanMode==='in'?'↑ Added':'↓ Removed'}: ${existing.name} → Qty: ${newQty}`);
-      setScanLog(p=>[{barcode:code,name:existing.name,qty:newQty,action:scanMode==='in'?'Scanned In':'Scanned Out',time:new Date().toLocaleTimeString()},...p.slice(0,29)]);
-    } else {
-      // Auto-lookup and save, then count it
-      const saved = await autoSaveFromUPC(code, uid, 1, 'scan_in');
-      if(!saved) { setScanStatus(`⚠️ Could not save ${code}. Try adding manually.`); }
+      setReceiptLines(prev=>[{...placeholder,name:existing.name,brand:existing.brand??'',category:existing.category??'Pantry',looking:false,id:existing.id},...prev]);
+      setScanStatus(`✅ ${existing.name} added to list`);
+      scanRef.current?.focus();
+      return;
     }
-    requestAnimationFrame(()=>scanRef.current?.focus());
+
+    // New item — add looking placeholder, then lookup
+    setReceiptLines(prev=>[placeholder,...prev]);
+    setScanStatus(`🔍 Looking up ${code}...`);
+
+    const product = await lookupUPC(code);
+    const name = product?.name || `Unknown item (${code})`;
+    const brand = product?.brand || '';
+    const category = product?.category || 'Pantry';
+
+    setReceiptLines(prev=>prev.map(r=>r.barcode===code
+      ? {...r, name, brand, category, looking:false, isNew:true}
+      : r
+    ));
+    setScanStatus(product ? `✅ Found: ${name}` : `⚠️ ${code} not in database — scan added, edit name below`);
+    scanRef.current?.focus();
+  }
+
+  // __ Commit receipt to inventory _________________________________________
+  async function commitReceipt(){
+    if(!supabase||receiptLines.length===0)return;
+    setReceiptSaving(true);
+    const{data:sd}=await supabase.auth.getSession();
+    const uid=sd.session?.user?.id;if(!uid){setReceiptSaving(false);return;}
+
+    for(const line of receiptLines){
+      if(line.looking) continue; // skip still-loading lines
+      const qtyChange = scanMode==='in' ? line.qty : -line.qty;
+
+      if(line.id){
+        // Existing item — update quantity
+        const current = items.find(i=>i.id===line.id);
+        const newQty = Math.max(0,(current?.quantity??0)+qtyChange);
+        await supabase.from('inventory_items').update({quantity:newQty,scan_count:(current?.scan_count??0)+line.qty,last_scanned_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('id',line.id);
+        await supabase.from('inventory_transactions').insert({item_id:line.id,user_id:uid,transaction_type:scanMode==='in'?'scan_in':'scan_out',quantity_change:qtyChange,barcode:line.barcode,notes:`Receipt scan`});
+      } else {
+        // New item — create it
+        const payload={name:line.name||`Item ${line.barcode}`,brand:line.brand||null,category:line.category,location:'Pantry',quantity:Math.max(0,qtyChange),unit:'each',expires:null,import_date:invKey(new Date()),avg_cost_canton:line.marketPrice,barcode:line.barcode,notes:null,is_perishable:['Refrigerator','Freezer'].includes(line.category),user_id:uid,updated_at:new Date().toISOString()};
+        const{data:ni}=await supabase.from('inventory_items').insert([payload]).select().single();
+        if(ni) await supabase.from('inventory_transactions').insert({item_id:ni.id,user_id:uid,transaction_type:'scan_in',quantity_change:Math.max(0,qtyChange),barcode:line.barcode,notes:'Auto-added via scan'});
+      }
+    }
+
+    await loadInv();
+    setReceiptLines([]);
+    setScanStatus(`✅ ${receiptLines.length} item(s) saved to inventory!`);
+    setReceiptSaving(false);
   }
 
   async function saveBulk(){
@@ -3147,50 +3161,86 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     </div>}
 
     {tab==='scan'&&<div>
-      <section className="panel" style={{borderTop:'3px solid #16a34a',marginBottom:14}}>
-        <div className="panel-head"><h2>📷 Barcode Scanner</h2></div>
-        <p style={{fontSize:13,color:'var(--muted)',marginBottom:14}}>Tera HW0009 & any USB/BT HID scanner. Field stays focused — scanner sends code + Enter automatically.</p>
-        <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap',alignItems:'center'}}>
-          <div style={{display:'flex',gap:6}}>
-            {(['in','out'] as const).map(m=><button key={m} onClick={()=>setScanMode(m)} style={{padding:'8px 18px',borderRadius:8,cursor:'pointer',fontWeight:700,fontSize:13,border:`2px solid ${scanMode===m?(m==='in'?'#16a34a':'#ef4444'):'var(--border)'}`,background:scanMode===m?(m==='in'?'#dcfce7':'#fee2e2'):'transparent',color:scanMode===m?(m==='in'?'#16a34a':'#ef4444'):'var(--muted)'}}>{m==='in'?'↑ Scan In (+)':'↓ Scan Out (−)'}</button>)}
+      {/* Mode toggle */}
+      <div style={{display:'flex',gap:8,marginBottom:12}}>
+        {(['in','out'] as const).map(m=><button key={m} onClick={()=>setScanMode(m)} style={{flex:1,padding:'10px',borderRadius:10,cursor:'pointer',fontWeight:700,fontSize:14,border:`2px solid ${scanMode===m?(m==='in'?'#16a34a':'#ef4444'):'var(--border)'}`,background:scanMode===m?(m==='in'?'#dcfce7':'#fee2e2'):'transparent',color:scanMode===m?(m==='in'?'#16a34a':'#ef4444'):'var(--muted)'}}>{m==='in'?'↑ Adding to Stock':'↓ Removing from Stock'}</button>)}
+      </div>
+
+      {/* Scan input */}
+      <div style={{marginBottom:10}}>
+        <input
+          ref={scanRef} value={scanInput} onChange={e=>setScanInput(e.target.value)}
+          onKeyDown={e=>{if(e.key==='Enter'&&scanInput.trim())handleScan(scanInput.trim());}}
+          onBlur={()=>setTimeout(()=>{if(document.activeElement?.tagName!=='BUTTON'&&document.activeElement?.tagName!=='INPUT'&&document.activeElement?.tagName!=='SELECT')scanRef.current?.focus();},200)}
+          placeholder="📷 Scan barcode or type UPC + Enter"
+          style={{fontSize:15,fontWeight:600,background:'var(--surface-1)',border:'2px solid #16a34a',borderRadius:10,padding:'12px 14px',letterSpacing:1,width:'100%'}}
+          autoComplete="off" autoFocus inputMode="none"
+        />
+      </div>
+
+      {/* Status */}
+      {scanStatus&&<div style={{background:'var(--surface-1)',borderRadius:8,padding:'8px 12px',fontSize:13,marginBottom:10,fontWeight:600}}>{scanStatus}</div>}
+
+      {/* Receipt list */}
+      {receiptLines.length>0&&<>
+        <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:12,overflow:'hidden',marginBottom:10}}>
+          {/* Receipt header */}
+          <div style={{background: scanMode==='in'?'#dcfce7':'#fee2e2',padding:'10px 14px',display:'flex',justifyContent:'space-between',alignItems:'center',borderBottom:'1px solid var(--border)'}}>
+            <div style={{fontWeight:700,fontSize:13,color:scanMode==='in'?'#16a34a':'#ef4444'}}>{scanMode==='in'?'↑ ADDING TO INVENTORY':'↓ REMOVING FROM INVENTORY'}</div>
+            <div style={{fontSize:12,color:'var(--muted)'}}>{receiptLines.length} item{receiptLines.length!==1?'s':''} · {receiptLines.reduce((s,r)=>s+r.qty,0)} units</div>
           </div>
-          <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,cursor:'pointer',marginLeft:'auto'}}>
-            <input type="checkbox" checked={bulkMode} onChange={e=>{setBulkMode(e.target.checked);setPendingBulk([]);}}/>
-            <span style={{fontWeight:bulkMode?700:400,color:bulkMode?'var(--purple)':'var(--muted)'}}>Bulk Mode</span>
-          </label>
+
+          {/* Receipt lines */}
+          {receiptLines.map((line,i)=>(
+            <div key={line.barcode} style={{padding:'10px 14px',borderBottom:i<receiptLines.length-1?'1px solid var(--border)':undefined,display:'flex',gap:10,alignItems:'center'}}>
+              <div style={{flex:1,minWidth:0}}>
+                {line.looking
+                  ? <div style={{fontSize:13,color:'var(--muted)',fontStyle:'italic'}}>🔍 Looking up {line.barcode}...</div>
+                  : <>
+                    <input
+                      value={line.name}
+                      onChange={e=>setReceiptLines(prev=>prev.map(r=>r.barcode===line.barcode?{...r,name:e.target.value}:r))}
+                      style={{border:'none',background:'transparent',fontWeight:700,fontSize:14,padding:0,width:'100%',color:'var(--text)'}}
+                      placeholder="Item name (tap to edit)"
+                    />
+                    <div style={{fontSize:11,color:'var(--muted)',marginTop:2,display:'flex',gap:8,flexWrap:'wrap'}}>
+                      {line.brand&&<span>{line.brand}</span>}
+                      <span style={{background:'var(--surface-1)',padding:'1px 6px',borderRadius:4}}>{line.category}</span>
+                      {line.isNew&&<span style={{color:'#16a34a',fontWeight:600}}>NEW</span>}
+                      {line.marketPrice&&<span style={{color:'var(--green)',fontWeight:600}}>${line.marketPrice.toFixed(2)}</span>}
+                    </div>
+                  </>
+                }
+              </div>
+              {/* Qty counter */}
+              <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
+                <button onClick={()=>setReceiptLines(prev=>prev.map(r=>r.barcode===line.barcode?{...r,qty:Math.max(1,r.qty-1)}:r))} style={{width:30,height:30,borderRadius:8,border:'1px solid var(--border)',background:'var(--surface-1)',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>−</button>
+                <span style={{fontSize:16,fontWeight:800,minWidth:24,textAlign:'center'}}>{line.qty}</span>
+                <button onClick={()=>setReceiptLines(prev=>prev.map(r=>r.barcode===line.barcode?{...r,qty:r.qty+1}:r))} style={{width:30,height:30,borderRadius:8,border:'1px solid var(--border)',background:'var(--surface-1)',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>+</button>
+                <button onClick={()=>setReceiptLines(prev=>prev.filter(r=>r.barcode!==line.barcode))} style={{width:30,height:30,borderRadius:8,border:'none',background:'transparent',fontSize:16,cursor:'pointer',color:'var(--red)'}}>×</button>
+              </div>
+            </div>
+          ))}
+
+          {/* Receipt footer */}
+          <div style={{padding:'10px 14px',background:'var(--surface-1)',display:'flex',gap:8}}>
+            <button
+              onClick={commitReceipt}
+              disabled={receiptSaving||receiptLines.every(r=>r.looking)}
+              style={{flex:1,padding:'12px',borderRadius:10,border:'none',background:scanMode==='in'?'#16a34a':'#ef4444',color:'white',fontWeight:700,fontSize:15,cursor:'pointer'}}
+            >
+              {receiptSaving?'Saving...':`${scanMode==='in'?'✅ Add':'🗑 Remove'} ${receiptLines.reduce((s,r)=>s+r.qty,0)} item${receiptLines.reduce((s,r)=>s+r.qty,0)!==1?'s':''} to Inventory`}
+            </button>
+            <button onClick={()=>{setReceiptLines([]);setScanStatus('');}} style={{padding:'12px 16px',borderRadius:10,border:'1px solid var(--border)',background:'var(--surface-1)',cursor:'pointer',fontSize:13}}>Clear</button>
+          </div>
         </div>
-        <div style={{marginBottom:14}}>
-          <label style={{fontSize:12,color:'var(--muted)',display:'block',marginBottom:6,fontWeight:600}}>Scan field (click once to focus, then scan):</label>
-          <input
-            ref={scanRef} value={scanInput} onChange={e=>setScanInput(e.target.value)}
-            onKeyDown={e=>{if(e.key==='Enter'&&scanInput.trim())handleScan(scanInput.trim());}}
-            onBlur={()=>setTimeout(()=>{if(document.activeElement?.tagName!=='BUTTON'&&document.activeElement?.tagName!=='INPUT'&&document.activeElement?.tagName!=='SELECT')scanRef.current?.focus();},150)}
-            placeholder="Click here, then scan — or type barcode + Enter"
-            style={{fontSize:16,fontWeight:600,background:'var(--surface-1)',border:'2px solid var(--green)',letterSpacing:2}}
-            autoComplete="off" autoFocus inputMode="none"
-          />
-          <div style={{fontSize:11,color:'var(--muted)',marginTop:4}}>💡 Scanner types the barcode + Enter automatically. Keep this field focused between scans.</div>
-        </div>
-        {scanStatus&&<div style={{background:'var(--surface-1)',borderRadius:8,padding:'10px 12px',fontSize:13,marginBottom:14,fontWeight:600}}>{scanStatus}</div>}
-        {bulkMode&&pendingBulk.length>0&&<div style={{marginBottom:14}}>
-          <div style={{fontSize:12,fontWeight:700,color:'var(--muted)',marginBottom:8}}>QUEUED ({pendingBulk.reduce((s,p)=>s+p.count,0)} total)</div>
-          <div style={{display:'flex',flexDirection:'column',gap:4,marginBottom:10}}>
-            {pendingBulk.map(p=><div key={p.barcode} style={{display:'flex',justifyContent:'space-between',padding:'6px 10px',background:'var(--surface-1)',borderRadius:6,fontSize:13}}><span>{p.name}</span><span style={{fontWeight:700}}>×{p.count}</span></div>)}
-          </div>
-          <div style={{display:'flex',gap:8,position:'sticky',bottom:'calc(80px + env(safe-area-inset-bottom,16px))',background:'var(--surface-0)',padding:'10px 0',zIndex:10}}>
-            <button className="btn primary" onClick={saveBulk} style={{flex:1,fontSize:15,padding:'12px 0'}}>✅ Save All ({pendingBulk.reduce((s,p)=>s+p.count,0)} scans)</button>
-            <button className="btn ghost" onClick={()=>{setPendingBulk([]);setScanStatus('');}}>Clear</button>
-          </div>
-        </div>}
-      </section>
-      {scanLog.length>0&&<section className="panel">
-        <div className="panel-head"><h2>This Session</h2><span className="readonly-pill">{scanLog.length}</span></div>
-        {scanLog.map((s,i)=><div key={i} style={{display:'flex',gap:10,alignItems:'center',padding:'7px 0',borderBottom:'1px solid var(--border)'}}>
-          <span style={{fontSize:12,fontWeight:700,color:s.action==='Scanned In'?'#16a34a':'#ef4444'}}>{s.action==='Scanned In'?'↑':'↓'}</span>
-          <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600}}>{s.name}</div><div style={{fontSize:11,color:'var(--muted)'}}>{s.barcode} · {s.time}</div></div>
-          <span style={{fontSize:12,color:'var(--muted)'}}>Qty:{s.qty}</span>
-        </div>)}
-      </section>}
+      </>}
+
+      {receiptLines.length===0&&<div style={{textAlign:'center',padding:'40px 20px',color:'var(--muted)',fontSize:13}}>
+        <div style={{fontSize:40,marginBottom:12}}>📷</div>
+        <div style={{fontWeight:600,marginBottom:6}}>Ready to scan</div>
+        <div>Scan barcodes to build your list — they'll appear here like a receipt. Adjust quantities, then tap Save.</div>
+      </div>}
     </div>}
 
     {tab==='add'&&<section className="panel" style={{borderLeft:'4px solid var(--green)'}}>
