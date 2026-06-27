@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import {
   Activity, Cloud, Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
@@ -2823,21 +2823,251 @@ function Briefing({ compact = false, role }: { compact?: boolean; role?: Role })
   );
 }
 
-function Inventory({ inventory, createItem, updateQuantity, editable }: { inventory: InventoryItem[]; createItem: (item: Omit<InventoryItem, 'id'>) => void; updateQuantity: (id: string, quantity: number) => void; editable: boolean }) {
-  const [action, setAction] = useState<InventoryAction>('none');
-  const [form, setForm] = useState({ name: '', brand: '', location: '', category: '', quantity: '1', value: '', barcode: '' });
+function Inventory({ inventory: _inventory, createItem: _createItem, updateQuantity: _updateQuantity, editable }: { inventory: InventoryItem[]; createItem: (item: Omit<InventoryItem, 'id'>) => void; updateQuantity: (id: string, quantity: number) => void; editable: boolean }) {
+  // Full-featured inventory — ignores legacy props, reads/writes Supabase directly
+  type InvItem = { id:string; name:string; brand:string|null; location:string|null; category:string|null; quantity:number; unit:string; expires:string|null; import_date:string|null; value:number|null; avg_cost_canton:number|null; barcode:string|null; notes:string|null; is_perishable:boolean; scan_count:number; created_at:string; updated_at:string|null; };
+  type InvTx = { id:string; item_id:string; transaction_type:string; quantity_change:number; barcode:string|null; notes:string|null; created_at:string; };
 
-  function submit() {
-    createItem({ name: form.name || 'Untitled item', brand: form.brand || null, location: form.location || 'Fridge', category: form.category || 'Food', quantity: Number(form.quantity) || 1, expires: null, value: Number(form.value) || 0, barcode: form.barcode || null });
-    setForm({ name: '', brand: '', location: '', category: '', quantity: '1', value: '', barcode: '' });
-    setAction('none');
+  const INV_CATS = ['Pantry','Refrigerator','Freezer','Cleaning','Personal Care','Pet Supplies','Medicine','Garden','Paper Products','Beverages','Snacks','Baking','Canned Goods','Condiments','Other'];
+  const INV_UNITS = ['each','oz','lbs','gal','qt','pint','fl oz','cups','count','pkg','box','can','jar','bottle'];
+  const INV_LOCS = ['Pantry','Refrigerator','Freezer','Cabinet','Bathroom','Laundry Room','Garage','Storage'];
+
+  function invDays(iso:string){const e=new Date(iso+'T00:00:00'),n=new Date();n.setHours(0,0,0,0);return Math.round((e.getTime()-n.getTime())/(86400000));}
+  function invFmt(iso:string){return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}
+  function invKey(d:Date){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+
+  const [items, setItems] = useState<InvItem[]>([]);
+  const [txs, setTxs] = useState<InvTx[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<'items'|'expiring'|'scan'|'add'|'history'>('items');
+  const [searchQ, setSearchQ] = useState('');
+  const [filterCat, setFilterCat] = useState('all');
+  const [filterLoc, setFilterLoc] = useState('all');
+  const [editItem, setEditItem] = useState<InvItem|null>(null);
+  const [fName,setFName]=useState('');const [fBrand,setFBrand]=useState('');const [fCat,setFCat]=useState('Pantry');const [fLoc,setFLoc]=useState('Pantry');const [fQty,setFQty]=useState(1);const [fUnit,setFUnit]=useState('each');const [fExp,setFExp]=useState('');const [fImp,setFImp]=useState(invKey(new Date()));const [fCost,setFCost]=useState('');const [fBarcode,setFBarcode]=useState('');const [fNotes,setFNotes]=useState('');const [fPerish,setFPerish]=useState(false);const [saving,setSaving]=useState(false);
+  const [scanMode,setScanMode]=useState<'in'|'out'>('in');const [bulkMode,setBulkMode]=useState(false);const [scanInput,setScanInput]=useState('');const [scanLog,setScanLog]=useState<{barcode:string;name:string;qty:number;action:string;time:string}[]>([]);const [scanStatus,setScanStatus]=useState('');const [pendingBulk,setPendingBulk]=useState<{barcode:string;name:string;count:number}[]>([]);
+  const [aiRecipes,setAiRecipes]=useState('');const [aiLoading,setAiLoading]=useState(false);
+  const scanRef = useRef<HTMLInputElement>(null);
+
+  const loadInv = useCallback(async()=>{
+    if(!supabase)return;setLoading(true);
+    const{data:sd}=await supabase.auth.getSession();const uid=sd.session?.user?.id;if(!uid){setLoading(false);return;}
+    const[ir,tr]=await Promise.all([supabase.from('inventory_items').select('*').eq('user_id',uid).order('name'),supabase.from('inventory_transactions').select('*').eq('user_id',uid).order('created_at',{ascending:false}).limit(100)]);
+    setItems((ir.data as InvItem[])??[]);setTxs((tr.data as InvTx[])??[]);setLoading(false);
+  },[]);
+  useEffect(()=>{loadInv();},[loadInv]);
+  useEffect(()=>{if(tab==='scan'&&scanRef.current)scanRef.current.focus();},[tab]);
+
+  function resetInvForm(){setFName('');setFBrand('');setFCat('Pantry');setFLoc('Pantry');setFQty(1);setFUnit('each');setFExp('');setFImp(invKey(new Date()));setFCost('');setFBarcode('');setFNotes('');setFPerish(false);setEditItem(null);}
+
+  async function saveInvItem(){
+    if(!supabase||!fName.trim())return;setSaving(true);
+    const{data:sd}=await supabase.auth.getSession();const uid=sd.session?.user?.id;if(!uid){setSaving(false);return;}
+    const p={name:fName.trim(),brand:fBrand.trim()||null,category:fCat,location:fLoc,quantity:fQty,unit:fUnit,expires:fExp||null,import_date:fImp||null,avg_cost_canton:fCost?parseFloat(fCost):null,barcode:fBarcode.trim()||null,notes:fNotes.trim()||null,is_perishable:fPerish,user_id:uid,updated_at:new Date().toISOString()};
+    if(editItem){await supabase.from('inventory_items').update(p).eq('id',editItem.id);if(editItem.quantity!==fQty)await supabase.from('inventory_transactions').insert({item_id:editItem.id,user_id:uid,transaction_type:'manual_adjust',quantity_change:fQty-editItem.quantity,notes:'Manual edit'});}
+    else{const{data:ni}=await supabase.from('inventory_items').insert([p]).select().single();if(ni)await supabase.from('inventory_transactions').insert({item_id:ni.id,user_id:uid,transaction_type:'manual_adjust',quantity_change:fQty,notes:'Item added'});}
+    await loadInv();resetInvForm();setSaving(false);setTab('items');
   }
 
+  async function delInvItem(id:string){if(!supabase||!confirm('Delete this item?'))return;await supabase.from('inventory_items').delete().eq('id',id);setItems(p=>p.filter(i=>i.id!==id));}
+
+  async function handleScan(barcode:string){
+    if(!supabase||!barcode.trim())return;const code=barcode.trim();setScanInput('');
+    const{data:sd}=await supabase.auth.getSession();const uid=sd.session?.user?.id;if(!uid)return;
+    const existing=items.find(i=>i.barcode===code);
+    if(bulkMode){
+      setPendingBulk(prev=>{const f=prev.find(p=>p.barcode===code);if(f)return prev.map(p=>p.barcode===code?{...p,count:p.count+1}:p);return[...prev,{barcode:code,name:existing?.name??`⚠️ Unknown (${code})`,count:1}];});
+      setScanStatus(`📦 ${existing?.name??'Unknown item'} queued. Keep scanning!`);
+      scanRef.current?.focus();return;
+    }
+    if(existing){
+      const newQty=Math.max(0,existing.quantity+(scanMode==='in'?1:-1));
+      await supabase.from('inventory_items').update({quantity:newQty,scan_count:(existing.scan_count??0)+1,last_scanned_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('id',existing.id);
+      await supabase.from('inventory_transactions').insert({item_id:existing.id,user_id:uid,transaction_type:scanMode==='in'?'scan_in':'scan_out',quantity_change:scanMode==='in'?1:-1,barcode:code});
+      setItems(p=>p.map(i=>i.id===existing.id?{...i,quantity:newQty,scan_count:(i.scan_count??0)+1}:i));
+      setScanStatus(`✅ ${scanMode==='in'?'↑ Added':'↓ Removed'}: ${existing.name} → Qty: ${newQty}`);
+      setScanLog(p=>[{barcode:code,name:existing.name,qty:newQty,action:scanMode==='in'?'Scanned In':'Scanned Out',time:new Date().toLocaleTimeString()},...p.slice(0,29)]);
+    }else{setScanStatus(`⚠️ Unknown: ${code} — add it below.`);setFBarcode(code);setTab('add');return;}
+    requestAnimationFrame(()=>scanRef.current?.focus());
+  }
+
+  async function saveBulk(){
+    if(!supabase||pendingBulk.length===0)return;
+    const{data:sd}=await supabase.auth.getSession();const uid=sd.session?.user?.id;if(!uid)return;
+    const total=pendingBulk.reduce((s,p)=>s+p.count,0);let saved=0;const unknown:string[]=[];
+    for(const p of pendingBulk){const item=items.find(i=>i.barcode===p.barcode);if(item){const nq=scanMode==='in'?item.quantity+p.count:Math.max(0,item.quantity-p.count);await supabase.from('inventory_items').update({quantity:nq,scan_count:(item.scan_count??0)+p.count,last_scanned_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('id',item.id);await supabase.from('inventory_transactions').insert({item_id:item.id,user_id:uid,transaction_type:'bulk_add',quantity_change:scanMode==='in'?p.count:-p.count,barcode:p.barcode,notes:`Bulk ${scanMode}: ${p.count} units`});saved+=p.count;}else unknown.push(p.barcode);}
+    setPendingBulk([]);setScanStatus(unknown.length>0?`✅ Saved ${saved} scans. ⚠️ ${unknown.length} unknown: ${unknown.join(', ')}`:`✅ Bulk done — ${saved} scan(s) saved`);
+    await loadInv();scanRef.current?.focus();
+  }
+
+  async function genRecipes(){
+    const exp=filteredExpiring.filter(i=>(i._days??99)<=7);if(!exp.length)return;
+    setAiLoading(true);setAiRecipes('');
+    try{const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,messages:[{role:'user',content:`Suggest 3-4 simple weeknight recipes for a family in Canton GA using these expiring items:\n${exp.map(i=>`${i.name} (${i._days}d left)`).join('\n')}\nFormat: 🍽️ Name\nUses: items\nTip: note`}]})});const d=await r.json();setAiRecipes(d.content?.[0]?.text??'Could not generate.');}catch{setAiRecipes('Error. Try again.');}
+    setAiLoading(false);
+  }
+
+  const filteredItems = useMemo(()=>{
+    let l=items;if(filterCat!=='all')l=l.filter(i=>i.category===filterCat);if(filterLoc!=='all')l=l.filter(i=>i.location===filterLoc);
+    if(searchQ.trim()){const q=searchQ.toLowerCase();l=l.filter(i=>i.name.toLowerCase().includes(q)||(i.brand??'').toLowerCase().includes(q)||(i.barcode??'').includes(q));}return l;
+  },[items,filterCat,filterLoc,searchQ]);
+
+  const filteredExpiring = useMemo(()=>items.filter(i=>i.expires&&i.is_perishable).map(i=>({...i,_days:invDays(i.expires!)})).sort((a,b)=>(a._days??999)-(b._days??999)),[items]);
+  const expiredCount=filteredExpiring.filter(i=>(i._days??0)<0).length;
+
   return <>
-    <Header title="Inventory" sub="Scan to add, manual entry, scan to use/remove, and insurance-ready tracking.">{editable ? <><button className="btn primary" onClick={() => setAction('scanAdd')}>Scan to Add</button><button className="btn ghost" onClick={() => setAction('manual')}><Plus size={15} /> Manual Entry</button><button className="btn warning" onClick={() => setAction('scanUse')}>Scan to Use / Remove</button></> : <span className="readonly-pill"><Eye size={14} /> View only</span>}</Header>
-    <Stats items={[['Total items', String(inventory.length)], ['Estimated value', `$${inventory.reduce((sum, item) => sum + Number(item.value || 0), 0).toFixed(2)}`], ['Expiring soon', String(inventory.filter((item) => item.expires).length)], ['Locations', '15']]} />
-    {editable && action !== 'none' && <section className={`panel action-panel ${action}`}><div className="panel-head"><h2>{action === 'manual' ? 'Manual Entry' : action === 'scanAdd' ? 'Scan to Add' : 'Scan to Use / Remove'}</h2><button className="btn ghost" onClick={() => setAction('none')}>Close</button></div>{action === 'manual' ? <div><div className="form-grid"><input placeholder="Item name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /><input placeholder="Brand" value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} /><input placeholder="Location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /><input placeholder="Category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /><input placeholder="Quantity" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /><input placeholder="Estimated value" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} /></div><div className="form-actions"><button className="btn primary" onClick={submit}><Save size={15} /> Save Item</button></div></div> : <div className="scan-row"><input placeholder="Scan or type barcode" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} /><button className={action === 'scanUse' ? 'btn warning' : 'btn primary'}>{action === 'scanUse' ? 'Use item' : 'Look up barcode'}</button></div>}</section>}
-    <div className="table-card"><table><thead><tr><th>Item</th><th>Location</th><th>Category</th><th>Qty</th><th>Expires</th><th>Value</th></tr></thead><tbody>{inventory.map((item) => <tr key={item.id}><td><strong>{item.name}</strong><small>{item.brand || '—'}</small></td><td>{item.location}</td><td>{item.category}</td><td>{item.quantity} {editable && <button className="qty-button" onClick={() => updateQuantity(item.id, item.quantity - 1)}><Minus size={12} /></button>}</td><td>{item.expires || '—'}</td><td>${Number(item.value || 0).toFixed(2)}</td></tr>)}</tbody></table></div>
+    <div className="page-header">
+      <div><h1>Inventory</h1><p>{items.length} items · Canton, GA</p></div>
+      {editable&&<button className="btn primary" onClick={()=>{resetInvForm();setTab('add');}}><Plus size={14}/> Add Item</button>}
+    </div>
+
+    <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:14}}>
+      {[['Total Items',items.length,'var(--purple)'],['Expired',expiredCount,'var(--red)'],['Expiring Soon',filteredExpiring.filter(i=>(i._days??99)>=0&&(i._days??99)<=7).length,'var(--amber)'],['Low Stock',items.filter(i=>i.quantity<=1).length,'#0891b2']].map(([l,v,c])=>(
+        <section key={String(l)} className="panel" style={{textAlign:'center',padding:'10px 8px'}}>
+          <div style={{fontSize:11,color:'var(--muted)',marginBottom:4}}>{l}</div>
+          <div style={{fontSize:26,fontWeight:800,color:String(c)}}>{v}</div>
+        </section>
+      ))}
+    </div>
+
+    <div className="tabs" style={{marginBottom:14}}>
+      <button className={tab==='items'?'active':''} onClick={()=>setTab('items')}>All Items ({items.length})</button>
+      <button className={tab==='expiring'?'active':''} onClick={()=>setTab('expiring')} style={{color:expiredCount>0?'var(--red)':undefined}}>Expiring{filteredExpiring.length>0?` (${filteredExpiring.length})`:''}</button>
+      <button className={tab==='scan'?'active':''} onClick={()=>setTab('scan')}>📷 Scanner</button>
+      <button className={tab==='add'?'active':''} onClick={()=>setTab('add')}>{editItem?'Edit Item':'+ Add'}</button>
+      <button className={tab==='history'?'active':''} onClick={()=>setTab('history')}>History</button>
+    </div>
+
+    {tab==='items'&&<div>
+      <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
+        <input value={searchQ} onChange={e=>setSearchQ(e.target.value)} placeholder="Search name, brand, barcode..." style={{flex:'1 1 200px',fontSize:13}}/>
+        <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={{fontSize:12}}><option value="all">All categories</option>{INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select>
+        <select value={filterLoc} onChange={e=>setFilterLoc(e.target.value)} style={{fontSize:12}}><option value="all">All locations</option>{INV_LOCS.map(l=><option key={l} value={l}>{l}</option>)}</select>
+      </div>
+      {loading&&<p style={{color:'var(--muted)',fontSize:13}}>Loading...</p>}
+      <div style={{display:'flex',flexDirection:'column',gap:6}}>
+        {filteredItems.map(item=>{
+          const d=item.expires?invDays(item.expires):null;
+          const isExp=d!==null&&d<0;const isUrg=d!==null&&d>=0&&d<=3;const isSoon=d!==null&&d>=4&&d<=7;
+          const acc=isExp?'var(--red)':isUrg?'#f97316':isSoon?'var(--amber)':'var(--border)';
+          return<div key={item.id} style={{background:'var(--surface-0)',border:`1px solid ${acc}`,borderLeft:`4px solid ${acc}`,borderRadius:8,padding:'10px 14px',display:'flex',gap:12,alignItems:'center'}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:'flex',alignItems:'baseline',gap:8,flexWrap:'wrap'}}>
+                <span style={{fontWeight:700,fontSize:14}}>{item.name}</span>
+                {item.brand&&<span style={{fontSize:11,color:'var(--muted)'}}>{item.brand}</span>}
+              </div>
+              <div style={{display:'flex',gap:8,marginTop:4,flexWrap:'wrap',alignItems:'center'}}>
+                <span style={{fontSize:12,fontWeight:700,color:item.quantity<=1?'var(--red)':'var(--text)'}}>{item.quantity} {item.unit}</span>
+                {item.category&&<span style={{fontSize:11,color:'var(--muted)'}}>{item.category}</span>}
+                {item.location&&<span style={{fontSize:11,color:'var(--muted)'}}>· {item.location}</span>}
+                {item.expires&&<span style={{fontSize:11,fontWeight:600,color:isExp?'var(--red)':isUrg?'#f97316':isSoon?'var(--amber)':'var(--muted)'}}>{isExp?`⚠️ EXPIRED ${Math.abs(d!)}d ago`:`Exp: ${invFmt(item.expires)} (${d}d)`}</span>}
+              </div>
+            </div>
+            <div style={{display:'flex',gap:4,alignItems:'center',flexShrink:0}}>
+              <button className="qty-button" onClick={async()=>{if(!supabase)return;const nq=Math.max(0,item.quantity-1);await supabase.from('inventory_items').update({quantity:nq,updated_at:new Date().toISOString()}).eq('id',item.id);setItems(p=>p.map(i=>i.id===item.id?{...i,quantity:nq}:i));}}>−</button>
+              <span style={{fontSize:13,fontWeight:700,minWidth:24,textAlign:'center'}}>{item.quantity}</span>
+              <button className="qty-button" onClick={async()=>{if(!supabase)return;const nq=item.quantity+1;await supabase.from('inventory_items').update({quantity:nq,updated_at:new Date().toISOString()}).eq('id',item.id);setItems(p=>p.map(i=>i.id===item.id?{...i,quantity:nq}:i));}}>+</button>
+              <button className="qty-button" onClick={()=>{setEditItem(item);setFName(item.name);setFBrand(item.brand??'');setFCat(item.category??'Pantry');setFLoc(item.location??'Pantry');setFQty(item.quantity);setFUnit(item.unit??'each');setFExp(item.expires??'');setFImp(item.import_date??invKey(new Date()));setFCost(item.avg_cost_canton?.toString()??'');setFBarcode(item.barcode??'');setFNotes(item.notes??'');setFPerish(item.is_perishable??false);setTab('add');}}>✏️</button>
+              <button className="qty-button" style={{color:'var(--red)'}} onClick={()=>delInvItem(item.id)}>🗑</button>
+            </div>
+          </div>;
+        })}
+      </div>
+      {filteredItems.length===0&&!loading&&<section className="panel" style={{textAlign:'center',padding:40}}><p style={{color:'var(--muted)'}}>No items found.</p></section>}
+    </div>}
+
+    {tab==='expiring'&&<div>
+      {expiredCount>0&&<div style={{background:'#fee2e2',border:'1px solid var(--red)',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:13,fontWeight:600,color:'var(--red)'}}>⚠️ {expiredCount} item(s) expired — check and discard.</div>}
+      {filteredExpiring.filter(i=>(i._days??99)<=7).length>0&&<section className="panel" style={{borderTop:'3px solid var(--amber)',marginBottom:14}}>
+        <div className="panel-head"><h2>🍽️ Use These Up — AI Recipe Ideas</h2></div>
+        <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:12}}>
+          {filteredExpiring.filter(i=>(i._days??99)<=7).map(i=><span key={i.id} style={{fontSize:12,background:(i._days??99)<0?'#fee2e2':(i._days??99)<=3?'#ffedd5':'#fef9c3',padding:'4px 10px',borderRadius:999,fontWeight:600}}>{i.name} ({(i._days??0)<0?'EXPIRED':`${i._days}d`})</span>)}
+        </div>
+        <button className="btn primary" onClick={genRecipes} disabled={aiLoading}>{aiLoading?'Generating...':'✨ Get Recipe Ideas'}</button>
+        {aiRecipes&&<div style={{marginTop:14,background:'var(--surface-1)',borderRadius:8,padding:'12px 14px',fontSize:13,lineHeight:1.75,whiteSpace:'pre-wrap'}}>{aiRecipes}</div>}
+      </section>}
+      <div style={{display:'flex',flexDirection:'column',gap:6}}>
+        {filteredExpiring.map(item=>{const d=item._days??0;const c=d<0?'var(--red)':d<=3?'#f97316':d<=7?'var(--amber)':'var(--green)';return<div key={item.id} style={{display:'flex',gap:12,alignItems:'center',padding:'10px 14px',background:'var(--surface-0)',border:`1px solid ${c}`,borderLeft:`4px solid ${c}`,borderRadius:8}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:14}}>{item.name}</div><div style={{fontSize:12,color:'var(--muted)',marginTop:2}}>{item.quantity} {item.unit} · {item.location??'No location'}</div></div><div style={{textAlign:'right',flexShrink:0}}><div style={{fontSize:14,fontWeight:800,color:c}}>{d<0?`${Math.abs(d)}d EXPIRED`:d===0?'TODAY':`${d}d left`}</div>{item.expires&&<div style={{fontSize:11,color:'var(--muted)'}}>{invFmt(item.expires)}</div>}</div></div>;})}
+        {filteredExpiring.length===0&&<section className="panel" style={{textAlign:'center',padding:40}}><p style={{color:'var(--muted)'}}>No perishable items tracked.</p></section>}
+      </div>
+    </div>}
+
+    {tab==='scan'&&<div>
+      <section className="panel" style={{borderTop:'3px solid #16a34a',marginBottom:14}}>
+        <div className="panel-head"><h2>📷 Barcode Scanner</h2></div>
+        <p style={{fontSize:13,color:'var(--muted)',marginBottom:14}}>Tera HW0009 & any USB/BT HID scanner. Field stays focused — scanner sends code + Enter automatically.</p>
+        <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap',alignItems:'center'}}>
+          <div style={{display:'flex',gap:6}}>
+            {(['in','out'] as const).map(m=><button key={m} onClick={()=>setScanMode(m)} style={{padding:'8px 18px',borderRadius:8,cursor:'pointer',fontWeight:700,fontSize:13,border:`2px solid ${scanMode===m?(m==='in'?'#16a34a':'#ef4444'):'var(--border)'}`,background:scanMode===m?(m==='in'?'#dcfce7':'#fee2e2'):'transparent',color:scanMode===m?(m==='in'?'#16a34a':'#ef4444'):'var(--muted)'}}>{m==='in'?'↑ Scan In (+)':'↓ Scan Out (−)'}</button>)}
+          </div>
+          <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,cursor:'pointer',marginLeft:'auto'}}>
+            <input type="checkbox" checked={bulkMode} onChange={e=>{setBulkMode(e.target.checked);setPendingBulk([]);}}/>
+            <span style={{fontWeight:bulkMode?700:400,color:bulkMode?'var(--purple)':'var(--muted)'}}>Bulk Mode</span>
+          </label>
+        </div>
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:12,color:'var(--muted)',display:'block',marginBottom:6,fontWeight:600}}>Scan field (click once to focus, then scan):</label>
+          <input
+            ref={scanRef} value={scanInput} onChange={e=>setScanInput(e.target.value)}
+            onKeyDown={e=>{if(e.key==='Enter'&&scanInput.trim())handleScan(scanInput.trim());}}
+            onBlur={()=>setTimeout(()=>{if(document.activeElement?.tagName!=='BUTTON'&&document.activeElement?.tagName!=='INPUT'&&document.activeElement?.tagName!=='SELECT')scanRef.current?.focus();},150)}
+            placeholder="Click here, then scan — or type barcode + Enter"
+            style={{fontSize:16,fontWeight:600,background:'var(--surface-1)',border:'2px solid var(--green)',letterSpacing:2}}
+            autoComplete="off" autoFocus inputMode="none"
+          />
+          <div style={{fontSize:11,color:'var(--muted)',marginTop:4}}>💡 Scanner types the barcode + Enter automatically. Keep this field focused between scans.</div>
+        </div>
+        {scanStatus&&<div style={{background:'var(--surface-1)',borderRadius:8,padding:'10px 12px',fontSize:13,marginBottom:14,fontWeight:600}}>{scanStatus}</div>}
+        {bulkMode&&pendingBulk.length>0&&<div style={{marginBottom:14}}>
+          <div style={{fontSize:12,fontWeight:700,color:'var(--muted)',marginBottom:8}}>QUEUED ({pendingBulk.reduce((s,p)=>s+p.count,0)} total)</div>
+          <div style={{display:'flex',flexDirection:'column',gap:4,marginBottom:10}}>
+            {pendingBulk.map(p=><div key={p.barcode} style={{display:'flex',justifyContent:'space-between',padding:'6px 10px',background:'var(--surface-1)',borderRadius:6,fontSize:13}}><span>{p.name}</span><span style={{fontWeight:700}}>×{p.count}</span></div>)}
+          </div>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn primary" onClick={saveBulk}>✅ Save All ({pendingBulk.reduce((s,p)=>s+p.count,0)} scans)</button>
+            <button className="btn ghost" onClick={()=>{setPendingBulk([]);setScanStatus('');}}>Clear</button>
+          </div>
+        </div>}
+      </section>
+      {scanLog.length>0&&<section className="panel">
+        <div className="panel-head"><h2>This Session</h2><span className="readonly-pill">{scanLog.length}</span></div>
+        {scanLog.map((s,i)=><div key={i} style={{display:'flex',gap:10,alignItems:'center',padding:'7px 0',borderBottom:'1px solid var(--border)'}}>
+          <span style={{fontSize:12,fontWeight:700,color:s.action==='Scanned In'?'#16a34a':'#ef4444'}}>{s.action==='Scanned In'?'↑':'↓'}</span>
+          <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600}}>{s.name}</div><div style={{fontSize:11,color:'var(--muted)'}}>{s.barcode} · {s.time}</div></div>
+          <span style={{fontSize:12,color:'var(--muted)'}}>Qty:{s.qty}</span>
+        </div>)}
+      </section>}
+    </div>}
+
+    {tab==='add'&&<section className="panel" style={{borderLeft:'4px solid var(--green)'}}>
+      <div className="panel-head"><h2>{editItem?`Edit — ${editItem.name}`:'Add Item'}</h2><button className="btn ghost" onClick={()=>{resetInvForm();setTab('items');}}><X size={14}/> Cancel</button></div>
+      <div className="form-grid" style={{marginBottom:12}}>
+        {([['Item name *',fName,setFName,'e.g. Canned Tomatoes'],['Brand',fBrand,setFBrand,'e.g. Hunt\'s'],['Barcode',fBarcode,setFBarcode,'UPC / EAN']]) .map(([l,v,s,p])=><label key={String(l)} style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>{l}<input value={String(v)} onChange={e=>(s as (v:string)=>void)(e.target.value)} placeholder={String(p)}/></label>)}
+        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Category<select value={fCat} onChange={e=>setFCat(e.target.value)}>{INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></label>
+        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Location<select value={fLoc} onChange={e=>setFLoc(e.target.value)}>{INV_LOCS.map(l=><option key={l} value={l}>{l}</option>)}</select></label>
+        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Quantity<input type="number" min={0} value={fQty} onChange={e=>setFQty(parseInt(e.target.value)||0)}/></label>
+        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Unit<select value={fUnit} onChange={e=>setFUnit(e.target.value)}>{INV_UNITS.map(u=><option key={u} value={u}>{u}</option>)}</select></label>
+        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Avg cost (Canton GA)<input type="number" step="0.01" value={fCost} onChange={e=>setFCost(e.target.value)} placeholder="e.g. 2.49"/></label>
+        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Purchase date<input type="date" value={fImp} onChange={e=>setFImp(e.target.value)}/></label>
+        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Expiration date<input type="date" value={fExp} onChange={e=>setFExp(e.target.value)}/></label>
+      </div>
+      <label style={{display:'flex',alignItems:'center',gap:10,fontSize:13,cursor:'pointer',marginBottom:12,padding:'8px 12px',background:fPerish?'#fef9c3':'var(--surface-1)',borderRadius:8,border:`1px solid ${fPerish?'#eab308':'var(--border)'}`}}>
+        <input type="checkbox" checked={fPerish} onChange={e=>setFPerish(e.target.checked)} style={{accentColor:'#eab308'}}/>
+        Perishable / food item (tracks expiration alerts)
+      </label>
+      <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)',marginBottom:14}}>Notes<textarea value={fNotes} onChange={e=>setFNotes(e.target.value)} placeholder="Any notes..." style={{minHeight:50}}/></label>
+      <button className="btn primary" onClick={saveInvItem} disabled={saving||!fName.trim()}>{saving?'Saving...':editItem?'Save Changes':'Add to Inventory'}</button>
+    </section>}
+
+    {tab==='history'&&<section className="panel">
+      <div className="panel-head"><h2>Transaction History</h2><span className="readonly-pill">{txs.length}</span></div>
+      {txs.length===0&&<p style={{fontSize:13,color:'var(--muted)'}}>No transactions yet.</p>}
+      {txs.map(tx=>{const item=items.find(i=>i.id===tx.item_id);const isIn=tx.quantity_change>0;return<div key={tx.id} style={{display:'flex',gap:10,alignItems:'flex-start',padding:'8px 0',borderBottom:'1px solid var(--border)'}}>
+        <span style={{fontSize:16,fontWeight:800,color:isIn?'#16a34a':'#ef4444',flexShrink:0}}>{isIn?'↑':'↓'}</span>
+        <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600}}>{item?.name??'Unknown'}</div><div style={{fontSize:12,color:'var(--muted)'}}>{tx.transaction_type.replace('_',' ')} · {isIn?'+':''}{tx.quantity_change} · {new Date(tx.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</div>{tx.notes&&<div style={{fontSize:11,color:'var(--muted)'}}>{tx.notes}</div>}</div>
+        {tx.barcode&&<span style={{fontSize:10,color:'var(--muted)',flexShrink:0}}>{tx.barcode}</span>}
+      </div>;})}
+    </section>}
   </>;
 }
 
