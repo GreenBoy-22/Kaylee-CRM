@@ -419,6 +419,8 @@ export default function PlantCatalog() {
     await loadMoistureHistory();
     setMoistureSaving(false);
   }
+
+  function resetPlantForm() {
     setPName(''); setPSci(''); setPNick(''); setPLoc('indoor');
     setPSpot(''); setPPot(''); setPNotes(''); setPGuide('');
   }
