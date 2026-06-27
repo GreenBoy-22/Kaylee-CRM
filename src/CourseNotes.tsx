@@ -7,7 +7,7 @@
 // - All notes stored in Supabase course_notes table
 
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Save, ChevronDown, BookOpen, X, RefreshCw, FileText } from 'lucide-react';
+import { Plus, X, FileText, Upload, Loader } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
 // -- Types ------------------------------------------------------------------
