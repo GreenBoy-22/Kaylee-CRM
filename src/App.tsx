@@ -3018,80 +3018,93 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     setReceiptSaving(false);
   }
 
-  // __ Camera barcode scanner using QuaggaJS ________________________________
+  // __ Camera barcode scanner ______________________________________________
   async function startCamera() {
     setCameraError('');
     setCameraActive(true);
-
     try {
-      // Load Quagga from CDN — best mobile barcode scanner library
-      if (!(window as any).Quagga) {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+      });
+      const container = videoRef.current;
+      if (!container) { stream.getTracks().forEach(t => t.stop()); setCameraActive(false); return; }
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = true;
+      video.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;border-radius:12px;';
+      container.innerHTML = '';
+      container.appendChild(video);
+      await video.play();
+      let stopped = false;
+      cameraStopRef.current = () => {
+        stopped = true;
+        stream.getTracks().forEach(t => t.stop());
+        if (container) container.innerHTML = '';
+      };
+      if ('BarcodeDetector' in window) {
+        // Native BarcodeDetector — iOS 17.4+, Chrome Android
+        const detector = new (window as any).BarcodeDetector({
+          formats: ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf','qr_code']
+        });
+        let lastCode = ''; let lastTime = 0;
+        const tick = async () => {
+          if (stopped) return;
+          if (video.readyState >= 2) {
+            try {
+              const results = await detector.detect(video);
+              if (results.length > 0) {
+                const code = results[0].rawValue;
+                const now = Date.now();
+                if (code && (code !== lastCode || now - lastTime > 2000)) {
+                  lastCode = code; lastTime = now;
+                  handleScan(code);
+                  container.style.outline = '4px solid #16a34a';
+                  setTimeout(() => { container.style.outline = 'none'; }, 500);
+                }
+              }
+            } catch { /* frame skip */ }
+          }
+          if (!stopped) setTimeout(tick, 300);
+        };
+        tick();
+      } else {
+        // ZXing fallback — iOS 16 and below
         await new Promise<void>((resolve, reject) => {
+          if ((window as any).ZXing) { resolve(); return; }
           const s = document.createElement('script');
-          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js';
+          s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.18.6/umd/index.min.js';
+          s.crossOrigin = 'anonymous';
           s.onload = () => resolve();
-          s.onerror = () => reject(new Error('Could not load scanner. Please use manual entry below.'));
+          s.onerror = () => reject(new Error('Scanner library failed. Please type barcode manually.'));
           document.head.appendChild(s);
         });
-      }
-
-      const Quagga = (window as any).Quagga;
-
-      await new Promise<void>((resolve, reject) => {
-        Quagga.init({
-          inputStream: {
-            name: 'Live',
-            type: 'LiveStream',
-            target: videoRef.current,
-            constraints: {
-              facingMode: 'environment',
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            },
-          },
-          frequency: 10,
-          decoder: {
-            readers: [
-              'ean_reader', 'ean_8_reader', 'upc_reader', 'upc_e_reader',
-              'code_128_reader', 'code_39_reader', 'itf_reader',
-            ],
-            multiple: false,
-          },
-          locate: true,
-          numOfWorkers: 0,
-        }, (err: any) => {
-          if (err) { reject(new Error('Camera error: ' + (err.message || err))); return; }
-          Quagga.start();
-          resolve();
+        const ZXing = (window as any).ZXing;
+        if (!ZXing?.BrowserMultiFormatReader) throw new Error('Scanner not available. Type barcode manually.');
+        const reader = new ZXing.BrowserMultiFormatReader();
+        let lastCode = ''; let lastTime = 0;
+        reader.decodeFromStream(stream, video, (result: any) => {
+          if (!result || stopped) return;
+          const code = result.getText();
+          const now = Date.now();
+          if (code && (code !== lastCode || now - lastTime > 2000)) {
+            lastCode = code; lastTime = now;
+            handleScan(code);
+            container.style.outline = '4px solid #16a34a';
+            setTimeout(() => { container.style.outline = 'none'; }, 500);
+          }
         });
-      });
-
-      let lastCode = '';
-      let lastCodeTime = 0;
-
-      Quagga.onDetected((result: any) => {
-        const code = result?.codeResult?.code;
-        if (!code) return;
-        const now = Date.now();
-        // Debounce — same code can't fire twice within 2 seconds
-        if (code === lastCode && now - lastCodeTime < 2000) return;
-        lastCode = code;
-        lastCodeTime = now;
-        // Flash the container green
-        if (videoRef.current) {
-          videoRef.current.style.outline = '4px solid #16a34a';
-          setTimeout(() => { if (videoRef.current) videoRef.current.style.outline = 'none'; }, 400);
-        }
-        handleScan(code);
-      });
-
-      cameraStopRef.current = () => {
-        Quagga.offDetected();
-        Quagga.stop();
-      };
-
+        const prev = cameraStopRef.current;
+        cameraStopRef.current = () => { try { reader.reset(); } catch {} prev?.(); };
+      }
     } catch (e: any) {
-      setCameraError(e.message || 'Could not start camera. Use manual entry below.');
+      const msg = String(e?.message || e || '');
+      if (/denied|permission|notallowed/i.test(msg)) {
+        setCameraError('Camera permission denied — allow camera in Settings then try again.');
+      } else {
+        setCameraError(msg || 'Could not start camera. Type the barcode manually below.');
+      }
       setCameraActive(false);
     }
   }
@@ -3101,6 +3114,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     cameraStopRef.current = null;
     setCameraActive(false);
     setCameraError('');
+    if (videoRef.current) videoRef.current.innerHTML = '';
   }
 
   useEffect(() => {
