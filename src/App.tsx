@@ -3091,18 +3091,6 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     if (tab !== 'scan' && cameraActive) stopCamera();
   }, [tab]);
 
-  function stopCamera() {
-    cameraStopRef.current?.();
-    cameraStopRef.current = null;
-    setCameraActive(false);
-    setCameraError('');
-    if (videoRef.current) videoRef.current.innerHTML = '';
-  }
-
-  useEffect(() => {
-    if (tab !== 'scan' && cameraActive) stopCamera();
-  }, [tab]);
-
   async function saveBulk(){
     if(!supabase||pendingBulk.length===0)return;
     const{data:sd}=await supabase.auth.getSession();const uid=sd.session?.user?.id;if(!uid)return;
