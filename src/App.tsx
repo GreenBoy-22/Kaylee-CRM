@@ -2975,18 +2975,14 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
       const qtyChange = scanMode==='in' ? line.qty : -line.qty;
 
       if(line.id){
-        // Existing item — update quantity
         const current = items.find(i=>i.id===line.id);
         const newQty = Math.max(0,(current?.quantity??0)+qtyChange);
-        await supabase.from('inventory_items').update({
-          quantity: newQty,
-          updated_at: new Date().toISOString()
-        }).eq('id',line.id);
-        await supabase.from('inventory_transactions').insert({
-          item_id:line.id, user_id:uid,
-          transaction_type:scanMode==='in'?'scan_in':'scan_out',
-          quantity_change:qtyChange, barcode:line.barcode, notes:'Receipt scan'
-        });
+        if(newQty <= 0){
+          await supabase.from('inventory_items').delete().eq('id',line.id);
+        } else {
+          await supabase.from('inventory_items').update({quantity:newQty,updated_at:new Date().toISOString()}).eq('id',line.id);
+          await supabase.from('inventory_transactions').insert({item_id:line.id,user_id:uid,transaction_type:scanMode==='in'?'scan_in':'scan_out',quantity_change:qtyChange,barcode:line.barcode,notes:'Receipt scan'});
+        }
       } else {
         // New item — create it with the selected location
         const payload={
@@ -3026,40 +3022,124 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   async function startCamera() {
     setCameraError('');
     setCameraActive(true);
+
     try {
-      // Dynamically load ZXing from CDN
-      if (!(window as any).ZXingBrowser) {
-        await new Promise<void>((resolve, reject) => {
-          const s = document.createElement('script');
-          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/zxing-browser/0.1.1/umd/index.min.js';
-          s.onload = () => resolve();
-          s.onerror = () => reject(new Error('Failed to load scanner library'));
-          document.head.appendChild(s);
-        });
-      }
-      const ZXing = (window as any).ZXingBrowser;
-      const codeReader = new ZXing.BrowserMultiFormatReader();
-
-      // Get back camera on mobile
-      const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
-      const backCamera = devices.find((d:any) => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
-      const deviceId = backCamera?.deviceId;
-
-      await codeReader.decodeFromVideoDevice(deviceId || undefined, videoRef.current, (result:any, err:any) => {
-        if (result) {
-          const code = result.getText();
-          handleScan(code);
-          // Flash feedback
-          if (videoRef.current) {
-            videoRef.current.style.outline = '4px solid #16a34a';
-            setTimeout(() => { if (videoRef.current) videoRef.current.style.outline = 'none'; }, 300);
-          }
-        }
+      // Request camera — prefer back/environment camera on mobile
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
       });
 
-      cameraStopRef.current = () => codeReader.reset();
-    } catch (e:any) {
-      setCameraError(e.message || 'Camera access denied. Please allow camera permissions.');
+      if (!videoRef.current) { stream.getTracks().forEach(t=>t.stop()); setCameraActive(false); return; }
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play();
+
+      let stopped = false;
+      cameraStopRef.current = () => {
+        stopped = true;
+        stream.getTracks().forEach(t => t.stop());
+        if (videoRef.current) { videoRef.current.srcObject = null; }
+      };
+
+      // Try native BarcodeDetector first (Chrome Android, Safari iOS 16+)
+      if ('BarcodeDetector' in window) {
+        const detector = new (window as any).BarcodeDetector({
+          formats: ['qr_code','ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf','data_matrix']
+        });
+
+        const scan = async () => {
+          if (stopped || !videoRef.current) return;
+          try {
+            const codes = await detector.detect(videoRef.current);
+            if (codes.length > 0) {
+              const code = codes[0].rawValue;
+              handleScan(code);
+              if (videoRef.current) {
+                videoRef.current.style.outline = '4px solid #16a34a';
+                setTimeout(() => { if (videoRef.current) videoRef.current.style.outline = 'none'; }, 400);
+              }
+              // Pause briefly after scan to avoid duplicates
+              await new Promise(r => setTimeout(r, 1500));
+            }
+          } catch { /* frame not ready */ }
+          if (!stopped) requestAnimationFrame(scan);
+        };
+        requestAnimationFrame(scan);
+
+      } else {
+        // Fallback: load ZXing from unpkg (more reliable than cdnjs)
+        if (!(window as any).ZXing) {
+          await new Promise<void>((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js';
+            s.onload = () => resolve();
+            s.onerror = () => {
+              // Second fallback CDN
+              const s2 = document.createElement('script');
+              s2.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js';
+              s2.onload = () => resolve();
+              s2.onerror = () => reject(new Error('Could not load barcode library. Try typing the barcode manually.'));
+              document.head.appendChild(s2);
+            };
+            document.head.appendChild(s);
+          });
+        }
+
+        const ZXing = (window as any).ZXing;
+        const hints = new Map();
+        const formats = [
+          ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+          ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
+          ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
+          ZXing.BarcodeFormat.ITF, ZXing.BarcodeFormat.QR_CODE,
+        ];
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+        const reader = new ZXing.MultiFormatReader();
+        reader.setHints(hints);
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d')!;
+        let lastCode = '';
+        let lastCodeTime = 0;
+
+        const scan = () => {
+          if (stopped || !videoRef.current) return;
+          const v = videoRef.current;
+          if (v.readyState === v.HAVE_ENOUGH_DATA) {
+            canvas.width = v.videoWidth;
+            canvas.height = v.videoHeight;
+            ctx.drawImage(v, 0, 0);
+            try {
+              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const luminance = new ZXing.RGBLuminanceSource(imageData.data, canvas.width, canvas.height);
+              const binary = new ZXing.HybridBinarizer(luminance);
+              const bitmap = new ZXing.BinaryBitmap(binary);
+              const result = reader.decode(bitmap);
+              const code = result.getText();
+              const now = Date.now();
+              // Debounce — same code can't fire twice within 2s
+              if (code && (code !== lastCode || now - lastCodeTime > 2000)) {
+                lastCode = code;
+                lastCodeTime = now;
+                handleScan(code);
+                if (videoRef.current) {
+                  videoRef.current.style.outline = '4px solid #16a34a';
+                  setTimeout(() => { if (videoRef.current) videoRef.current.style.outline = 'none'; }, 400);
+                }
+              }
+            } catch { /* no barcode in frame */ }
+          }
+          if (!stopped) setTimeout(scan, 200);
+        };
+        scan();
+      }
+
+    } catch (e: any) {
+      const msg = e.message || '';
+      if (msg.includes('Permission') || msg.includes('permission') || msg.includes('denied')) {
+        setCameraError('Camera permission denied. Please allow camera access in your browser settings, then try again.');
+      } else {
+        setCameraError(msg || 'Could not start camera. Try typing the barcode manually below.');
+      }
       setCameraActive(false);
     }
   }
@@ -3068,9 +3148,9 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     cameraStopRef.current?.();
     cameraStopRef.current = null;
     setCameraActive(false);
+    setCameraError('');
   }
 
-  // Stop camera when leaving scan tab
   useEffect(() => {
     if (tab !== 'scan' && cameraActive) stopCamera();
   }, [tab]);
@@ -3079,7 +3159,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     if(!supabase||pendingBulk.length===0)return;
     const{data:sd}=await supabase.auth.getSession();const uid=sd.session?.user?.id;if(!uid)return;
     const total=pendingBulk.reduce((s,p)=>s+p.count,0);let saved=0;const unknown:string[]=[];
-    for(const p of pendingBulk){const item=items.find(i=>i.barcode===p.barcode);if(item){const nq=scanMode==='in'?item.quantity+p.count:Math.max(0,item.quantity-p.count);await supabase.from('inventory_items').update({quantity:nq,scan_count:(item.scan_count??0)+p.count,last_scanned_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('id',item.id);await supabase.from('inventory_transactions').insert({item_id:item.id,user_id:uid,transaction_type:'bulk_add',quantity_change:scanMode==='in'?p.count:-p.count,barcode:p.barcode,notes:`Bulk ${scanMode}: ${p.count} units`});saved+=p.count;}else unknown.push(p.barcode);}
+    for(const p of pendingBulk){const item=items.find(i=>i.barcode===p.barcode);if(item){const nq=scanMode==='in'?item.quantity+p.count:Math.max(0,item.quantity-p.count);if(nq<=0){await supabase.from('inventory_items').delete().eq('id',item.id);}else{await supabase.from('inventory_items').update({quantity:nq,updated_at:new Date().toISOString()}).eq('id',item.id);await supabase.from('inventory_transactions').insert({item_id:item.id,user_id:uid,transaction_type:'bulk_add',quantity_change:scanMode==='in'?p.count:-p.count,barcode:p.barcode,notes:`Bulk ${scanMode}: ${p.count} units`});}saved+=p.count;}else unknown.push(p.barcode);}
     setPendingBulk([]);setScanStatus(unknown.length>0?`✅ Saved ${saved} scans. ⚠️ ${unknown.length} unknown: ${unknown.join(', ')}`:`✅ Bulk done — ${saved} scan(s) saved`);
     await loadInv();scanRef.current?.focus();
   }
@@ -3149,7 +3229,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
               </div>
             </div>
             <div style={{display:'flex',gap:4,alignItems:'center',flexShrink:0}}>
-              <button className="qty-button" onClick={async()=>{if(!supabase)return;const nq=Math.max(0,item.quantity-1);await supabase.from('inventory_items').update({quantity:nq,updated_at:new Date().toISOString()}).eq('id',item.id);setItems(p=>p.map(i=>i.id===item.id?{...i,quantity:nq}:i));}}>−</button>
+              <button className="qty-button" onClick={async()=>{if(!supabase)return;const nq=Math.max(0,item.quantity-1);if(nq<=0){await supabase.from('inventory_items').delete().eq('id',item.id);setItems(p=>p.filter(i=>i.id!==item.id));}else{await supabase.from('inventory_items').update({quantity:nq,updated_at:new Date().toISOString()}).eq('id',item.id);setItems(p=>p.map(i=>i.id===item.id?{...i,quantity:nq}:i));}}}>−</button>
               <span style={{fontSize:13,fontWeight:700,minWidth:24,textAlign:'center'}}>{item.quantity}</span>
               <button className="qty-button" onClick={async()=>{if(!supabase)return;const nq=item.quantity+1;await supabase.from('inventory_items').update({quantity:nq,updated_at:new Date().toISOString()}).eq('id',item.id);setItems(p=>p.map(i=>i.id===item.id?{...i,quantity:nq}:i));}}>+</button>
               <button className="qty-button" onClick={()=>{setEditItem(item);setFName(item.name);setFBrand(item.brand??'');setFCat(item.category??'Pantry');setFLoc(item.location??'Pantry');setFQty(item.quantity);setFUnit(item.unit??'each');setFExp(item.expires??'');setFImp(item.import_date??invKey(new Date()));setFCost(item.avg_cost_canton?.toString()??'');setFBarcode(item.barcode??'');setFNotes(item.notes??'');setFPerish(item.is_perishable??false);setTab('add');}}>✏️</button>
