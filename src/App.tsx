@@ -2857,8 +2857,12 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   type ReceiptLine = {barcode:string;name:string;brand:string;category:string;location:string;qty:number;marketPrice:number|null;isNew:boolean;looking:boolean;id:string|null};
   const [receiptLines, setReceiptLines] = useState<ReceiptLine[]>([]);
   const [receiptSaving, setReceiptSaving] = useState(false);
-  const [scanLocation, setScanLocation] = useState('Kitchen'); // default room for all scans
-  const [useAIFallback, setUseAIFallback] = useState(false); // opt-in AI barcode lookup
+  const [scanLocation, setScanLocation] = useState('Kitchen');
+  const [useAIFallback, setUseAIFallback] = useState(false);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const cameraStopRef = useRef<(()=>void)|null>(null);
   const scanRef = useRef<HTMLInputElement>(null);
 
   const loadInv = useCallback(async()=>{
@@ -3018,6 +3022,59 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     setReceiptSaving(false);
   }
 
+  // __ Camera barcode scanner ______________________________________________
+  async function startCamera() {
+    setCameraError('');
+    setCameraActive(true);
+    try {
+      // Dynamically load ZXing from CDN
+      if (!(window as any).ZXingBrowser) {
+        await new Promise<void>((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/zxing-browser/0.1.1/umd/index.min.js';
+          s.onload = () => resolve();
+          s.onerror = () => reject(new Error('Failed to load scanner library'));
+          document.head.appendChild(s);
+        });
+      }
+      const ZXing = (window as any).ZXingBrowser;
+      const codeReader = new ZXing.BrowserMultiFormatReader();
+
+      // Get back camera on mobile
+      const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
+      const backCamera = devices.find((d:any) => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
+      const deviceId = backCamera?.deviceId;
+
+      await codeReader.decodeFromVideoDevice(deviceId || undefined, videoRef.current, (result:any, err:any) => {
+        if (result) {
+          const code = result.getText();
+          handleScan(code);
+          // Flash feedback
+          if (videoRef.current) {
+            videoRef.current.style.outline = '4px solid #16a34a';
+            setTimeout(() => { if (videoRef.current) videoRef.current.style.outline = 'none'; }, 300);
+          }
+        }
+      });
+
+      cameraStopRef.current = () => codeReader.reset();
+    } catch (e:any) {
+      setCameraError(e.message || 'Camera access denied. Please allow camera permissions.');
+      setCameraActive(false);
+    }
+  }
+
+  function stopCamera() {
+    cameraStopRef.current?.();
+    cameraStopRef.current = null;
+    setCameraActive(false);
+  }
+
+  // Stop camera when leaving scan tab
+  useEffect(() => {
+    if (tab !== 'scan' && cameraActive) stopCamera();
+  }, [tab]);
+
   async function saveBulk(){
     if(!supabase||pendingBulk.length===0)return;
     const{data:sd}=await supabase.auth.getSession();const uid=sd.session?.user?.id;if(!uid)return;
@@ -3160,16 +3217,56 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
         </div>
       </div>
 
-      {/* Scan input */}
+      {/* Camera scanner */}
       <div style={{marginBottom:10}}>
-        <input
-          ref={scanRef} value={scanInput} onChange={e=>setScanInput(e.target.value)}
-          onKeyDown={e=>{if(e.key==='Enter'&&scanInput.trim())handleScan(scanInput.trim());}}
-          onBlur={()=>setTimeout(()=>{if(document.activeElement?.tagName!=='BUTTON'&&document.activeElement?.tagName!=='INPUT'&&document.activeElement?.tagName!=='SELECT')scanRef.current?.focus();},200)}
-          placeholder="📷 Scan barcode or type UPC + Enter"
-          style={{fontSize:15,fontWeight:600,background:'var(--surface-1)',border:'2px solid #16a34a',borderRadius:10,padding:'12px 14px',letterSpacing:1,width:'100%'}}
-          autoComplete="off" autoFocus inputMode="none"
-        />
+        {!cameraActive ? (
+          <button
+            onClick={startCamera}
+            style={{width:'100%',padding:'18px',borderRadius:12,border:'2px dashed #16a34a',background:'#dcfce7',cursor:'pointer',fontSize:16,fontWeight:700,color:'#16a34a',display:'flex',alignItems:'center',justifyContent:'center',gap:10}}
+          >
+            <span style={{fontSize:28}}>📷</span> Tap to Start Camera Scanner
+          </button>
+        ) : (
+          <div style={{position:'relative',borderRadius:12,overflow:'hidden',background:'#000'}}>
+            <video
+              ref={videoRef}
+              style={{width:'100%',maxHeight:280,objectFit:'cover',display:'block',borderRadius:12}}
+              autoPlay playsInline muted
+            />
+            {/* Targeting overlay */}
+            <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'none'}}>
+              <div style={{width:220,height:120,border:'3px solid #16a34a',borderRadius:8,boxShadow:'0 0 0 2000px rgba(0,0,0,0.35)'}}>
+                <div style={{position:'absolute',top:0,left:0,width:20,height:20,borderTop:'3px solid #16a34a',borderLeft:'3px solid #16a34a',borderRadius:'8px 0 0 0'}}/>
+                <div style={{position:'absolute',top:0,right:0,width:20,height:20,borderTop:'3px solid #16a34a',borderRight:'3px solid #16a34a',borderRadius:'0 8px 0 0'}}/>
+                <div style={{position:'absolute',bottom:0,left:0,width:20,height:20,borderBottom:'3px solid #16a34a',borderLeft:'3px solid #16a34a',borderRadius:'0 0 0 8px'}}/>
+                <div style={{position:'absolute',bottom:0,right:0,width:20,height:20,borderBottom:'3px solid #16a34a',borderRight:'3px solid #16a34a',borderRadius:'0 0 8px 0'}}/>
+              </div>
+            </div>
+            <button
+              onClick={stopCamera}
+              style={{position:'absolute',top:10,right:10,background:'rgba(0,0,0,0.6)',color:'white',border:'none',borderRadius:8,padding:'6px 12px',cursor:'pointer',fontSize:13,fontWeight:700}}
+            >✕ Stop</button>
+            <div style={{position:'absolute',bottom:10,left:0,right:0,textAlign:'center',color:'white',fontSize:12,fontWeight:600,textShadow:'0 1px 3px rgba(0,0,0,0.8)'}}>
+              Point camera at barcode — scans automatically
+            </div>
+          </div>
+        )}
+        {cameraError && <div style={{marginTop:8,padding:'8px 12px',background:'#fee2e2',borderRadius:8,fontSize:12,color:'var(--red)'}}>{cameraError}</div>}
+
+        {/* Manual entry fallback */}
+        <div style={{marginTop:8,display:'flex',gap:8}}>
+          <input
+            ref={scanRef} value={scanInput} onChange={e=>setScanInput(e.target.value)}
+            onKeyDown={e=>{if(e.key==='Enter'&&scanInput.trim())handleScan(scanInput.trim());}}
+            placeholder="Or type UPC manually + Enter"
+            style={{flex:1,fontSize:14,background:'var(--surface-1)',border:'1px solid var(--border)',borderRadius:8,padding:'8px 12px'}}
+            autoComplete="off" inputMode="numeric"
+          />
+          <button
+            onClick={()=>{if(scanInput.trim())handleScan(scanInput.trim());}}
+            style={{padding:'8px 14px',borderRadius:8,border:'none',background:'var(--purple)',color:'white',fontWeight:700,cursor:'pointer',fontSize:13}}
+          >Add</button>
+        </div>
       </div>
 
       {/* Status */}
