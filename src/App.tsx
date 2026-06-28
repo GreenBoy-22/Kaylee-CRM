@@ -3019,95 +3019,77 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   }
 
   // __ Camera barcode scanner ______________________________________________
+  // __ Camera scanner using html5-qrcode (best iOS Safari support) __________
   async function startCamera() {
     setCameraError('');
     setCameraActive(true);
+    const containerId = 'inv-qr-reader';
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
-      });
-      const container = videoRef.current;
-      if (!container) { stream.getTracks().forEach(t => t.stop()); setCameraActive(false); return; }
-      const video = document.createElement('video');
-      video.srcObject = stream;
-      video.autoplay = true;
-      video.playsInline = true;
-      video.muted = true;
-      video.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;border-radius:12px;';
-      container.innerHTML = '';
-      container.appendChild(video);
-      await video.play();
-      let stopped = false;
-      cameraStopRef.current = () => {
-        stopped = true;
-        stream.getTracks().forEach(t => t.stop());
-        if (container) container.innerHTML = '';
-      };
-      if ('BarcodeDetector' in window) {
-        // Native BarcodeDetector — iOS 17.4+, Chrome Android
-        const detector = new (window as any).BarcodeDetector({
-          formats: ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf','qr_code']
-        });
-        let lastCode = ''; let lastTime = 0;
-        const tick = async () => {
-          if (stopped) return;
-          if (video.readyState >= 2) {
-            try {
-              const results = await detector.detect(video);
-              if (results.length > 0) {
-                const code = results[0].rawValue;
-                const now = Date.now();
-                if (code && (code !== lastCode || now - lastTime > 2000)) {
-                  lastCode = code; lastTime = now;
-                  handleScan(code);
-                  container.style.outline = '4px solid #16a34a';
-                  setTimeout(() => { container.style.outline = 'none'; }, 500);
-                }
-              }
-            } catch { /* frame skip */ }
-          }
-          if (!stopped) setTimeout(tick, 300);
-        };
-        tick();
-      } else {
-        // ZXing fallback — iOS 16 and below
+      // Load html5-qrcode — best iOS Safari barcode library available
+      if (!(window as any).Html5Qrcode) {
         await new Promise<void>((resolve, reject) => {
-          if ((window as any).ZXing) { resolve(); return; }
           const s = document.createElement('script');
-          s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.18.6/umd/index.min.js';
-          s.crossOrigin = 'anonymous';
+          s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
           s.onload = () => resolve();
-          s.onerror = () => reject(new Error('Scanner library failed. Please type barcode manually.'));
+          s.onerror = () => {
+            // fallback CDN
+            const s2 = document.createElement('script');
+            s2.src = 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js';
+            s2.onload = () => resolve();
+            s2.onerror = () => reject(new Error('Scanner library failed to load.'));
+            document.head.appendChild(s2);
+          };
           document.head.appendChild(s);
         });
-        const ZXing = (window as any).ZXing;
-        if (!ZXing?.BrowserMultiFormatReader) throw new Error('Scanner not available. Type barcode manually.');
-        const reader = new ZXing.BrowserMultiFormatReader();
-        let lastCode = ''; let lastTime = 0;
-        reader.decodeFromStream(stream, video, (result: any) => {
-          if (!result || stopped) return;
-          const code = result.getText();
+      }
+
+      const Html5Qrcode = (window as any).Html5Qrcode;
+      const scanner = new Html5Qrcode(containerId);
+
+      let lastCode = ''; let lastTime = 0;
+
+      await scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 250, height: 150 }, aspectRatio: 1.5 },
+        (code: string) => {
           const now = Date.now();
           if (code && (code !== lastCode || now - lastTime > 2000)) {
             lastCode = code; lastTime = now;
             handleScan(code);
-            container.style.outline = '4px solid #16a34a';
-            setTimeout(() => { container.style.outline = 'none'; }, 500);
+            const el = document.getElementById(containerId);
+            if (el) { el.style.outline = '4px solid #16a34a'; setTimeout(() => { if (el) el.style.outline = 'none'; }, 500); }
           }
-        });
-        const prev = cameraStopRef.current;
-        cameraStopRef.current = () => { try { reader.reset(); } catch {} prev?.(); };
-      }
+        },
+        () => { /* scan failure — ignore */ }
+      );
+
+      cameraStopRef.current = () => {
+        scanner.stop().catch(() => {});
+      };
+
     } catch (e: any) {
       const msg = String(e?.message || e || '');
       if (/denied|permission|notallowed/i.test(msg)) {
-        setCameraError('Camera permission denied — allow camera in Settings then try again.');
+        setCameraError('Camera permission denied — please allow camera access in Settings then try again.');
       } else {
         setCameraError(msg || 'Could not start camera. Type the barcode manually below.');
       }
       setCameraActive(false);
     }
   }
+
+  function stopCamera() {
+    cameraStopRef.current?.();
+    cameraStopRef.current = null;
+    setCameraActive(false);
+    setCameraError('');
+    if (videoRef.current) videoRef.current.innerHTML = '';
+  }
+
+  useEffect(() => {
+    if (tab !== 'scan' && cameraActive) stopCamera();
+  }, [tab]);
 
   function stopCamera() {
     cameraStopRef.current?.();
@@ -3273,25 +3255,14 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
             <span style={{fontSize:28}}>📷</span> Tap to Start Camera Scanner
           </button>
         ) : (
-          <div style={{position:'relative',borderRadius:12,overflow:'hidden',background:'#000',minHeight:240}}>
-            {/* Quagga renders its own video+canvas inside this div */}
+          <div style={{position:'relative',borderRadius:12,overflow:'hidden',background:'#000',minHeight:260}}>
+            {/* html5-qrcode renders into this div by ID */}
             <div
+              id="inv-qr-reader"
               ref={videoRef}
-              style={{width:'100%',minHeight:240,borderRadius:12}}
+              style={{width:'100%',minHeight:260,borderRadius:12}}
             />
-            {/* Targeting overlay */}
-            <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'none'}}>
-              <div style={{width:220,height:120,border:'3px solid #16a34a',borderRadius:8,boxShadow:'0 0 0 2000px rgba(0,0,0,0.3)',position:'relative'}}>
-                <div style={{position:'absolute',top:-3,left:-3,width:20,height:20,borderTop:'4px solid #16a34a',borderLeft:'4px solid #16a34a',borderRadius:'6px 0 0 0'}}/>
-                <div style={{position:'absolute',top:-3,right:-3,width:20,height:20,borderTop:'4px solid #16a34a',borderRight:'4px solid #16a34a',borderRadius:'0 6px 0 0'}}/>
-                <div style={{position:'absolute',bottom:-3,left:-3,width:20,height:20,borderBottom:'4px solid #16a34a',borderLeft:'4px solid #16a34a',borderRadius:'0 0 0 6px'}}/>
-                <div style={{position:'absolute',bottom:-3,right:-3,width:20,height:20,borderBottom:'4px solid #16a34a',borderRight:'4px solid #16a34a',borderRadius:'0 0 6px 0'}}/>
-              </div>
-            </div>
             <button onClick={stopCamera} style={{position:'absolute',top:10,right:10,background:'rgba(0,0,0,0.65)',color:'white',border:'none',borderRadius:8,padding:'6px 14px',cursor:'pointer',fontSize:13,fontWeight:700,zIndex:10}}>✕ Stop</button>
-            <div style={{position:'absolute',bottom:10,left:0,right:0,textAlign:'center',color:'white',fontSize:12,fontWeight:600,textShadow:'0 1px 3px rgba(0,0,0,0.9)',zIndex:10}}>
-              Point at barcode — auto-scans ✓
-            </div>
           </div>
         )}
         {cameraError && <div style={{marginTop:8,padding:'8px 12px',background:'#fee2e2',borderRadius:8,fontSize:12,color:'var(--red)'}}>{cameraError}</div>}
