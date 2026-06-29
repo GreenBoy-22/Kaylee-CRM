@@ -282,6 +282,7 @@ export default function PlantCatalog() {
   const [libArticles, setLibArticles] = useState<{id:string;section:string;title:string;content:string;tags:string[]}[]>([]);
   const [libLoading, setLibLoading]   = useState(false);
   const [libExpanded, setLibExpanded] = useState<string | null>(null);
+  const [showPhotoGrid, setShowPhotoGrid] = useState(false);
 
   // Filters
   const [filterLoc, setFilterLoc]     = useState<Location | 'all'>('all');
@@ -887,7 +888,7 @@ export default function PlantCatalog() {
       {/* ── MY PLANTS TAB ── */}
       {tab === 'plants' && (
         <div>
-          {/* Filters + Search */}
+          {/* Filters + Search + View toggle */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             {(['all', 'indoor', 'outdoor', 'garden'] as const).map(loc => (
               <button key={loc} onClick={() => setFilterLoc(loc)} style={{
@@ -900,10 +901,44 @@ export default function PlantCatalog() {
                 {' '}({loc === 'all' ? plants.length : plants.filter(p => p.location === loc).length})
               </button>
             ))}
-            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search plants..." style={{ marginLeft: 'auto', width: 180, fontSize: 12 }} />
+            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search plants..." style={{ marginLeft: 'auto', width: 140, fontSize: 12 }} />
+            <button
+              onClick={() => setShowPhotoGrid(prev => !prev)}
+              style={{ padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: `2px solid ${showPhotoGrid ? 'var(--green)' : 'var(--border)'}`, background: showPhotoGrid ? 'var(--green-bg)' : 'transparent', color: showPhotoGrid ? 'var(--green)' : 'var(--muted)' }}
+            >
+              {showPhotoGrid ? '📷 Photos' : '📷 Photos'}
+            </button>
           </div>
 
           {loading && <div style={{ color: 'var(--muted)', fontSize: 13, padding: 20 }}>Loading plants...</div>}
+
+          {/* ── Photo grid view ── */}
+          {showPhotoGrid && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: 16 }}>
+              {filteredPlants.map(p => (
+                <div
+                  key={p.id}
+                  onClick={() => { setExpandedPlant(p.id); setShowPhotoGrid(false); setTab('plants'); }}
+                  style={{ borderRadius: 12, overflow: 'hidden', border: `2px solid ${LOCATION_COLORS[p.location]}`, cursor: 'pointer', background: 'var(--surface-1)', position: 'relative' }}
+                >
+                  {(p as any).image_url ? (
+                    <img
+                      src={(p as any).image_url}
+                      alt={p.name}
+                      style={{ width: '100%', height: 110, objectFit: 'cover', display: 'block' }}
+                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                  ) : (
+                    <div style={{ width: '100%', height: 110, background: 'var(--surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>🌿</div>
+                  )}
+                  <div style={{ padding: '6px 8px' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3 }}>{p.nickname || p.name}</div>
+                    <div style={{ fontSize: 10, color: LOCATION_COLORS[p.location], marginTop: 2, fontWeight: 600 }}>{LOCATION_LABELS[p.location]}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Accordion plant list */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
