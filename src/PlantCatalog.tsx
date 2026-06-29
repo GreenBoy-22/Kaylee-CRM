@@ -12,7 +12,7 @@ import { supabase } from './lib/supabase';
 
 // __ Types _______________________________________________________________
 
-type Location = 'indoor' | 'outdoor' | 'garden';
+type Location = 'indoor' | 'outdoor' | 'garden' | 'porch';
 type LogType = 'watered' | 'fertilized' | 'repotted' | 'pruned' | 'treated' | 'observation' | 'propagated' | 'other';
 type Priority = 'low' | 'medium' | 'high';
 type TaskSource = 'manual' | 'ai' | 'care_guide';
@@ -27,7 +27,7 @@ interface Plant {
   pot_size: string | null;
   soil_type: string | null;
   photo_url: string | null;
-  image_url: string | null;
+  image_url?: string | null;
   notes: string | null;
   is_active: boolean;
   care_guide: string | null;
@@ -67,12 +67,14 @@ interface CareSection {
 const LOCATION_LABELS: Record<Location, string> = {
   indoor:  'Indoor',
   outdoor: 'Outdoor',
+  porch:   'Porch',
   garden:  "Garden (Mom's)",
 };
 
 const LOCATION_COLORS: Record<Location, string> = {
   indoor:  '#0891b2',
   outdoor: '#16a34a',
+  porch:   '#7c3aed',
   garden:  '#d97706',
 };
 
@@ -891,7 +893,7 @@ export default function PlantCatalog() {
         <div>
           {/* Filters + Search + View toggle */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-            {(['all', 'indoor', 'outdoor', 'garden'] as const).map(loc => (
+            {(['all', 'indoor', 'porch', 'outdoor', 'garden'] as const).map(loc => (
               <button key={loc} onClick={() => setFilterLoc(loc)} style={{
                 padding: '5px 14px', borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: 'pointer',
                 border: `2px solid ${filterLoc === loc ? (loc === 'all' ? 'var(--purple)' : LOCATION_COLORS[loc as Location]) : 'var(--border)'}`,
