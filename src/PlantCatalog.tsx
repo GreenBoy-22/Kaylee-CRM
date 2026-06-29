@@ -287,6 +287,12 @@ export default function PlantCatalog() {
   const [libExpanded, setLibExpanded] = useState<string | null>(null);
   const [showPhotoGrid, setShowPhotoGrid] = useState(false);
 
+  // Birds state
+  type BackyardBird = { id:string; common_name:string; scientific_name:string|null; georgia_status:string|null; image_url:string|null; about:string|null; activity_pattern:string|null; water_preferences:string|null; feeding_position:string|null; preferred_foods:string|null; temperature_range:string|null; humidity_rain:string|null; breeding_signals:string|null; habitat_strategy:string|null; seasonal_calendar:string|null; nest_box:string|null; signs_to_watch:string|null; birdbath_depth:string|null; threats_competition:string|null; did_you_know:string|null; quick_summary:string|null; friendliness_rating:number|null; };
+  const [birds, setBirds] = useState<BackyardBird[]>([]);
+  const [birdsLoading, setBirdsLoading] = useState(false);
+  const [expandedBird, setExpandedBird] = useState<string | null>(null);
+
   // Filters
   const [filterLoc, setFilterLoc]     = useState<Location | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -348,6 +354,13 @@ export default function PlantCatalog() {
   useEffect(() => {
     if (section === 'library') loadLibrary();
     if (section === 'moisture') loadMoistureHistory();
+    if (section === 'birds' && birds.length === 0) {
+      setBirdsLoading(true);
+      supabase?.from('backyard_birds').select('*').order('common_name').then(({ data }) => {
+        setBirds((data as BackyardBird[]) ?? []);
+        setBirdsLoading(false);
+      });
+    }
   }, [section, loadLibrary, loadMoistureHistory]);
 
   // Moisture meter advice engine
@@ -786,35 +799,164 @@ export default function PlantCatalog() {
       {/* ── BIRDS SECTION ── */}
       {section === 'birds' && (
         <div>
-          <section className="panel" style={{ borderTop: '3px solid #d97706', marginBottom: 14 }}>
-            <div className="panel-head">
-              <h2>🐦 Canton GA Backyard Birds</h2>
-            </div>
-            <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
-              Bird info for Canton, GA (Zone 7b) — species, feeders, and habitat plants. Expand the Reference Library for full details.
-            </p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-              {[
-                { name: 'Northern Cardinal', status: '🟢 Year-round', feeder: 'Sunflower seeds', color: '#dc2626' },
-                { name: 'Carolina Chickadee', status: '🟢 Year-round', feeder: 'Sunflower, suet', color: '#374151' },
-                { name: 'Ruby-throated Hummingbird', status: '🟡 Apr–Oct', feeder: '4:1 sugar water', color: '#059669' },
-                { name: 'Tufted Titmouse', status: '🟢 Year-round', feeder: 'Sunflower, peanuts', color: '#6b7280' },
-                { name: 'Downy Woodpecker', status: '🟢 Year-round', feeder: 'Suet, sunflower', color: '#1f2937' },
-                { name: 'American Goldfinch', status: '🔵 Winter visitor', feeder: 'Nyjer/thistle', color: '#eab308' },
-                { name: 'Eastern Bluebird', status: '🟢 Year-round', feeder: 'Mealworms, nest box', color: '#1d4ed8' },
-                { name: 'Carolina Wren', status: '🟢 Year-round', feeder: 'Suet, peanut butter', color: '#92400e' },
-              ].map(b => (
-                <div key={b.name} style={{ background: 'var(--surface-1)', borderRadius: 8, padding: '10px 12px', borderLeft: `3px solid ${b.color}` }}>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>{b.name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{b.status}</div>
-                  <div style={{ fontSize: 11, marginTop: 4 }}>🪺 {b.feeder}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{ marginTop: 14, fontSize: 13, color: 'var(--muted)', background: 'var(--surface-1)', borderRadius: 8, padding: '10px 12px' }}>
-              💡 See Reference Library → Birds for full Canton GA species list, feeder types, and plants that attract birds.
-            </div>
-          </section>
+          {/* Bird stats row */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+            {[
+              { label: 'Species in Guide', value: birds.length, color: '#d97706' },
+              { label: 'Year-round Residents', value: birds.filter(b => b.georgia_status?.toLowerCase().includes('year-round')).length, color: '#16a34a' },
+              { label: 'Seasonal / Migratory', value: birds.filter(b => !b.georgia_status?.toLowerCase().includes('year-round')).length, color: '#0891b2' },
+            ].map(s => (
+              <section key={s.label} className="panel" style={{ textAlign: 'center', padding: '10px 8px' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{s.label}</div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: s.color }}>{s.value}</div>
+              </section>
+            ))}
+          </div>
+
+          {birdsLoading && <div style={{ color: 'var(--muted)', fontSize: 13, padding: 20 }}>Loading bird guides...</div>}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {birds.map(bird => {
+              const isExpanded = expandedBird === bird.id;
+              return (
+                <section key={bird.id} className="panel" style={{ borderLeft: '4px solid #d97706', padding: 0, overflow: 'hidden' }}>
+                  {/* Header */}
+                  <div
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer' }}
+                    onClick={() => setExpandedBird(isExpanded ? null : bird.id)}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
+                      {bird.image_url ? (
+                        <img src={bird.image_url} alt={bird.common_name}
+                          style={{ width: 52, height: 52, borderRadius: 8, objectFit: 'cover', flexShrink: 0, border: '2px solid #d97706' }}
+                          onError={e => { (e.target as HTMLImageElement).style.display='none'; }}
+                        />
+                      ) : (
+                        <div style={{ width: 52, height: 52, borderRadius: 8, background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, flexShrink: 0 }}>🐦</div>
+                      )}
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 15 }}>{bird.common_name}</div>
+                        {bird.scientific_name && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{bird.scientific_name}</div>}
+                        <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: '#d97706', background: '#fef3c720', padding: '2px 8px', borderRadius: 999, border: '1px solid #d97706' }}>
+                            {bird.georgia_status?.includes('Year-round') ? '🟢' : '🔵'} {bird.georgia_status}
+                          </span>
+                          {'★'.repeat(bird.friendliness_rating || 4)}
+                        </div>
+                      </div>
+                    </div>
+                    {isExpanded ? <ChevronDown size={16} color="var(--muted)" /> : <ChevronRight size={16} color="var(--muted)" />}
+                  </div>
+
+                  {/* Expanded body */}
+                  {isExpanded && (
+                    <div style={{ borderTop: '1px solid var(--border)', padding: '0 16px 20px' }}>
+                      {/* Quick summary bar */}
+                      {bird.quick_summary && (
+                        <div style={{ background: '#fef3c7', borderRadius: 8, padding: '10px 12px', margin: '14px 0', fontSize: 12, lineHeight: 1.6 }}>
+                          <strong>📋 Quick Reference:</strong> {bird.quick_summary}
+                        </div>
+                      )}
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14, marginTop: 14 }}>
+                        {bird.about && (
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: '#d97706', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>🐦 About the Bird</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{bird.about}</div>
+                          </div>
+                        )}
+                        {bird.preferred_foods && (
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: '#d97706', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>🌻 Preferred Foods</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{bird.preferred_foods}</div>
+                          </div>
+                        )}
+                        {bird.activity_pattern && (
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: '#d97706', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>☀️ Activity Pattern</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{bird.activity_pattern}</div>
+                          </div>
+                        )}
+                        {bird.water_preferences && (
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: '#d97706', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>💧 Water Preferences</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{bird.water_preferences}</div>
+                          </div>
+                        )}
+                        {bird.feeding_position && (
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: '#d97706', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>🪺 Feeding Position</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{bird.feeding_position}</div>
+                          </div>
+                        )}
+                        {bird.temperature_range && (
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: '#d97706', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>🌡️ Temperature Range</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{bird.temperature_range}</div>
+                          </div>
+                        )}
+                        {bird.humidity_rain && (
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: '#d97706', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>🌧️ Humidity & Rain</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{bird.humidity_rain}</div>
+                          </div>
+                        )}
+                        {bird.breeding_signals && (
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: '#d97706', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>🥚 Breeding Season Signals</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{bird.breeding_signals}</div>
+                          </div>
+                        )}
+                        {bird.habitat_strategy && (
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: '#d97706', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>🌿 Habitat Support</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{bird.habitat_strategy}</div>
+                          </div>
+                        )}
+                        {bird.seasonal_calendar && (
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: '#d97706', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>📅 Seasonal Calendar</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{bird.seasonal_calendar}</div>
+                          </div>
+                        )}
+                        {bird.nest_box && (
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: '#d97706', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>🏠 Nest Box</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{bird.nest_box}</div>
+                          </div>
+                        )}
+                        {bird.signs_to_watch && (
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: '#d97706', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>🔍 Signs to Watch For</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{bird.signs_to_watch}</div>
+                          </div>
+                        )}
+                        {bird.threats_competition && (
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: '#d97706', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>⚠️ Threats & Competition</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{bird.threats_competition}</div>
+                          </div>
+                        )}
+                        {bird.did_you_know && (
+                          <div style={{ background: '#fef3c7', borderRadius: 8, padding: '10px 12px' }}>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: '#d97706', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>💡 Did You Know?</div>
+                            <div style={{ fontSize: 12, lineHeight: 1.7 }}>{bird.did_you_know}</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+
+          {birds.length === 0 && !birdsLoading && (
+            <section className="panel" style={{ textAlign: 'center', padding: 40 }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>🐦</div>
+              <p style={{ color: 'var(--muted)' }}>No bird guides loaded yet.</p>
+            </section>
+          )}
         </div>
       )}
 
