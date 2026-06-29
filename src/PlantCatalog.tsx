@@ -770,14 +770,29 @@ export default function PlantCatalog() {
                     style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer' }}
                     onClick={() => setLibExpanded(libExpanded === a.id ? null : a.id)}
                   >
-                    <div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>{a.title}</div>
                       <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, textTransform: 'capitalize' }}>
                         {a.section.replace(/_/g, ' ')}
                         {a.tags?.length > 0 && ` · ${a.tags.slice(0, 3).join(', ')}`}
                       </div>
                     </div>
-                    {libExpanded === a.id ? <ChevronDown size={16} color="var(--muted)" /> : <ChevronRight size={16} color="var(--muted)" />}
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                      <button
+                        className="btn ghost tiny"
+                        style={{ color: 'var(--red)', fontSize: 11, padding: '3px 8px' }}
+                        onClick={e => {
+                          e.stopPropagation();
+                          if (confirm(`Delete "${a.title}"? This cannot be undone.`)) {
+                            supabase?.from('outdoor_guide_articles').delete().eq('id', a.id).then(() => {
+                              setLibArticles(prev => prev.filter(x => x.id !== a.id));
+                              if (libExpanded === a.id) setLibExpanded(null);
+                            });
+                          }
+                        }}
+                      >🗑 Delete</button>
+                      {libExpanded === a.id ? <ChevronDown size={16} color="var(--muted)" /> : <ChevronRight size={16} color="var(--muted)" />}
+                    </div>
                   </div>
                   {libExpanded === a.id && (
                     <div style={{ borderTop: '1px solid var(--border)', padding: '14px 16px', fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap', color: 'var(--text)' }}>
