@@ -27,6 +27,7 @@ interface Plant {
   pot_size: string | null;
   soil_type: string | null;
   photo_url: string | null;
+  image_url: string | null;
   notes: string | null;
   is_active: boolean;
   care_guide: string | null;
@@ -821,10 +822,10 @@ export default function PlantCatalog() {
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
         {[
-          { label: 'Total Plants', value: plants.length,                                     color: 'var(--purple)' },
-          { label: 'Indoor',       value: plants.filter(p => p.location === 'indoor').length, color: LOCATION_COLORS.indoor },
-          { label: 'Outdoor',      value: plants.filter(p => p.location === 'outdoor').length,color: LOCATION_COLORS.outdoor },
-          { label: 'Tasks Due',    value: overdueTasks.length + dueSoonTasks.length,           color: overdueTasks.length > 0 ? 'var(--red)' : 'var(--amber)' },
+          { label: 'Total Plants', value: plants.length, color: 'var(--purple)' },
+          { label: 'Indoor',  value: plants.filter(p => p.location === 'indoor').length,  color: LOCATION_COLORS.indoor },
+          { label: 'Porch',   value: plants.filter(p => p.location === 'porch').length,   color: LOCATION_COLORS.outdoor },
+          { label: 'Tasks Due', value: overdueTasks.length + dueSoonTasks.length, color: overdueTasks.length > 0 ? 'var(--red)' : 'var(--amber)' },
         ].map(s => (
           <section key={s.label} className="panel" style={{ textAlign: 'center', padding: '10px 8px' }}>
             <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{s.label}</div>
@@ -841,8 +842,8 @@ export default function PlantCatalog() {
         <button className={tab === 'ai'     ? 'active' : ''} onClick={() => setTab('ai')}>AI Suggestions</button>
       </div>
 
-      {/* Add/Edit Plant Form */}
-      {showAddPlant && (
+      {/* Add Plant Form — only shown for NEW plants, editing is inline */}
+      {showAddPlant && !editingPlant && (
         <section className="panel" style={{ borderLeft: '4px solid var(--green)', marginBottom: 14 }}>
           <div className="panel-head">
             <h2>{editingPlant ? `Edit — ${editingPlant.name}` : 'Add a Plant'}</h2>
@@ -921,9 +922,9 @@ export default function PlantCatalog() {
                   onClick={() => { setExpandedPlant(p.id); setShowPhotoGrid(false); setTab('plants'); }}
                   style={{ borderRadius: 12, overflow: 'hidden', border: `2px solid ${LOCATION_COLORS[p.location]}`, cursor: 'pointer', background: 'var(--surface-1)', position: 'relative' }}
                 >
-                  {(p as any).image_url ? (
+                  {p.image_url ? (
                     <img
-                      src={(p as any).image_url}
+                      src={p.image_url}
                       alt={p.name}
                       style={{ width: '100%', height: 110, objectFit: 'cover', display: 'block' }}
                       onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
@@ -957,11 +958,21 @@ export default function PlantCatalog() {
 
                   {/* Header row — always visible, click to expand */}
                   <div
-                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', cursor: 'pointer' }}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer' }}
                     onClick={() => setExpandedPlant(isExpanded ? null : p.id)}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
-                      <Leaf size={16} color={accentColor} style={{ flexShrink: 0 }} />
+                      {/* Plant photo thumbnail */}
+                      {p.image_url ? (
+                        <img
+                          src={p.image_url}
+                          alt={p.name}
+                          style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover', flexShrink: 0, border: `2px solid ${accentColor}` }}
+                          onError={e => { (e.target as HTMLImageElement).style.display='none'; }}
+                        />
+                      ) : (
+                        <div style={{ width: 48, height: 48, borderRadius: 8, background: `${accentColor}22`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>🌿</div>
+                      )}
                       <div style={{ minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
                           <span style={{ fontWeight: 700, fontSize: 15 }}>{p.nickname || p.name}</span>
@@ -985,7 +996,12 @@ export default function PlantCatalog() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-                      <button className="qty-button" title="Edit plant" onClick={e => { e.stopPropagation(); startEdit(p); }}>
+                      <button className="qty-button" title="Edit plant" onClick={e => {
+                        e.stopPropagation();
+                        // Toggle inline edit — open expanded first
+                        if (!isExpanded) setExpandedPlant(p.id);
+                        startEdit(p);
+                      }}>
                         <Edit2 size={12} />
                       </button>
                       {isExpanded ? <ChevronDown size={16} color="var(--muted)" /> : <ChevronRight size={16} color="var(--muted)" />}
@@ -995,6 +1011,38 @@ export default function PlantCatalog() {
                   {/* Expanded body */}
                   {isExpanded && (
                     <div style={{ borderTop: '1px solid var(--border)', padding: '0 16px 20px' }}>
+
+                      {/* Inline edit form — shows when this plant is being edited */}
+                      {editingPlant?.id === p.id && showAddPlant && (
+                        <div style={{ background: 'var(--surface-1)', borderRadius: 10, padding: 14, margin: '14px 0', border: '2px solid var(--green)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                            <span style={{ fontWeight: 700, fontSize: 14 }}>✏️ Edit — {p.name}</span>
+                            <button className="btn ghost" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => { setShowAddPlant(false); setEditingPlant(null); resetPlantForm(); }}><X size={12} /> Cancel</button>
+                          </div>
+                          <div className="form-grid" style={{ marginBottom: 12 }}>
+                            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Plant name *<input value={pName} onChange={e => setPName(e.target.value)} /></label>
+                            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Scientific name<input value={pSci} onChange={e => setPSci(e.target.value)} /></label>
+                            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Nickname<input value={pNick} onChange={e => setPNick(e.target.value)} /></label>
+                            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
+                              Location
+                              <select value={pLoc} onChange={e => setPLoc(e.target.value as Location)}>
+                                <option value="indoor">Indoor</option>
+                                <option value="outdoor">Outdoor</option>
+                                <option value="porch">Porch</option>
+                                <option value="garden">Garden</option>
+                              </select>
+                            </label>
+                            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Window / Spot<input value={pSpot} onChange={e => setPSpot(e.target.value)} /></label>
+                            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Pot size<input value={pPot} onChange={e => setPPot(e.target.value)} /></label>
+                          </div>
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+                            Notes<textarea value={pNotes} onChange={e => setPNotes(e.target.value)} style={{ minHeight: 50 }} />
+                          </label>
+                          <button className="btn primary" onClick={savePlant} disabled={pSaving || !pName.trim()}>
+                            <Save size={13} /> {pSaving ? 'Saving...' : 'Save Changes'}
+                          </button>
+                        </div>
+                      )}
 
                       {/* Action bar */}
                       <div style={{ display: 'flex', gap: 8, padding: '12px 0 16px', flexWrap: 'wrap' }}>
