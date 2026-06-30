@@ -22,10 +22,11 @@ import MoodTracker from './MoodTracker';
 import PlantCatalog from './PlantCatalog';
 import WeatherWidget from './WeatherWidget';
 import WorkCalendar from './WorkCalendar';
+import PackageTracking from './PackageTracking';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'mood' | 'weather' | 'plants' | 'settings';
+type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'mood' | 'weather' | 'plants' | 'packages' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -224,7 +225,8 @@ const homeNav: readonly NavEntry[] = [
   ['weather', 'Weather', Cloud],
   ['plants', 'Plant Catalog', Flower2],
   ['contacts', 'Contacts', Users],
-  ['books', 'Library', BookOpen]
+  ['books', 'Library', BookOpen],
+  ['packages', 'Packages', Inbox]
 ];
 
 const workNav: readonly NavEntry[] = [
@@ -1632,6 +1634,7 @@ Kaylee`;
           {page === 'course_notes' && activeRole === 'admin' && <CourseNotes />}
           {page === 'mood' && <MoodTracker />}
           {page === 'plants' && <PlantCatalog />}
+          {page === 'packages' && session && <PackageTracking userId={session.user.id} />}
           {page === 'weather' && <WeatherWidget />}
           {page === 'outreach' && activeRole === 'admin' && <Outreach drafts={drafts} students={students} generateCohortDrafts={generateCohortDrafts} updateDraft={updateDraft} markDraftSent={markDraftSent} deleteDraft={deleteDraft} />}
           {page === 'settings' && activeRole === 'admin' && <SettingsPage permissions={permissions} updatePermission={updatePermission} />}
