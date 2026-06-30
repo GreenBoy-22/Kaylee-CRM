@@ -22,11 +22,10 @@ import MoodTracker from './MoodTracker';
 import PlantCatalog from './PlantCatalog';
 import WeatherWidget from './WeatherWidget';
 import WorkCalendar from './WorkCalendar';
-import PackageTracking from './PackageTracking';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'mood' | 'weather' | 'plants' | 'packages' | 'settings';
+type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'mood' | 'weather' | 'plants' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -215,18 +214,18 @@ const homeNav: readonly NavEntry[] = [
   ['briefing', 'Daily Briefing', Sparkles],
   ['calendar', 'Calendar', CalendarDays],
   ['budget', 'Budget', WalletCards],
-  ['inventory', 'Inventory', Inbox],
   ['chores', 'Chores & Tasks', ListTodo],
-  ['vehicles', 'Vehicles', Car],
-  ['jules', 'Jules', Heart],
-  ['migraine', 'Migraine Tracker', Brain],
-  ['suggestions', 'Home Suggestions', Home],
-  ['mood', 'Mood Log', Activity],
-  ['weather', 'Weather', Cloud],
-  ['plants', 'Plant Catalog', Flower2],
   ['contacts', 'Contacts', Users],
+  ['suggestions', 'Home Suggestions', Home],
+  ['inventory', 'Inventory', Inbox],
+  ['jules', 'Jules', Heart],
   ['books', 'Library', BookOpen],
-  ['packages', 'Packages', Inbox]
+  ['migraine', 'Migraine Tracker', Brain],
+  ['mood', 'Mood Log', Activity],
+  ['packages', 'Packages', Inbox],
+  ['plants', 'Plant Catalog', Flower2],
+  ['vehicles', 'Vehicles', Car],
+  ['weather', 'Weather', Cloud]
 ];
 
 const workNav: readonly NavEntry[] = [
@@ -234,10 +233,10 @@ const workNav: readonly NavEntry[] = [
   ['today', 'Today’s Tasks', ClipboardCheck],
   ['briefing', 'Daily Briefing', Sparkles],
   ['calendar', 'Calendar', CalendarDays],
-  ['students', 'Students', Users],
-  ['outreach', 'Outreach Drafts', Mail],
+  ['course_notes', 'Course Notes', BookOpen],
   ['fto', 'FTO Tracker', Clock],
-  ['course_notes', 'Course Notes', BookOpen]
+  ['outreach', 'Outreach Drafts', Mail],
+  ['students', 'Students', Users]
 ];
 
 const moduleMeta: { page: Page; module_name: string; label: string; default_access: AccessLevel }[] = [
@@ -1634,7 +1633,6 @@ Kaylee`;
           {page === 'course_notes' && activeRole === 'admin' && <CourseNotes />}
           {page === 'mood' && <MoodTracker />}
           {page === 'plants' && <PlantCatalog />}
-          {page === 'packages' && session && <PackageTracking userId={session.user.id} />}
           {page === 'weather' && <WeatherWidget />}
           {page === 'outreach' && activeRole === 'admin' && <Outreach drafts={drafts} students={students} generateCohortDrafts={generateCohortDrafts} updateDraft={updateDraft} markDraftSent={markDraftSent} deleteDraft={deleteDraft} />}
           {page === 'settings' && activeRole === 'admin' && <SettingsPage permissions={permissions} updatePermission={updatePermission} />}
