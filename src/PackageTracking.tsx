@@ -126,6 +126,14 @@ export default function PackageTracking({ userId }: { userId: string }) {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
 
+      // Get the Google provider token from the session
+      const providerToken = (session as any).provider_token;
+      if (!providerToken) {
+        setScanError('Google access token not available. Please go to Settings → Reconnect Google Account, then try again.');
+        setScanning(false);
+        return;
+      }
+
       const response = await fetch(
         `https://uccehajbwxzqdzvexzuc.supabase.co/functions/v1/ai-proxy`,
         {
@@ -136,31 +144,7 @@ export default function PackageTracking({ userId }: { userId: string }) {
           },
           body: JSON.stringify({
             _gmail_tracking_scan: true,
-            model: 'claude-sonnet-4-6',
-            max_tokens: 4000,
-            messages: [{
-              role: 'user',
-              content: `Search my Gmail inbox for shipping/tracking emails from the last 60 days.
-Look for emails containing: tracking number, shipped, your order has shipped, out for delivery, package, delivery notification.
-For each email found, extract:
-- tracking_number (the actual tracking code)
-- carrier (UPS, USPS, FedEx, Amazon, DHL, OnTrac, LaserShip, or Unknown)
-- item_description (what was ordered, if mentioned)
-- retailer (Amazon, Etsy, Target, Walmart, Chewy, etc.)
-- expected_delivery (date if mentioned, as YYYY-MM-DD)
-- subject (email subject)
-- date (email date as ISO string)
-- snippet (brief excerpt)
-- threadId (Gmail thread ID)
-
-Return ONLY a JSON array of objects with exactly those fields. No markdown, no explanation.
-If no tracking emails found, return [].`,
-            }],
-            mcp_servers: [{
-              type: 'url',
-              url: 'https://gmailmcp.googleapis.com/mcp/v1',
-              name: 'gmail-mcp',
-            }],
+            provider_token: providerToken,
           }),
         }
       );
