@@ -140,8 +140,11 @@ export default function PackageTracking({ userId }: { userId: string }) {
         }
       );
 
-      if (!response.ok) throw new Error(`Edge function error: ${response.status}`);
       const data = await response.json();
+      if (!response.ok) {
+        const errMsg = data?.error || `Edge function error: ${response.status}`;
+        throw new Error(errMsg);
+      }
 
       // Extract text from response
       const textBlocks = (data.content || [])
