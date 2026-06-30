@@ -140,11 +140,8 @@ export default function PackageTracking({ userId }: { userId: string }) {
         }
       );
 
+      if (!response.ok) throw new Error(`Edge function error: ${response.status}`);
       const data = await response.json();
-      if (!response.ok) {
-        const errMsg = data?.error || `Edge function error: ${response.status}`;
-        throw new Error(errMsg);
-      }
 
       // Extract text from response
       const textBlocks = (data.content || [])
@@ -157,8 +154,14 @@ export default function PackageTracking({ userId }: { userId: string }) {
       const results: EmailCandidate[] = JSON.parse(clean || '[]');
 
       // Filter out already-saved tracking numbers
-      const existing = new Set(packages.map(p => p.tracking_number));
-      const fresh = results.filter(r => r.tracking_number && !existing.has(r.tracking_number));
+      const existingTracking = new Set(packages.map(p => p.tracking_number).filter(Boolean));
+      const existingSubjects = new Set(packages.map(p => p.email_subject).filter(Boolean));
+      const fresh = results.filter(r => {
+        // Dedup by tracking number when present, otherwise by subject line
+        if (r.tracking_number) return !existingTracking.has(r.tracking_number);
+        if (r.subject) return !existingSubjects.has(r.subject);
+        return true;
+      });
 
       setScanResults(fresh);
       // Auto-select all by default
@@ -184,7 +187,7 @@ export default function PackageTracking({ userId }: { userId: string }) {
       const r = scanResults[i];
       return {
         user_id: userId,
-        tracking_number: r.tracking_number,
+        tracking_number: r.tracking_number || `no-tracking-${r.threadId || Date.now()}`,
         carrier: r.carrier || null,
         item_description: r.item_description || null,
         retailer: r.retailer || null,
@@ -427,7 +430,7 @@ export default function PackageTracking({ userId }: { userId: string }) {
                 <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
                   {r.carrier && <span style={{ marginRight: 8 }}>🚚 {r.carrier}</span>}
                   {r.retailer && <span style={{ marginRight: 8 }}>🏪 {r.retailer}</span>}
-                  <span style={{ fontFamily: 'monospace' }}>{r.tracking_number}</span>
+                  <span style={{ fontFamily: 'monospace' }}>{r.tracking_number || 'No tracking #'}</span>
                   {r.expected_delivery && <span style={{ marginLeft: 8 }}>📅 {formatDate(r.expected_delivery)}</span>}
                 </div>
               </div>
