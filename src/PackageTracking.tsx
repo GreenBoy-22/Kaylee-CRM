@@ -126,14 +126,6 @@ export default function PackageTracking({ userId }: { userId: string }) {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
 
-      // Get the Google provider token from the session
-      const providerToken = (session as any).provider_token;
-      if (!providerToken) {
-        setScanError('Google access token not available. Please go to Settings → Reconnect Google Account, then try again.');
-        setScanning(false);
-        return;
-      }
-
       const response = await fetch(
         `https://uccehajbwxzqdzvexzuc.supabase.co/functions/v1/ai-proxy`,
         {
@@ -144,7 +136,6 @@ export default function PackageTracking({ userId }: { userId: string }) {
           },
           body: JSON.stringify({
             _gmail_tracking_scan: true,
-            provider_token: providerToken,
           }),
         }
       );
