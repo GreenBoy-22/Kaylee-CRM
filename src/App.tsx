@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import {
   Activity, Cloud, Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
-  Inbox, ListTodo, ShieldCheck, Car, Gamepad2, Plus, Copy, RefreshCw, Settings, LogOut,
+  Inbox, ListTodo, ShieldCheck, Car, Gamepad2, Film, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
   CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon
 } from 'lucide-react';
@@ -24,10 +24,11 @@ import WeatherWidget from './WeatherWidget';
 import WorkCalendar from './WorkCalendar';
 import PackageTracking from './PackageTracking';
 import Games from './Games';
+import Media from './Media';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'mood' | 'weather' | 'plants' | 'packages' | 'games' | 'settings';
+type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'mood' | 'weather' | 'plants' | 'packages' | 'games' | 'media' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -223,6 +224,7 @@ const homeNav: readonly NavEntry[] = [
   ['inventory', 'Inventory', Inbox],
   ['jules', 'Jules', Heart],
   ['books', 'Library', BookOpen],
+  ['media', 'Movies & TV', Film],
   ['migraine', 'Migraine Tracker', Brain],
   ['mood', 'Mood Log', Activity],
   ['packages', 'Packages', Inbox],
@@ -1638,6 +1640,7 @@ Kaylee`;
           {page === 'plants' && <PlantCatalog />}
           {page === 'packages' && session && <PackageTracking userId={session.user.id} />}
           {page === 'games' && <Games />}
+          {page === 'media' && <Media />}
           {page === 'weather' && <WeatherWidget />}
           {page === 'outreach' && activeRole === 'admin' && <Outreach drafts={drafts} students={students} generateCohortDrafts={generateCohortDrafts} updateDraft={updateDraft} markDraftSent={markDraftSent} deleteDraft={deleteDraft} />}
           {page === 'settings' && activeRole === 'admin' && <SettingsPage permissions={permissions} updatePermission={updatePermission} />}
