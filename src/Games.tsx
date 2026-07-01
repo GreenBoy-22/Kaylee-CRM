@@ -272,6 +272,9 @@ export default function Games() {
   const [manualPlayTime, setManualPlayTime] = useState('');
   const [manualComplexity, setManualComplexity] = useState('');
   const [showManual, setShowManual]         = useState(false);
+  const [fetchingCovers, setFetchingCovers] = useState(false);
+  const [coverMsg, setCoverMsg]             = useState('');
+
 
   // ── Load ────────────────────────────────────────────────────────────
   const loadGames = useCallback(async () => {
@@ -283,6 +286,27 @@ export default function Games() {
   }, []);
 
   useEffect(() => { loadGames(); }, [loadGames]);
+
+  // ── Fetch covers via edge function ─────────────────────────────────
+  async function fetchCovers() {
+    if (!supabase) return;
+    setFetchingCovers(true);
+    setCoverMsg('Fetching covers — this may take a minute for 271 games…');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { setFetchingCovers(false); return; }
+    try {
+      const resp = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-game-covers`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` } }
+      );
+      const data = await resp.json();
+      setCoverMsg(data.message || `Updated ${data.updated} covers`);
+      await loadGames();
+    } catch (e) {
+      setCoverMsg('Error fetching covers. Try again.');
+    }
+    setFetchingCovers(false);
+  }
 
   // ── Add from RAWG result ────────────────────────────────────────────
   async function addFromRAWG(result: RAWGResult, status: PlayStatus = 'backlog') {
@@ -445,8 +469,18 @@ export default function Games() {
           <button className="btn primary" onClick={() => setShowAdd(v => !v)}>
             <Plus size={15} /> Add Game
           </button>
+          <button className="btn ghost" onClick={fetchCovers} disabled={fetchingCovers} title="Fetch cover art from RAWG and BoardGameGeek">
+            <RefreshCw size={15} className={fetchingCovers ? 'spin' : ''} /> {fetchingCovers ? 'Fetching…' : 'Fetch Covers'}
+          </button>
         </div>
       </div>
+
+      {coverMsg && (
+        <section className="panel" style={{ borderLeft: '3px solid var(--purple)', padding: '10px 14px', fontSize: 13 }}>
+          {fetchingCovers && <RefreshCw size={13} className="spin" style={{ marginRight: 6, verticalAlign: 'middle' }} />}
+          {coverMsg}
+        </section>
+      )}
 
       {/* Stats row */}
       <div className="stats-row">
