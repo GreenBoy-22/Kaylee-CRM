@@ -287,21 +287,38 @@ export default function Games() {
 
   useEffect(() => { loadGames(); }, [loadGames]);
 
-  // ── Fetch covers via edge function ─────────────────────────────────
+  // ── Fetch covers via edge function (batched loop) ──────────────────
   async function fetchCovers() {
     if (!supabase) return;
     setFetchingCovers(true);
-    setCoverMsg('Fetching covers — this may take a minute for 271 games…');
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { setFetchingCovers(false); return; }
+
+    let totalUpdated = 0;
+    let batchNum = 0;
+
     try {
-      const resp = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-game-covers`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` } }
-      );
-      const data = await resp.json();
-      setCoverMsg(data.message || `Updated ${data.updated} covers`);
-      await loadGames();
+      while (true) {
+        batchNum++;
+        setCoverMsg(`Fetching covers — batch ${batchNum} in progress…`);
+        const resp = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-game-covers`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` } }
+        );
+        if (!resp.ok) { setCoverMsg('Error fetching covers. Try again.'); break; }
+        const data = await resp.json();
+        totalUpdated += data.updated ?? 0;
+        setCoverMsg(data.message || `Batch ${batchNum}: ${data.updated} covers found`);
+        if (data.done || data.remaining === 0) {
+          await loadGames();
+          setCoverMsg(`✅ All done! Found covers for ${totalUpdated} games total.`);
+          break;
+        }
+        // Reload games between batches so UI shows progress
+        await loadGames();
+        // Small pause between batches
+        await new Promise(r => setTimeout(r, 500));
+      }
     } catch (e) {
       setCoverMsg('Error fetching covers. Try again.');
     }
