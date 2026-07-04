@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Plus, Search, RefreshCw, Star, CheckCircle2, Clock,
   Heart, X, ChevronDown, ChevronUp, List, LayoutGrid,
-  Tv, Film, Play, Pause, RotateCcw, Sparkles, Eye,
+  Tv, Film, Play, Pause, RotateCcw, Sparkles, Eye, Zap,
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
@@ -65,6 +65,26 @@ type TMDBResult = {
 
 type SortKey = 'title' | 'year' | 'genre' | 'status' | 'rating' | 'date_added';
 type ViewMode = 'grid' | 'list';
+
+const MOODS = [
+  { label: '🎬 Something epic',      prompt: 'epic action-packed blockbuster or war film' },
+  { label: '😂 Make me laugh',        prompt: 'hilarious comedy or feel-good movie' },
+  { label: '😢 Feel something deep',  prompt: 'emotional or thought-provoking drama' },
+  { label: '😱 Edge of my seat',      prompt: 'suspenseful thriller or mystery' },
+  { label: '🧚 Cozy & magical',       prompt: 'cozy fantasy or feel-good family film' },
+  { label: '💕 Romance me',           prompt: 'romantic movie or love story' },
+  { label: '🤯 Mind-bending',         prompt: 'mind-bending sci-fi or psychological film' },
+  { label: '🎃 Spooky vibes',         prompt: 'horror or supernatural thriller' },
+  { label: '🌍 True story',           prompt: 'biographical or historical drama' },
+  { label: '⚡ Short & fun',          prompt: 'light quick fun movie under 100 minutes' },
+  { label: '🎵 Music & art',          prompt: 'musical, music documentary, or arts film' },
+  { label: '🌏 Something different',  prompt: 'foreign film, indie gem, or lesser-known hidden gem' },
+];
+
+const STREAMING_SERVICES = [
+  'Netflix', 'Disney+', 'Max', 'Hulu', 'Prime Video',
+  'Apple TV+', 'Peacock', 'Paramount+', 'Crunchyroll', 'Other',
+];
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -218,6 +238,18 @@ export default function Media() {
   const [viewMode, setViewMode]         = useState<ViewMode>('grid');
   const [expandedId, setExpandedId]     = useState<string | null>(null);
 
+  // AI suggestion state
+  const [suggestion, setSuggestion]         = useState<string | null>(null);
+  const [suggesting, setSuggesting]         = useState(false);
+  const [activeMood, setActiveMood]         = useState<string | null>(null);
+
+  // Quick-add wishlist state
+  const [showQuickAdd, setShowQuickAdd]     = useState(false);
+  const [qaTitle, setQaTitle]               = useState('');
+  const [qaService, setQaService]           = useState('Netflix');
+  const [qaNotes, setQaNotes]               = useState('');
+  const [qaSaving, setQaSaving]             = useState(false);
+
   // Add panel
   const [showAdd, setShowAdd]           = useState(false);
   const [tmdbQuery, setTmdbQuery]       = useState('');
@@ -329,6 +361,73 @@ export default function Media() {
     await supabase.from('media').delete().eq('id', id);
   }
 
+  // ── AI suggestion ─────────────────────────────────────────────────────
+  async function getSuggestion(mood: { label: string; prompt: string }) {
+    if (!supabase) return;
+    setSuggesting(true);
+    setActiveMood(mood.label);
+    setSuggestion(null);
+
+    // Build list of watched titles for context
+    const watched = items.filter(i => i.status === 'watched' || i.status === 'rewatching');
+    const watchlist = items.filter(i => i.status === 'want_to_watch');
+    const watchedTitles = watched.slice(0, 40).map(i => i.title).join(', ');
+    const watchlistTitles = watchlist.slice(0, 20).map(i => i.title).join(', ');
+
+    const prompt = `You are a movie and TV show recommendation expert for Kaylee's personal collection.
+
+Mood requested: "${mood.prompt}"
+
+Movies/shows already watched (sample): ${watchedTitles || 'various films'}
+Currently on watchlist: ${watchlistTitles || 'nothing yet'}
+
+Suggest 3 movies or TV shows that match the mood. For each one give:
+- Title and year
+- One sentence on why it fits this mood perfectly
+- Whether it's a movie or TV show
+
+Keep it conversational and enthusiastic. Don't suggest anything already in their watched list. Format as a short punchy list.`;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { setSuggesting(false); return; }
+
+      const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-proxy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], max_tokens: 500 }),
+      });
+      const data = await resp.json();
+      const text = data?.content?.[0]?.text ?? data?.choices?.[0]?.message?.content ?? null;
+      setSuggestion(text);
+    } catch { setSuggestion('Could not get suggestions right now. Try again!'); }
+    setSuggesting(false);
+  }
+
+  // ── Quick-add to watchlist ─────────────────────────────────────────────
+  async function quickAddToWatchlist() {
+    if (!supabase || !qaTitle.trim()) return;
+    setQaSaving(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { setQaSaving(false); return; }
+    const row = {
+      user_id: session.user.id,
+      title: qaTitle.trim(),
+      media_type: 'movie' as MediaType,
+      status: 'want_to_watch' as WatchStatus,
+      streaming_services: qaService !== 'Other' ? qaService : null,
+      notes: qaNotes.trim() || null,
+      owned: false,
+    };
+    const { data, error } = await supabase.from('media').insert(row).select().single();
+    if (!error && data) {
+      setItems(prev => [...prev, data as MediaItem].sort((a, b) => a.title.localeCompare(b.title)));
+      setQaTitle(''); setQaService('Netflix'); setQaNotes('');
+      setShowQuickAdd(false);
+    }
+    setQaSaving(false);
+  }
+
   // ── Refresh streaming info ────────────────────────────────────────────
   async function refreshStreaming(item: MediaItem) {
     if (!item.tmdb_id || !hasApiKey) return;
@@ -410,10 +509,13 @@ export default function Media() {
       <div className="page-header">
         <div>
           <h1>Movies & TV</h1>
-          <p>{stats.movies} movies · {stats.tv} shows · {stats.watched} watched · {stats.watching} in progress · {stats.want_to_watch} on watchlist</p>
+          <p>{stats.movies} movies · {stats.tv} shows · {stats.watched} watched · {stats.watching} in progress · <span style={{ color: '#6366f1', fontWeight: 600 }}>{stats.want_to_watch} on watchlist</span></p>
         </div>
         <div className="actions">
-          <button className="btn primary" onClick={() => setShowAdd(v => !v)}>
+          <button className="btn ghost" onClick={() => { setShowQuickAdd(v => !v); setShowAdd(false); }} style={{ color: '#6366f1', borderColor: '#6366f1' }}>
+            <Zap size={15} /> Saw it on…
+          </button>
+          <button className="btn primary" onClick={() => { setShowAdd(v => !v); setShowQuickAdd(false); }}>
             <Plus size={15} /> Add Title
           </button>
         </div>
@@ -441,6 +543,81 @@ export default function Media() {
           </div>
         ))}
       </div>
+
+      {/* ── Quick-add watchlist panel ─────────────────────────────────── */}
+      {showQuickAdd && (
+        <section className="panel" style={{ borderLeft: '3px solid #6366f1' }}>
+          <div className="panel-head">
+            <h2 style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Zap size={15} style={{ color: '#6366f1' }} /> Saw something? Save it!</h2>
+            <button className="btn ghost" onClick={() => setShowQuickAdd(false)}>Close</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <input
+                placeholder="Title (movie or show)…"
+                value={qaTitle}
+                onChange={e => setQaTitle(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && quickAddToWatchlist()}
+                style={{ flex: '2 1 200px' }}
+                autoFocus
+              />
+              <select value={qaService} onChange={e => setQaService(e.target.value)} style={{ flex: '1 1 120px' }}>
+                {STREAMING_SERVICES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <input
+              placeholder="Optional note (e.g. 'looks hilarious', 'Adam recommended it')…"
+              value={qaNotes}
+              onChange={e => setQaNotes(e.target.value)}
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn primary" onClick={quickAddToWatchlist} disabled={!qaTitle.trim() || qaSaving}>
+                {qaSaving ? <RefreshCw size={13} className="spin" /> : <Heart size={13} />}
+                {qaSaving ? 'Saving…' : 'Add to Watchlist'}
+              </button>
+              <button className="btn ghost" onClick={() => setShowQuickAdd(false)}>Cancel</button>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ── AI What to Watch ─────────────────────────────────────────────── */}
+      <section className="panel" style={{ borderLeft: '3px solid #7C3AED' }}>
+        <div className="panel-head" style={{ marginBottom: 10 }}>
+          <h2 style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Sparkles size={15} style={{ color: '#7C3AED' }} /> What should I watch?
+          </h2>
+          {suggestion && (
+            <button className="btn ghost tiny" onClick={() => { setSuggestion(null); setActiveMood(null); }}>
+              <X size={11} /> Clear
+            </button>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: suggestion || suggesting ? 12 : 0 }}>
+          {MOODS.map(mood => (
+            <button
+              key={mood.label}
+              className={activeMood === mood.label ? 'btn primary tiny' : 'btn ghost tiny'}
+              onClick={() => getSuggestion(mood)}
+              disabled={suggesting}
+              style={{ fontSize: 12 }}
+            >
+              {suggesting && activeMood === mood.label ? <RefreshCw size={11} className="spin" /> : null}
+              {mood.label}
+            </button>
+          ))}
+        </div>
+        {suggesting && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--muted)', fontSize: 13 }}>
+            <RefreshCw size={13} className="spin" /> Finding the perfect pick for you…
+          </div>
+        )}
+        {suggestion && !suggesting && (
+          <div style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap', background: '#7C3AED11', borderRadius: 8, padding: '12px 14px', color: 'var(--text)' }}>
+            {suggestion}
+          </div>
+        )}
+      </section>
 
       {/* Add panel */}
       {showAdd && (
