@@ -94,11 +94,25 @@ const BLANK_ITEM: Omit<TravelItem, 'id' | 'trip_id' | 'user_id' | 'created_at' |
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+// Times are stored as 24h "HH:MM" strings; always display as 12h with AM/PM.
+function formatTime12h(time: string | null | undefined): string | null {
+  if (!time) return null;
+  const match = time.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return time;
+  let h = parseInt(match[1], 10);
+  const m = match[2];
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12;
+  if (h === 0) h = 12;
+  return `${h}:${m} ${ampm}`;
+}
+
 function fmt(date: string | null, time?: string | null) {
   if (!date) return null;
   const d = new Date(date + 'T00:00:00');
   const dateStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
-  return time ? `${dateStr} at ${time}` : dateStr;
+  const time12 = formatTime12h(time);
+  return time12 ? `${dateStr} at ${time12}` : dateStr;
 }
 
 function nightsBetween(start: string | null, end: string | null) {
@@ -939,7 +953,7 @@ function FlightItineraryCard({ legs, onDeleteLeg }: { legs: TravelItem[]; onDele
                 <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', letterSpacing: 0.5 }}>DEPARTS</div>
                 <div style={{ fontSize: 14 }}>
                   <span style={{ fontWeight: 700 }}>{leg.origin_code ?? ''}</span>{' '}
-                  {leg.start_time && <span style={{ color: '#D97706', fontWeight: 700 }}>{leg.start_time}</span>}
+                  {leg.start_time && <span style={{ color: '#D97706', fontWeight: 700 }}>{formatTime12h(leg.start_time)}</span>}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)' }}>{leg.origin_city ?? ''}</div>
               </div>
@@ -948,7 +962,7 @@ function FlightItineraryCard({ legs, onDeleteLeg }: { legs: TravelItem[]; onDele
                 <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', letterSpacing: 0.5 }}>ARRIVES</div>
                 <div style={{ fontSize: 14 }}>
                   <span style={{ fontWeight: 700 }}>{leg.destination_code ?? ''}</span>{' '}
-                  {leg.end_time && <span style={{ color: '#D97706', fontWeight: 700 }}>{leg.end_time}</span>}
+                  {leg.end_time && <span style={{ color: '#D97706', fontWeight: 700 }}>{formatTime12h(leg.end_time)}</span>}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)' }}>{leg.destination_city ?? ''}</div>
               </div>
