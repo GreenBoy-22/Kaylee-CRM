@@ -27,6 +27,13 @@ type Trip = {
   created_at: string;
 };
 
+type HistoryEntry = {
+  at: string;
+  note: string;
+  source?: string;
+  changes?: Record<string, { old: any; new: any }>;
+};
+
 type TravelItem = {
   id: string;
   trip_id: string;
@@ -35,17 +42,25 @@ type TravelItem = {
   title: string;
   provider: string | null;
   confirmation_number: string | null;
+  flight_number: string | null;
   start_date: string | null;
   start_time: string | null;
   end_date: string | null;
   end_time: string | null;
   location: string | null;
+  origin_code: string | null;
+  origin_city: string | null;
+  destination_code: string | null;
+  destination_city: string | null;
   address: string | null;
   phone: string | null;
   website: string | null;
   price: string | null;
   notes: string | null;
+  passenger_name: string | null;
+  leg_order: number | null;
   email_subject: string | null;
+  history: HistoryEntry[];
   created_at: string;
 };
 
@@ -69,11 +84,12 @@ const ITEM_CONFIG: Record<ItemType, { label: string; icon: React.ElementType; co
   other:      { label: 'Other',       icon: MapPin,   color: '#6b7280', emoji: '📍' },
 };
 
-const BLANK_ITEM: Omit<TravelItem, 'id' | 'trip_id' | 'user_id' | 'created_at'> = {
-  type: 'flight', title: '', provider: null, confirmation_number: null,
+const BLANK_ITEM: Omit<TravelItem, 'id' | 'trip_id' | 'user_id' | 'created_at' | 'history'> = {
+  type: 'flight', title: '', provider: null, confirmation_number: null, flight_number: null,
   start_date: null, start_time: null, end_date: null, end_time: null,
-  location: null, address: null, phone: null, website: null,
-  price: null, notes: null, email_subject: null,
+  location: null, origin_code: null, origin_city: null, destination_code: null, destination_city: null,
+  address: null, phone: null, website: null,
+  price: null, notes: null, passenger_name: null, leg_order: null, email_subject: null,
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -96,6 +112,90 @@ function tripDuration(trip: Trip) {
   const n = nightsBetween(trip.start_date, trip.end_date);
   if (!n) return null;
   return `${n} ${n === 1 ? 'night' : 'nights'}`;
+}
+
+// Known provider → domain map, used to pull a real logo/photo for the
+// company a reservation is with (via Clearbit's free public logo API).
+const PROVIDER_DOMAINS: [RegExp, string][] = [
+  [/delta/i, 'delta.com'],
+  [/american airlines|\baa\b/i, 'aa.com'],
+  [/southwest/i, 'southwest.com'],
+  [/united/i, 'united.com'],
+  [/jetblue/i, 'jetblue.com'],
+  [/spirit/i, 'spirit.com'],
+  [/frontier/i, 'flyfrontier.com'],
+  [/marriott/i, 'marriott.com'],
+  [/hilton/i, 'hilton.com'],
+  [/holiday inn|intercontinental|\bihg\b/i, 'ihg.com'],
+  [/hyatt/i, 'hyatt.com'],
+  [/airbnb/i, 'airbnb.com'],
+  [/vrbo/i, 'vrbo.com'],
+  [/hotels\.com/i, 'hotels.com'],
+  [/booking\.com/i, 'booking.com'],
+  [/expedia/i, 'expedia.com'],
+  [/enterprise/i, 'enterprise.com'],
+  [/hertz/i, 'hertz.com'],
+  [/\bbudget\b/i, 'budget.com'],
+  [/\bavis\b/i, 'avis.com'],
+  [/national car|nationalcar/i, 'nationalcar.com'],
+  [/alamo/i, 'alamo.com'],
+  [/carnival/i, 'carnival.com'],
+  [/royal caribbean/i, 'royalcaribbean.com'],
+  [/norwegian cruise|\bncl\b/i, 'ncl.com'],
+  [/disney/i, 'disney.com'],
+  [/universal/i, 'universalorlando.com'],
+  [/seaworld/i, 'seaworld.com'],
+  [/six flags/i, 'sixflags.com'],
+  [/autocamp/i, 'autocamp.com'],
+  [/amtrak/i, 'amtrak.com'],
+];
+
+function getProviderLogo(provider: string | null): string | null {
+  if (!provider) return null;
+  for (const [re, domain] of PROVIDER_DOMAINS) {
+    if (re.test(provider)) return `https://logo.clearbit.com/${domain}?size=96`;
+  }
+  return null;
+}
+
+// Groups flight legs that share a confirmation number into a single
+// itinerary card (matching how airlines present multi-leg trips), while
+// hotels/cars/other items render individually.
+type ItemGroup =
+  | { kind: 'flight'; legs: TravelItem[] }
+  | { kind: 'single'; item: TravelItem };
+
+function groupTripItems(items: TravelItem[]): ItemGroup[] {
+  const flightGroups: Record<string, TravelItem[]> = {};
+  const singles: TravelItem[] = [];
+
+  for (const item of items) {
+    if (item.type === 'flight' && item.confirmation_number) {
+      const key = item.confirmation_number;
+      (flightGroups[key] ??= []).push(item);
+    } else {
+      singles.push(item);
+    }
+  }
+
+  const groups: ItemGroup[] = [];
+  for (const key of Object.keys(flightGroups)) {
+    const legs = flightGroups[key].sort((a, b) => {
+      if ((a.leg_order ?? 0) !== (b.leg_order ?? 0)) return (a.leg_order ?? 0) - (b.leg_order ?? 0);
+      const ad = `${a.start_date ?? ''}${a.start_time ?? ''}`;
+      const bd = `${b.start_date ?? ''}${b.start_time ?? ''}`;
+      return ad < bd ? -1 : ad > bd ? 1 : 0;
+    });
+    groups.push({ kind: 'flight', legs });
+  }
+  for (const item of singles) groups.push({ kind: 'single', item });
+
+  groups.sort((a, b) => {
+    const da = a.kind === 'flight' ? (a.legs[0]?.start_date ?? '') : (a.item.start_date ?? '');
+    const db = b.kind === 'flight' ? (b.legs[0]?.start_date ?? '') : (b.item.start_date ?? '');
+    return da < db ? -1 : da > db ? 1 : 0;
+  });
+  return groups;
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -126,6 +226,12 @@ export default function Travel({ userId }: { userId: string }) {
 
   // Edit trip
   const [editingTrip, setEditingTrip]   = useState<Trip | null>(null);
+
+  // Paste Email modal
+  const [showPasteEmail, setShowPasteEmail] = useState(false);
+  const [pasteText, setPasteText]           = useState('');
+  const [pasting, setPasting]               = useState(false);
+  const [pasteMsg, setPasteMsg]             = useState('');
 
   // ── Load ─────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -185,6 +291,36 @@ export default function Travel({ userId }: { userId: string }) {
       setScanMsg('Error scanning Gmail. Try again.');
     }
     setScanning(false);
+  }
+
+  // ── Paste email ──────────────────────────────────────────────────────
+  async function pasteEmail() {
+    if (!supabase || !pasteText.trim()) return;
+    setPasting(true);
+    setPasteMsg('');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { setPasting(false); return; }
+    try {
+      const resp = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-pasted-email`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ text: pasteText }),
+        }
+      );
+      const data = await resp.json();
+      if (data.error) {
+        setPasteMsg(`⚠️ ${data.error}`);
+      } else {
+        setPasteMsg(`✅ ${data.message}`);
+        setPasteText('');
+        await load();
+      }
+    } catch {
+      setPasteMsg('Error parsing that email. Try again.');
+    }
+    setPasting(false);
   }
 
   // ── Save new trip ─────────────────────────────────────────────────────
@@ -266,6 +402,9 @@ export default function Travel({ userId }: { userId: string }) {
             {scanning ? <RefreshCw size={15} className="spin" /> : <Mail size={15} />}
             {scanning ? 'Scanning…' : 'Scan Gmail'}
           </button>
+          <button className="btn ghost" onClick={() => { setShowPasteEmail(v => !v); setPasteMsg(''); }} style={{ color: '#2563EB', borderColor: '#2563EB' }}>
+            <FileText size={15} /> Paste Email
+          </button>
           <button className="btn primary" onClick={() => setShowNewTrip(v => !v)}>
             <Plus size={15} /> New Trip
           </button>
@@ -278,6 +417,35 @@ export default function Travel({ userId }: { userId: string }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>{scanMsg}</span>
             <button onClick={() => setScanMsg('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)' }}><X size={14} /></button>
+          </div>
+        </section>
+      )}
+
+      {/* Paste Email panel */}
+      {showPasteEmail && (
+        <section className="panel" style={{ borderLeft: '3px solid #2563EB' }}>
+          <div className="panel-head">
+            <h2>Paste an Email</h2>
+            <button className="btn ghost" onClick={() => setShowPasteEmail(false)}>Close</button>
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 10px' }}>
+            Copy the full confirmation or update email (select-all / Ctrl+A in the message, then paste below) and I'll pull out the details automatically —
+            this skips Gmail search entirely, so it works for anything: forwarded mail, other inboxes, screenshots you've transcribed, etc.
+            If it matches an existing reservation, it'll update it in place and log what changed instead of creating a duplicate.
+          </p>
+          <textarea
+            value={pasteText}
+            onChange={e => setPasteText(e.target.value)}
+            placeholder="Paste the full email here, including the subject line and body if possible…"
+            style={{ minHeight: 180, resize: 'vertical', width: '100%', fontFamily: 'inherit', fontSize: 13 }}
+          />
+          {pasteMsg && <div style={{ fontSize: 13, marginTop: 8 }}>{pasteMsg}</div>}
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button className="btn primary" onClick={pasteEmail} disabled={!pasteText.trim() || pasting}>
+              {pasting ? <RefreshCw size={13} className="spin" /> : <FileText size={13} />}
+              {pasting ? 'Parsing…' : 'Parse & Add'}
+            </button>
+            <button className="btn ghost" onClick={() => { setShowPasteEmail(false); setPasteText(''); setPasteMsg(''); }}>Cancel</button>
           </div>
         </section>
       )}
@@ -426,7 +594,17 @@ export default function Travel({ userId }: { userId: string }) {
                   <p style={{ color: 'var(--muted)', fontSize: 13, margin: '0 0 12px' }}>No reservations yet — add them below or scan Gmail.</p>
                 )}
 
-                {tripItems.map(item => <TravelItemCard key={item.id} item={item} onDelete={() => deleteItem(trip.id, item.id)} />)}
+                {groupTripItems(tripItems).map(group =>
+                  group.kind === 'flight'
+                    ? (
+                      <FlightItineraryCard
+                        key={group.legs[0].confirmation_number ?? group.legs[0].id}
+                        legs={group.legs}
+                        onDeleteLeg={(itemId) => deleteItem(trip.id, itemId)}
+                      />
+                    )
+                    : <TravelItemCard key={group.item.id} item={group.item} onDelete={() => deleteItem(trip.id, group.item.id)} />
+                )}
 
                 {/* Add item button */}
                 <button
@@ -542,44 +720,249 @@ export default function Travel({ userId }: { userId: string }) {
 
 function TravelItemCard({ item, onDelete }: { item: TravelItem; onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [logoFailed, setLogoFailed] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const cfg = ITEM_CONFIG[item.type];
   const Icon = cfg.icon;
+  const logoUrl = getProviderLogo(item.provider);
+  const nights = item.type === 'hotel' ? nightsBetween(item.start_date, item.end_date) : null;
+  const history = item.history ?? [];
+  const updateEntries = history.filter(h => h.changes && Object.keys(h.changes).length > 0);
+  const hasUpdates = updateEntries.length > 0;
 
   return (
     <div style={{ borderRadius: 8, border: '1px solid var(--border, rgba(0,0,0,0.07))', marginBottom: 8, overflow: 'hidden' }}>
-      <button
-        onClick={() => setExpanded(v => !v)}
-        style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', background: `${cfg.color}08`, border: 'none', padding: '10px 12px', cursor: 'pointer', textAlign: 'left' }}
-      >
-        <div style={{ width: 32, height: 32, borderRadius: 8, background: `${cfg.color}22`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <Icon size={16} style={{ color: cfg.color }} />
+      {/* Passenger banner — make it obvious who this reservation is for */}
+      {item.passenger_name && (
+        <div style={{ padding: '5px 12px', background: '#0891b222', fontSize: 11, fontWeight: 700, color: '#0891b2', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <Star size={10} /> FOR: {item.passenger_name.toUpperCase()}
         </div>
+      )}
+      {/* Updated banner */}
+      {hasUpdates && (
+        <div style={{ padding: '5px 12px', background: '#D9770622', fontSize: 11, fontWeight: 700, color: '#D97706', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>⚠ Updated since it was added</span>
+          <button onClick={() => setShowHistory(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#D97706', fontWeight: 700, fontSize: 11, textDecoration: 'underline' }}>
+            {showHistory ? 'Hide history' : `View history (${updateEntries.length})`}
+          </button>
+        </div>
+      )}
+      {showHistory && (
+        <div style={{ padding: '8px 12px', background: 'var(--surface-2)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {history.slice().reverse().map((h, i) => (
+            <div key={i} style={{ fontSize: 11, color: 'var(--muted)' }}>
+              <span style={{ fontWeight: 700 }}>{new Date(h.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}:</span> {h.note} {h.source ? `(${h.source})` : ''}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Header: logo, title, provider, dates, confirmation #, price */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setExpanded(v => !v)}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setExpanded(v => !v); }}
+        style={{ display: 'flex', alignItems: 'flex-start', gap: 10, width: '100%', background: `${cfg.color}08`, border: 'none', padding: '10px 12px', cursor: 'pointer', textAlign: 'left' }}
+      >
+        <div style={{ width: 40, height: 40, borderRadius: 8, background: '#fff', border: `1px solid ${cfg.color}22`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
+          {logoUrl && !logoFailed ? (
+            <img
+              src={logoUrl}
+              alt={item.provider ?? ''}
+              onError={() => setLogoFailed(true)}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 5 }}
+            />
+          ) : (
+            <div style={{ width: '100%', height: '100%', background: `${cfg.color}22`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon size={17} style={{ color: cfg.color }} />
+            </div>
+          )}
+        </div>
+
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: 13 }}>{item.title}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             {item.provider && <span>{item.provider}</span>}
-            {item.start_date && <span><Clock size={9} style={{ marginRight: 2 }} />{fmt(item.start_date, item.start_time)}</span>}
-            {item.confirmation_number && <span style={{ fontFamily: 'monospace', fontWeight: 700, color: cfg.color }}>#{item.confirmation_number}</span>}
+            {item.start_date && (
+              <span>
+                <Clock size={9} style={{ marginRight: 2 }} />
+                {fmt(item.start_date, item.start_time)}
+                {item.end_date && item.end_date !== item.start_date ? ` → ${fmt(item.end_date, item.end_time)}` : ''}
+                {nights ? ` (${nights} ${nights === 1 ? 'night' : 'nights'})` : ''}
+              </span>
+            )}
           </div>
+          {/* Always-visible location / address */}
+          {(item.location || item.address) && (
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {item.location && (
+                <span style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                  <MapPin size={10} style={{ color: cfg.color, flexShrink: 0, marginTop: 1 }} />
+                  {item.location}
+                </span>
+              )}
+              {item.address && (
+                <span style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                  <Globe size={10} style={{ color: 'var(--muted)', flexShrink: 0, marginTop: 1 }} />
+                  {item.address}
+                </span>
+              )}
+            </div>
+          )}
         </div>
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
-          {item.price && <span style={{ fontSize: 12, fontWeight: 700, color: '#059669' }}>{item.price}</span>}
-          <button onClick={e => { e.stopPropagation(); onDelete(); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', padding: 4 }}><Trash2 size={12} /></button>
-          {expanded ? <ChevronUp size={13} style={{ color: 'var(--muted)' }} /> : <ChevronDown size={13} style={{ color: 'var(--muted)' }} />}
+
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            {item.price && <span style={{ fontSize: 12, fontWeight: 700, color: '#059669' }}>{item.price}</span>}
+            <button onClick={e => { e.stopPropagation(); onDelete(); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', padding: 4 }}><Trash2 size={12} /></button>
+            {expanded ? <ChevronUp size={13} style={{ color: 'var(--muted)' }} /> : <ChevronDown size={13} style={{ color: 'var(--muted)' }} />}
+          </div>
+          {item.confirmation_number && (
+            <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 11, color: cfg.color, background: `${cfg.color}18`, padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
+              #{item.confirmation_number}
+            </span>
+          )}
         </div>
-      </button>
+      </div>
 
       {expanded && (
         <div style={{ padding: '10px 12px 12px', borderTop: '1px solid var(--border, rgba(0,0,0,0.07))', display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {item.location && <div style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'flex-start' }}><MapPin size={13} style={{ color: cfg.color, flexShrink: 0, marginTop: 1 }} /><span>{item.location}</span></div>}
-          {item.address && <div style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'flex-start' }}><Globe size={13} style={{ color: 'var(--muted)', flexShrink: 0, marginTop: 1 }} /><span>{item.address}</span></div>}
-          {item.end_date && <div style={{ fontSize: 13, display: 'flex', gap: 6 }}><Clock size={13} style={{ color: 'var(--muted)', flexShrink: 0 }} /><span>Until {fmt(item.end_date, item.end_time)}{item.type === 'hotel' ? ` (${nightsBetween(item.start_date, item.end_date)} nights)` : ''}</span></div>}
           {item.phone && <div style={{ fontSize: 13, display: 'flex', gap: 6 }}><Phone size={13} style={{ color: 'var(--muted)', flexShrink: 0 }} /><a href={`tel:${item.phone}`} style={{ color: 'var(--link)' }}>{item.phone}</a></div>}
           {item.website && <div style={{ fontSize: 13, display: 'flex', gap: 6 }}><Globe size={13} style={{ color: 'var(--muted)', flexShrink: 0 }} /><a href={item.website} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--link)' }}>{item.website}</a></div>}
           {item.notes && <div style={{ fontSize: 13, color: 'var(--muted)', fontStyle: 'italic', marginTop: 4, padding: '6px 8px', background: 'var(--surface-2)', borderRadius: 4 }}>{item.notes}</div>}
           {item.email_subject && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, display: 'flex', gap: 4 }}><Mail size={10} /><span>From email: {item.email_subject}</span></div>}
+          {history.length > 0 && !hasUpdates && (
+            <button onClick={() => setShowHistory(v => !v)} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 11, textDecoration: 'underline', padding: 0, marginTop: 4 }}>
+              {showHistory ? 'Hide history' : 'View history'}
+            </button>
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── FlightItineraryCard ────────────────────────────────────────────────────
+// Renders a full multi-leg itinerary (same confirmation #) the way an
+// airline itinerary page does: route header, confirmation, passenger,
+// an "updated" banner if anything changed, then each leg with a
+// "change planes" divider in between.
+
+function FlightItineraryCard({ legs, onDeleteLeg }: { legs: TravelItem[]; onDeleteLeg: (id: string) => void }) {
+  const [showHistory, setShowHistory] = useState(false);
+  const first = legs[0];
+  const last = legs[legs.length - 1];
+  const cfg = ITEM_CONFIG.flight;
+
+  const allHistory = legs.flatMap(l => (l.history ?? []).map(h => ({ ...h, leg: l.flight_number })));
+  const updateEntries = allHistory.filter(h => h.changes && Object.keys(h.changes).length > 0);
+  const hasUpdates = updateEntries.length > 0;
+  const passenger = legs.find(l => l.passenger_name)?.passenger_name;
+
+  const startDate = first.start_date;
+  const endDate = last.end_date ?? last.start_date;
+  const dateRange = startDate
+    ? (endDate && endDate !== startDate
+      ? `${new Date(startDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: '2-digit' })} - ${new Date(endDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: '2-digit' })}`.toUpperCase()
+      : new Date(startDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: '2-digit', year: 'numeric' }).toUpperCase())
+    : null;
+
+  return (
+    <div style={{ borderRadius: 10, border: '1px solid var(--border, rgba(0,0,0,0.08))', marginBottom: 10, overflow: 'hidden', background: 'var(--surface, #fff)' }}>
+      {/* Passenger banner */}
+      {passenger && (
+        <div style={{ padding: '6px 16px', background: '#0891b222', fontSize: 11, fontWeight: 700, color: '#0891b2', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <Star size={10} /> FOR: {passenger.toUpperCase()}
+        </div>
+      )}
+
+      {/* Route header */}
+      <div style={{ padding: '16px 16px 12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+          {dateRange && <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', letterSpacing: 0.5 }}>{dateRange}</div>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            {legs.map(l => (
+              <button key={l.id} onClick={() => onDeleteLeg(l.id)} title={`Remove ${l.flight_number ?? 'leg'}`} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', padding: 2 }}>
+                <Trash2 size={13} />
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 28, fontWeight: 800, color: 'var(--text)' }}>{first.origin_code ?? '—'}</span>
+          <Plane size={20} style={{ color: cfg.color, transform: 'rotate(90deg)' }} />
+          <span style={{ fontSize: 28, fontWeight: 800, color: 'var(--text)' }}>{last.destination_code ?? '—'}</span>
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 2 }}>
+          {first.origin_city ?? first.location ?? 'Origin'} to {last.destination_city ?? last.location ?? 'Destination'}
+        </div>
+      </div>
+
+      {/* Confirmation number */}
+      {first.confirmation_number && (
+        <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border, rgba(0,0,0,0.06))', display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>Confirmation #</span>
+          <span style={{ fontSize: 20, fontWeight: 800, color: '#059669', fontFamily: 'monospace' }}>{first.confirmation_number}</span>
+        </div>
+      )}
+
+      {/* Updated banner */}
+      {hasUpdates && (
+        <div style={{ padding: '8px 16px', background: '#D9770622', fontSize: 12, fontWeight: 700, color: '#D97706', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>⚠ Updated flight information</span>
+          <button onClick={() => setShowHistory(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#D97706', fontWeight: 700, fontSize: 12, textDecoration: 'underline' }}>
+            {showHistory ? 'Hide history' : `View history (${updateEntries.length})`}
+          </button>
+        </div>
+      )}
+      {showHistory && (
+        <div style={{ padding: '8px 16px', background: 'var(--surface-2)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {allHistory.slice().reverse().map((h, i) => (
+            <div key={i} style={{ fontSize: 11, color: 'var(--muted)' }}>
+              <span style={{ fontWeight: 700 }}>{new Date(h.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{h.leg ? ` (Flight ${h.leg})` : ''}:</span> {h.note} {h.source ? `(${h.source})` : ''}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Legs */}
+      <div style={{ padding: '4px 16px 16px' }}>
+        {legs.map((leg, idx) => (
+          <div key={leg.id}>
+            <div style={{ padding: '12px 0', borderTop: idx > 0 ? '1px solid var(--border, rgba(0,0,0,0.06))' : 'none', display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ minWidth: 70 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', letterSpacing: 0.5 }}>FLIGHT</div>
+                <div style={{ fontSize: 13, fontWeight: 700 }}>{leg.flight_number ? `#${leg.flight_number}` : '—'}</div>
+              </div>
+              <div style={{ flex: 1, minWidth: 140 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', letterSpacing: 0.5 }}>DEPARTS</div>
+                <div style={{ fontSize: 14 }}>
+                  <span style={{ fontWeight: 700 }}>{leg.origin_code ?? ''}</span>{' '}
+                  {leg.start_time && <span style={{ color: '#D97706', fontWeight: 700 }}>{leg.start_time}</span>}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{leg.origin_city ?? ''}</div>
+              </div>
+              <Plane size={16} style={{ color: cfg.color, flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 140 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', letterSpacing: 0.5 }}>ARRIVES</div>
+                <div style={{ fontSize: 14 }}>
+                  <span style={{ fontWeight: 700 }}>{leg.destination_code ?? ''}</span>{' '}
+                  {leg.end_time && <span style={{ color: '#D97706', fontWeight: 700 }}>{leg.end_time}</span>}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{leg.destination_city ?? ''}</div>
+              </div>
+              {leg.price && <div style={{ fontSize: 12, fontWeight: 700, color: '#059669' }}>{leg.price}</div>}
+            </div>
+            {leg.notes && <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', paddingBottom: 8 }}>{leg.notes}</div>}
+            {idx < legs.length - 1 && (
+              <div style={{ margin: '0 0 4px', padding: '6px 10px', background: 'var(--surface-2)', borderRadius: 6, fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Plane size={11} style={{ transform: 'rotate(90deg)' }} /> Stop: Change planes in {leg.destination_city ?? leg.destination_code ?? 'transit'}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
