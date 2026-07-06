@@ -59,6 +59,7 @@ type TravelItem = {
   notes: string | null;
   passenger_name: string | null;
   leg_order: number | null;
+  details: Record<string, string>;
   email_subject: string | null;
   history: HistoryEntry[];
   created_at: string;
@@ -89,7 +90,7 @@ const BLANK_ITEM: Omit<TravelItem, 'id' | 'trip_id' | 'user_id' | 'created_at' |
   start_date: null, start_time: null, end_date: null, end_time: null,
   location: null, origin_code: null, origin_city: null, destination_code: null, destination_city: null,
   address: null, phone: null, website: null,
-  price: null, notes: null, passenger_name: null, leg_order: null, email_subject: null,
+  price: null, notes: null, passenger_name: null, leg_order: null, details: {}, email_subject: null,
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -617,7 +618,9 @@ export default function Travel({ userId }: { userId: string }) {
                         onDeleteLeg={(itemId) => deleteItem(trip.id, itemId)}
                       />
                     )
-                    : <TravelItemCard key={group.item.id} item={group.item} onDelete={() => deleteItem(trip.id, group.item.id)} />
+                    : group.item.type === 'hotel'
+                      ? <HotelItineraryCard key={group.item.id} item={group.item} onDelete={() => deleteItem(trip.id, group.item.id)} />
+                      : <TravelItemCard key={group.item.id} item={group.item} onDelete={() => deleteItem(trip.id, group.item.id)} />
                 )}
 
                 {/* Add item button */}
@@ -977,6 +980,160 @@ function FlightItineraryCard({ legs, onDeleteLeg }: { legs: TravelItem[]; onDele
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── HotelItineraryCard ──────────────────────────────────────────────────────
+// Styled like a hotel confirmation email: dark header bar with the
+// property name, address/phone row, a check-in → nights → check-out strip,
+// then a "Room Information"-style details block.
+
+function HotelItineraryCard({ item, onDelete }: { item: TravelItem; onDelete: () => void }) {
+  const [showHistory, setShowHistory] = useState(false);
+  const history = item.history ?? [];
+  const updateEntries = history.filter(h => h.changes && Object.keys(h.changes).length > 0);
+  const hasUpdates = updateEntries.length > 0;
+  const nights = nightsBetween(item.start_date, item.end_date);
+  const detailEntries = Object.entries(item.details ?? {});
+  const mapsUrl = item.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.address)}` : null;
+
+  const dayLabel = (date: string | null) => {
+    if (!date) return null;
+    const d = new Date(date + 'T00:00:00');
+    return {
+      weekday: d.toLocaleDateString('en-US', { weekday: 'long' }),
+      monthDay: d.toLocaleDateString('en-US', { month: 'short', day: '2-digit' }).toUpperCase(),
+    };
+  };
+  const checkIn = dayLabel(item.start_date);
+  const checkOut = dayLabel(item.end_date);
+
+  return (
+    <div style={{ borderRadius: 10, border: '1px solid var(--border, rgba(0,0,0,0.08))', marginBottom: 10, overflow: 'hidden', background: 'var(--surface, #fff)' }}>
+      {item.passenger_name && (
+        <div style={{ padding: '6px 16px', background: '#0891b222', fontSize: 11, fontWeight: 700, color: '#0891b2', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <Star size={10} /> FOR: {item.passenger_name.toUpperCase()}
+        </div>
+      )}
+
+      {/* Dark header bar with hotel name */}
+      <div style={{ background: '#3a3a3a', padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ color: '#fff', fontWeight: 700, fontSize: 15, textDecoration: 'underline', textAlign: 'center', flex: 1 }}>
+          {item.provider || item.title}
+        </div>
+        <button onClick={onDelete} title="Remove reservation" style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#f87171', flexShrink: 0 }}>
+          <Trash2 size={14} />
+        </button>
+      </div>
+
+      {/* Address / phone row */}
+      {(item.address || item.phone) && (
+        <div style={{ padding: '14px 16px', display: 'flex', flexWrap: 'wrap', gap: 20, borderBottom: '1px solid var(--border, rgba(0,0,0,0.06))' }}>
+          {item.address && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flex: 1, minWidth: 180 }}>
+              <MapPin size={16} style={{ color: '#7C3AED', flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <div style={{ fontSize: 13 }}>{item.address}</div>
+                {mapsUrl && (
+                  <a href={mapsUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 700, textDecoration: 'underline', color: 'var(--link)' }}>
+                    Maps &amp; Directions »
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+          {item.phone && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <Phone size={16} style={{ color: 'var(--muted)', flexShrink: 0 }} />
+              <a href={`tel:${item.phone}`} style={{ fontSize: 13, color: 'var(--link)' }}>{item.phone}</a>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Check-in / nights / check-out */}
+      {(checkIn || checkOut) && (
+        <div style={{ padding: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottom: '1px solid var(--border, rgba(0,0,0,0.06))', flexWrap: 'wrap' }}>
+          <div style={{ textAlign: 'left' }}>
+            {checkIn && <div style={{ fontSize: 13, color: 'var(--muted)' }}>{checkIn.weekday}</div>}
+            {checkIn && <div style={{ fontSize: 17, fontWeight: 800 }}>{checkIn.monthDay}</div>}
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Check In: {formatTime12h(item.start_time) ?? '—'}</div>
+          </div>
+          {nights != null && (
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 18 }}>🌙</div>
+              <div style={{ fontWeight: 800, fontSize: 15 }}>{nights}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{nights === 1 ? 'Night' : 'Nights'}</div>
+            </div>
+          )}
+          <div style={{ textAlign: 'right' }}>
+            {checkOut && <div style={{ fontSize: 13, color: 'var(--muted)' }}>{checkOut.weekday}</div>}
+            {checkOut && <div style={{ fontSize: 17, fontWeight: 800 }}>{checkOut.monthDay}</div>}
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Check Out: {formatTime12h(item.end_time) ?? '—'}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Updated banner */}
+      {hasUpdates && (
+        <div style={{ padding: '8px 16px', background: '#D9770622', fontSize: 12, fontWeight: 700, color: '#D97706', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>⚠ Updated reservation information</span>
+          <button onClick={() => setShowHistory(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#D97706', fontWeight: 700, fontSize: 12, textDecoration: 'underline' }}>
+            {showHistory ? 'Hide history' : `View history (${updateEntries.length})`}
+          </button>
+        </div>
+      )}
+      {showHistory && (
+        <div style={{ padding: '8px 16px', background: 'var(--surface-2)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {history.slice().reverse().map((h, i) => (
+            <div key={i} style={{ fontSize: 11, color: 'var(--muted)' }}>
+              <span style={{ fontWeight: 700 }}>{new Date(h.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}:</span> {h.note} {h.source ? `(${h.source})` : ''}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Room / reservation information */}
+      <div style={{ background: '#3a3a3a', color: '#fff', padding: '8px 16px', fontWeight: 700, fontSize: 13 }}>
+        Reservation Details
+      </div>
+      <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {detailEntries.length === 0 && item.notes && (
+          <div style={{ fontSize: 13, color: 'var(--muted)', fontStyle: 'italic' }}>{item.notes}</div>
+        )}
+        {detailEntries.map(([label, value]) => (
+          <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
+            <span style={{ fontWeight: 700, color: 'var(--muted)' }}>{label}</span>
+            <span style={{ textAlign: 'right' }}>{value}</span>
+          </div>
+        ))}
+        {item.price && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 800, marginTop: 4, paddingTop: 8, borderTop: '1px solid var(--border, rgba(0,0,0,0.06))' }}>
+            <span>Total price for Stay</span>
+            <span style={{ color: '#059669' }}>{item.price}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Footer: confirmation # + website + email source */}
+      <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border, rgba(0,0,0,0.06))', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        {item.confirmation_number && (
+          <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: '#7C3AED', background: '#7C3AED18', padding: '2px 8px', borderRadius: 4 }}>
+            #{item.confirmation_number}
+          </span>
+        )}
+        {item.website && (
+          <a href={item.website} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, textDecoration: 'underline', color: 'var(--link)' }}>
+            Modify Your Reservation »
+          </a>
+        )}
+      </div>
+      {item.email_subject && (
+        <div style={{ padding: '0 16px 10px', fontSize: 11, color: 'var(--muted)', display: 'flex', gap: 4, alignItems: 'center' }}>
+          <Mail size={10} /> From email: {item.email_subject}
+        </div>
+      )}
     </div>
   );
 }
