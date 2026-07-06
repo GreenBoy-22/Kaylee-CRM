@@ -414,7 +414,14 @@ export default function Travel({ userId }: { userId: string }) {
   }
 
   // ── Filtered trips ────────────────────────────────────────────────────
-  const filtered = trips.filter(t => statusFilter === 'all' || t.status === statusFilter);
+  const filtered = trips
+    .filter(t => statusFilter === 'all' || t.status === statusFilter)
+    .sort((a, b) => {
+      if (!a.start_date && !b.start_date) return 0;
+      if (!a.start_date) return 1;
+      if (!b.start_date) return -1;
+      return a.start_date.localeCompare(b.start_date);
+    });
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (
@@ -574,6 +581,19 @@ export default function Travel({ userId }: { userId: string }) {
               style={{ padding: '14px 16px', cursor: 'pointer', display: 'flex', alignItems: 'flex-start', gap: 12 }}
               onClick={() => setExpandedTrip(isExpanded ? null : trip.id)}
             >
+              {trip.start_date && (
+                <div style={{ textAlign: 'center', flexShrink: 0, minWidth: 46 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: cfg.color, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    {new Date(trip.start_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short' })}
+                  </div>
+                  <div style={{ fontSize: 24, fontWeight: 800, lineHeight: 1, color: 'var(--text)' }}>
+                    {new Date(trip.start_date + 'T00:00:00').getDate()}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+                    {new Date(trip.start_date + 'T00:00:00').getFullYear()}
+                  </div>
+                </div>
+              )}
               <div style={{ fontSize: 28, lineHeight: 1, flexShrink: 0 }}>{cfg.emoji}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
