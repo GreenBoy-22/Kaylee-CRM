@@ -55,7 +55,7 @@ const CATEGORIES = [
 
 const UNITS = ['each', 'oz', 'lbs', 'gal', 'qt', 'pint', 'fl oz', 'cups', 'count', 'pkg', 'box', 'can', 'jar', 'bottle'];
 
-const LOCATIONS = ['Pantry', 'Refrigerator', 'Freezer', 'Cabinet', 'Bathroom', 'Laundry Room', 'Garage', 'Storage'];
+const LOCATIONS = ['Kitchen', 'Cabinet', 'Bathroom', 'Laundry Room', 'Garage', 'Storage'];
 
 function pad(n: number) { return String(n).padStart(2, '0'); }
 function toKey(d: Date) { return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
@@ -86,7 +86,7 @@ export default function Inventory() {
   const [fName, setFName]               = useState('');
   const [fBrand, setFBrand]             = useState('');
   const [fCat, setFCat]                 = useState('Pantry');
-  const [fLoc, setFLoc]                 = useState('Pantry');
+  const [fLoc, setFLoc]                 = useState('Kitchen');
   const [fQty, setFQty]                 = useState(1);
   const [fUnit, setFUnit]               = useState('each');
   const [fExpires, setFExpires]         = useState('');
@@ -138,7 +138,7 @@ export default function Inventory() {
   }, [tab]);
 
   function resetForm() {
-    setFName(''); setFBrand(''); setFCat('Pantry'); setFLoc('Pantry');
+    setFName(''); setFBrand(''); setFCat('Pantry'); setFLoc('Kitchen');
     setFQty(1); setFUnit('each'); setFExpires(''); setFImport(toKey(new Date()));
     setFCost(''); setFBarcode(''); setFNotes(''); setFPerishable(false);
     setEditingItem(null);
@@ -147,7 +147,7 @@ export default function Inventory() {
   function startEdit(item: InventoryItem) {
     setEditingItem(item);
     setFName(item.name); setFBrand(item.brand ?? ''); setFCat(item.category ?? 'Pantry');
-    setFLoc(item.location ?? 'Pantry'); setFQty(item.quantity); setFUnit(item.unit ?? 'each');
+    setFLoc(item.location ?? 'Kitchen'); setFQty(item.quantity); setFUnit(item.unit ?? 'each');
     setFExpires(item.expires ?? ''); setFImport(item.import_date ?? toKey(new Date()));
     setFCost(item.avg_cost_canton?.toString() ?? ''); setFBarcode(item.barcode ?? '');
     setFNotes(item.notes ?? ''); setFPerishable(item.is_perishable ?? false);
@@ -429,20 +429,37 @@ Quick tip: [1-sentence cooking note]`;
       {tab === 'items' && (
         <div>
           {/* Filters */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-            <input
-              value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search by name, brand, barcode..."
-              style={{ flex: '1 1 200px', fontSize: 13 }}
-            />
-            <select value={filterCat} onChange={e => setFilterCat(e.target.value)} style={{ fontSize: 12 }}>
-              <option value="all">All categories</option>
-              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <select value={filterLoc} onChange={e => setFilterLoc(e.target.value)} style={{ fontSize: 12 }}>
-              <option value="all">All locations</option>
-              {LOCATIONS.map(l => <option key={l} value={l}>{l}</option>)}
-            </select>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input
+                value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search by name, brand, barcode..."
+                style={{ flex: '1 1 200px', fontSize: 13 }}
+              />
+              <select value={filterCat} onChange={e => setFilterCat(e.target.value)} style={{ fontSize: 12 }}>
+                <option value="all">All categories</option>
+                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            {/* Location toggle */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {['all', ...LOCATIONS].map(loc => (
+                <button
+                  key={loc}
+                  onClick={() => setFilterLoc(loc)}
+                  style={{
+                    padding: '6px 14px', borderRadius: 999, fontSize: 12, fontWeight: filterLoc === loc ? 700 : 500,
+                    border: `1.5px solid ${filterLoc === loc ? 'var(--green)' : 'var(--border)'}`,
+                    background: filterLoc === loc ? 'var(--green)' : 'transparent',
+                    color: filterLoc === loc ? '#fff' : 'var(--muted)',
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                >
+                  {loc === 'all' ? 'All Rooms' : loc}
+                </button>
+              ))}
+            </div>
           </div>
 
           {loading && <div style={{ color: 'var(--muted)', fontSize: 13, padding: 20 }}>Loading inventory...</div>}
@@ -717,12 +734,6 @@ Quick tip: [1-sentence cooking note]`;
               </select>
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
-              Location
-              <select value={fLoc} onChange={e => setFLoc(e.target.value)}>
-                {LOCATIONS.map(l => <option key={l} value={l}>{l}</option>)}
-              </select>
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
               Quantity<input type="number" min={0} value={fQty} onChange={e => setFQty(parseInt(e.target.value) || 0)} />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
@@ -743,6 +754,28 @@ Quick tip: [1-sentence cooking note]`;
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
               Expiration date<input type="date" value={fExpires} onChange={e => setFExpires(e.target.value)} />
             </label>
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Room</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {LOCATIONS.map(loc => (
+                <button
+                  key={loc}
+                  type="button"
+                  onClick={() => setFLoc(loc)}
+                  style={{
+                    padding: '7px 16px', borderRadius: 999, fontSize: 13, fontWeight: fLoc === loc ? 700 : 500,
+                    border: `1.5px solid ${fLoc === loc ? 'var(--green)' : 'var(--border)'}`,
+                    background: fLoc === loc ? 'var(--green)' : 'transparent',
+                    color: fLoc === loc ? '#fff' : 'var(--text)',
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                >
+                  {loc}
+                </button>
+              ))}
+            </div>
           </div>
 
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, cursor: 'pointer', marginBottom: 12, padding: '8px 12px', background: fPerishable ? '#fef9c3' : 'var(--surface-1)', borderRadius: 8, border: `1px solid ${fPerishable ? '#eab308' : 'var(--border)'}` }}>
