@@ -2846,7 +2846,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   const INV_CATS = ['Pantry','Refrigerator','Freezer','Cleaning','Personal Care','Pet Supplies','Medicine','Garden','Paper Products','Beverages','Snacks','Baking','Canned Goods','Condiments','Other'];
   const INV_UNITS = ['each','oz','lbs','gal','qt','pint','fl oz','cups','count','pkg','box','can','jar','bottle'];
   const INV_LOCS = [
-    'Kitchen','Pantry','Refrigerator','Freezer','Backstock Closet',
+    'Kitchen','Backstock Closet',
     'Living Room','Master Bedroom','Library','Office','Jules\' Room',
     'Bathroom','Laundry Room','Clothes Closet',
     'Garage','Basement','Storage',
@@ -2864,7 +2864,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   const [filterCat, setFilterCat] = useState('all');
   const [filterLoc, setFilterLoc] = useState('all');
   const [editItem, setEditItem] = useState<InvItem|null>(null);
-  const [fName,setFName]=useState('');const [fBrand,setFBrand]=useState('');const [fCat,setFCat]=useState('Pantry');const [fLoc,setFLoc]=useState('Pantry');const [fQty,setFQty]=useState(1);const [fUnit,setFUnit]=useState('each');const [fExp,setFExp]=useState('');const [fImp,setFImp]=useState(invKey(new Date()));const [fCost,setFCost]=useState('');const [fBarcode,setFBarcode]=useState('');const [fNotes,setFNotes]=useState('');const [fPerish,setFPerish]=useState(false);const [saving,setSaving]=useState(false);
+  const [fName,setFName]=useState('');const [fBrand,setFBrand]=useState('');const [fCat,setFCat]=useState('Pantry');const [fLoc,setFLoc]=useState('Kitchen');const [fQty,setFQty]=useState(1);const [fUnit,setFUnit]=useState('each');const [fExp,setFExp]=useState('');const [fImp,setFImp]=useState(invKey(new Date()));const [fCost,setFCost]=useState('');const [fBarcode,setFBarcode]=useState('');const [fNotes,setFNotes]=useState('');const [fPerish,setFPerish]=useState(false);const [saving,setSaving]=useState(false);
   const [scanMode,setScanMode]=useState<'in'|'out'>('in');const [bulkMode,setBulkMode]=useState(false);const [scanInput,setScanInput]=useState('');const [scanLog,setScanLog]=useState<{barcode:string;name:string;qty:number;action:string;time:string}[]>([]);const [scanStatus,setScanStatus]=useState('');const [pendingBulk,setPendingBulk]=useState<{barcode:string;name:string;count:number}[]>([]);
   const [aiRecipes,setAiRecipes]=useState('');const [aiLoading,setAiLoading]=useState(false);
 
@@ -2889,7 +2889,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   useEffect(()=>{loadInv();},[loadInv]);
   useEffect(()=>{if(tab==='scan'&&scanRef.current)scanRef.current.focus();},[tab]);
 
-  function resetInvForm(){setFName('');setFBrand('');setFCat('Pantry');setFLoc('Pantry');setFQty(1);setFUnit('each');setFExp('');setFImp(invKey(new Date()));setFCost('');setFBarcode('');setFNotes('');setFPerish(false);setEditItem(null);}
+  function resetInvForm(){setFName('');setFBrand('');setFCat('Pantry');setFLoc('Kitchen');setFQty(1);setFUnit('each');setFExp('');setFImp(invKey(new Date()));setFCost('');setFBarcode('');setFNotes('');setFPerish(false);setEditItem(null);}
 
   async function saveInvItem(){
     if(!supabase||!fName.trim())return;setSaving(true);
@@ -2946,12 +2946,12 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     }
 
     // Add placeholder line immediately so user sees feedback
-    const placeholder:ReceiptLine = {barcode:code,name:'',brand:'',category:'Pantry',location:'Pantry',qty:1,marketPrice:null,isNew:false,looking:true,id:null};
+    const placeholder:ReceiptLine = {barcode:code,name:'',brand:'',category:'Pantry',location:'Kitchen',qty:1,marketPrice:null,isNew:false,looking:true,id:null};
 
     // Check if already in inventory
     const existing = items.find(i=>i.barcode===code);
     if(existing){
-      setReceiptLines(prev=>[{...placeholder,name:existing.name,brand:existing.brand??'',category:existing.category??'Pantry',location:existing.location??'Pantry',looking:false,id:existing.id},...prev]);
+      setReceiptLines(prev=>[{...placeholder,name:existing.name,brand:existing.brand??'',category:existing.category??'Pantry',location:existing.location??'Kitchen',looking:false,id:existing.id},...prev]);
       setScanStatus(`✅ ${existing.name} added to list`);
       scanRef.current?.focus();
       return;
@@ -2965,7 +2965,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     const name = product?.name || `Unknown item (${code})`;
     const brand = product?.brand || '';
     const category = product?.category || 'Pantry';
-    const location = ['Refrigerator','Freezer'].includes(category) ? category : scanLocation;
+    const location = ['Pantry','Refrigerator','Freezer'].includes(category) ? 'Kitchen' : scanLocation;
 
     setReceiptLines(prev=>prev.map(r=>r.barcode===code
       ? {...r, name, brand, category, location, looking:false, isNew:true}
@@ -3155,10 +3155,21 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     </div>
 
     {tab==='items'&&<div>
-      <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
-        <input value={searchQ} onChange={e=>setSearchQ(e.target.value)} placeholder="Search name, brand, barcode..." style={{flex:'1 1 200px',fontSize:13}}/>
-        <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={{fontSize:12}}><option value="all">All categories</option>{INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select>
-        <select value={filterLoc} onChange={e=>setFilterLoc(e.target.value)} style={{fontSize:12}}><option value="all">All locations</option>{INV_LOCS.map(l=><option key={l} value={l}>{l}</option>)}</select>
+      <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:12}}>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+          <input value={searchQ} onChange={e=>setSearchQ(e.target.value)} placeholder="Search name, brand, barcode..." style={{flex:'1 1 200px',fontSize:13}}/>
+          <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={{fontSize:12}}><option value="all">All categories</option>{INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select>
+        </div>
+        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+          {['all',...INV_LOCS].map(loc=>(
+            <button key={loc} onClick={()=>setFilterLoc(loc)} style={{
+              padding:'6px 14px',borderRadius:999,fontSize:12,fontWeight:filterLoc===loc?700:500,
+              border:`1.5px solid ${filterLoc===loc?'var(--green)':'var(--border)'}`,
+              background:filterLoc===loc?'var(--green)':'transparent',
+              color:filterLoc===loc?'#fff':'var(--muted)',cursor:'pointer',transition:'all 0.15s',
+            }}>{loc==='all'?'All Rooms':loc}</button>
+          ))}
+        </div>
       </div>
       {loading&&<p style={{color:'var(--muted)',fontSize:13}}>Loading...</p>}
       <div style={{display:'flex',flexDirection:'column',gap:6}}>
@@ -3370,12 +3381,24 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Brand<input value={fBrand} onChange={e=>setFBrand(e.target.value)} placeholder="e.g. Hunt's"/></label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Barcode<input value={fBarcode} onChange={e=>setFBarcode(e.target.value)} placeholder="UPC / EAN"/></label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Category<select value={fCat} onChange={e=>setFCat(e.target.value)}>{INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></label>
-        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Location<select value={fLoc} onChange={e=>setFLoc(e.target.value)}>{INV_LOCS.map(l=><option key={l} value={l}>{l}</option>)}</select></label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Quantity<input type="number" min={0} value={fQty} onChange={e=>setFQty(parseInt(e.target.value)||0)}/></label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Unit<select value={fUnit} onChange={e=>setFUnit(e.target.value)}>{INV_UNITS.map(u=><option key={u} value={u}>{u}</option>)}</select></label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Avg cost (Canton GA)<input type="number" step="0.01" value={fCost} onChange={e=>setFCost(e.target.value)} placeholder="e.g. 2.49"/></label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Purchase date<input type="date" value={fImp} onChange={e=>setFImp(e.target.value)}/></label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Expiration date<input type="date" value={fExp} onChange={e=>setFExp(e.target.value)}/></label>
+      </div>
+      <div style={{marginBottom:12}}>
+        <div style={{fontSize:12,color:'var(--muted)',marginBottom:6}}>Room</div>
+        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+          {INV_LOCS.map(loc=>(
+            <button key={loc} type="button" onClick={()=>setFLoc(loc)} style={{
+              padding:'7px 16px',borderRadius:999,fontSize:13,fontWeight:fLoc===loc?700:500,
+              border:`1.5px solid ${fLoc===loc?'var(--green)':'var(--border)'}`,
+              background:fLoc===loc?'var(--green)':'transparent',
+              color:fLoc===loc?'#fff':'var(--text)',cursor:'pointer',transition:'all 0.15s',
+            }}>{loc}</button>
+          ))}
+        </div>
       </div>
       <label style={{display:'flex',alignItems:'center',gap:10,fontSize:13,cursor:'pointer',marginBottom:12,padding:'8px 12px',background:fPerish?'#fef9c3':'var(--surface-1)',borderRadius:8,border:`1px solid ${fPerish?'#eab308':'var(--border)'}`}}>
         <input type="checkbox" checked={fPerish} onChange={e=>setFPerish(e.target.checked)} style={{accentColor:'#eab308'}}/>
