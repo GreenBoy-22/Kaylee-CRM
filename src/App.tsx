@@ -2852,6 +2852,14 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     'Refrigerator': 14, 'Freezer': 365, 'Pantry': 365, 'Beverages': 270,
     'Snacks': 120, 'Baking': 730, 'Canned Goods': 730, 'Condiments': 365,
   };
+  // These are the only kinds of things that actually get replenished
+  // regularly (food, cleaning supplies, bathroom essentials) — everything
+  // else (tools, decor, one-off purchases) just disappears once it's gone
+  // rather than sitting around as a permanent "0 in stock" row.
+  const REPLENISH_CATS = ['Cleaning', 'Personal Care'];
+  function needsStockTracking(item: { is_perishable: boolean; category: string | null }): boolean {
+    return item.is_perishable || REPLENISH_CATS.includes(item.category ?? '');
+  }
   const INV_LOCS = [
     'Kitchen','Backstock Closet',
     'Living Room','Master Bedroom','Library','Office','Jules\' Room',
@@ -2901,15 +2909,69 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   async function saveInvItem(){
     if(!supabase||!fName.trim())return;setSaving(true);
     const{data:sd}=await supabase.auth.getSession();const uid=sd.session?.user?.id;if(!uid){setSaving(false);return;}
+    const wasEditing = !!editItem;
     const p={name:fName.trim(),brand:fBrand.trim()||null,category:fCat,location:fLoc,quantity:fQty,unit:fUnit,expires:fExp||null,import_date:fImp||null,avg_cost_canton:fCost?parseFloat(fCost):null,barcode:fBarcode.trim()||null,notes:fNotes.trim()||null,is_perishable:fPerish,user_id:uid,updated_at:new Date().toISOString()};
     if(editItem){await supabase.from('inventory_items').update(p).eq('id',editItem.id);if(editItem.quantity!==fQty)await supabase.from('inventory_transactions').insert({item_id:editItem.id,user_id:uid,transaction_type:'manual_adjust',quantity_change:fQty-editItem.quantity,notes:'Manual edit'});}
     else{const{data:ni}=await supabase.from('inventory_items').insert([p]).select().single();if(ni)await supabase.from('inventory_transactions').insert({item_id:ni.id,user_id:uid,transaction_type:'manual_adjust',quantity_change:fQty,notes:'Item added'});}
     const hadBarcode = fBarcode.trim().length > 0;
     await loadInv();resetInvForm();setSaving(false);
-    setTab(hadBarcode ? 'scan' : 'items');
+    // Editing an existing item happens inline in the items list — stay put.
+    // Only a brand-new item added via barcode should jump to the scanner.
+    if (!wasEditing) setTab(hadBarcode ? 'scan' : 'items');
   }
 
   async function delInvItem(id:string){if(!supabase||!confirm('Delete this item?'))return;await supabase.from('inventory_items').delete().eq('id',id);setItems(p=>p.filter(i=>i.id!==id));}
+
+  // Shared form body used both for the full "+ Add Item" flow and for
+  // editing an item inline, right where it sits in the list.
+  function renderInvForm(onCancel: () => void) {
+    return (
+      <>
+        <div className="panel-head"><h2>{editItem?`Edit — ${editItem.name}`:'Add Item'}</h2><button className="btn ghost" onClick={onCancel}><XIcon size={14}/> Cancel</button></div>
+        <div className="form-grid" style={{marginBottom:12}}>
+          <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Item name *<input value={fName} onChange={e=>setFName(e.target.value)} placeholder="e.g. Canned Tomatoes"/></label>
+          <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Brand<input value={fBrand} onChange={e=>setFBrand(e.target.value)} placeholder="e.g. Hunt's"/></label>
+          <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Barcode<input value={fBarcode} onChange={e=>setFBarcode(e.target.value)} placeholder="UPC / EAN"/></label>
+          <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Category<select value={fCat} onChange={e=>{
+            const cat = e.target.value;
+            setFCat(cat);
+            if (FOOD_CATS.includes(cat)) {
+              setFPerish(true);
+              if (!fExp) {
+                const days = FOOD_CAT_DEFAULT_DAYS[cat] ?? 365;
+                const d = new Date(); d.setDate(d.getDate() + days);
+                setFExp(invKey(d));
+              }
+            }
+          }}>{INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></label>
+          <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Quantity<input type="number" min={0} value={fQty} onChange={e=>setFQty(parseInt(e.target.value)||0)}/></label>
+          <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Unit<select value={fUnit} onChange={e=>setFUnit(e.target.value)}>{INV_UNITS.map(u=><option key={u} value={u}>{u}</option>)}</select></label>
+          <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Avg cost (Canton GA)<input type="number" step="0.01" value={fCost} onChange={e=>setFCost(e.target.value)} placeholder="e.g. 2.49"/></label>
+          <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Purchase date<input type="date" value={fImp} onChange={e=>setFImp(e.target.value)}/></label>
+          <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Expiration date<input type="date" value={fExp} onChange={e=>setFExp(e.target.value)}/></label>
+        </div>
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:12,color:'var(--muted)',marginBottom:6}}>Room</div>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            {INV_LOCS.map(loc=>(
+              <button key={loc} type="button" onClick={()=>setFLoc(loc)} style={{
+                padding:'7px 16px',borderRadius:999,fontSize:13,fontWeight:fLoc===loc?700:500,
+                border:`1.5px solid ${fLoc===loc?'var(--green)':'var(--border)'}`,
+                background:fLoc===loc?'var(--green)':'transparent',
+                color:fLoc===loc?'#fff':'var(--text)',cursor:'pointer',transition:'all 0.15s',
+              }}>{loc}</button>
+            ))}
+          </div>
+        </div>
+        <label style={{display:'flex',alignItems:'center',gap:10,fontSize:13,cursor:'pointer',marginBottom:12,padding:'8px 12px',background:fPerish?'#fef9c3':'var(--surface-1)',borderRadius:8,border:`1px solid ${fPerish?'#eab308':'var(--border)'}`}}>
+          <input type="checkbox" checked={fPerish} onChange={e=>setFPerish(e.target.checked)} style={{accentColor:'#eab308'}}/>
+          Perishable / food item (tracks expiration alerts)
+        </label>
+        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)',marginBottom:14}}>Notes<textarea value={fNotes} onChange={e=>setFNotes(e.target.value)} placeholder="Any notes..." style={{minHeight:50}}/></label>
+        <button className="btn primary" onClick={saveInvItem} disabled={saving||!fName.trim()}>{saving?'Saving...':editItem?'Save Changes':'Add to Inventory'}</button>
+      </>
+    );
+  }
 
   // __ UPC lookup — robust chain with proper timeouts ______________________
   // __ Barcode normalization — handles UPC/EAN/JAN/ITF-14/ISBN/EAN-8 ______
@@ -3152,7 +3214,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     </div>
 
     <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:14}}>
-      {[['Total Items',items.length,'var(--purple)'],['Expired',expiredCount,'var(--red)'],['Expiring Soon',filteredExpiring.filter(i=>(i._days??99)>=0&&(i._days??99)<=7).length,'var(--amber)'],['Low Stock',items.filter(i=>i.quantity<=1).length,'#0891b2']].map(([l,v,c])=>(
+      {[['Total Items',items.length,'var(--purple)'],['Expired',expiredCount,'var(--red)'],['Expiring Soon',filteredExpiring.filter(i=>(i._days??99)>=0&&(i._days??99)<=7).length,'var(--amber)'],['Out of Stock',items.filter(i=>i.quantity<=0&&needsStockTracking(i)).length,'#0891b2']].map(([l,v,c])=>(
         <section key={String(l)} className="panel" style={{textAlign:'center',padding:'10px 8px'}}>
           <div style={{fontSize:11,color:'var(--muted)',marginBottom:4}}>{l}</div>
           <div style={{fontSize:26,fontWeight:800,color:String(c)}}>{v}</div>
@@ -3164,7 +3226,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
       <button className={tab==='items'?'active':''} onClick={()=>setTab('items')}>All Items ({items.length})</button>
       <button className={tab==='expiring'?'active':''} onClick={()=>setTab('expiring')} style={{color:expiredCount>0?'var(--red)':undefined}}>Expiring{filteredExpiring.length>0?` (${filteredExpiring.length})`:''}</button>
       <button className={tab==='scan'?'active':''} onClick={()=>setTab('scan')}>📷 Scanner</button>
-      <button className={tab==='add'?'active':''} onClick={()=>setTab('add')}>{editItem?'Edit Item':'+ Add'}</button>
+      <button className={tab==='add'?'active':''} onClick={()=>{resetInvForm();setTab('add');}}>+ Add</button>
       <button className={tab==='history'?'active':''} onClick={()=>setTab('history')}>History</button>
     </div>
 
@@ -3191,26 +3253,54 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
           const d=item.expires?invDays(item.expires):null;
           const isExp=d!==null&&d<0;const isUrg=d!==null&&d>=0&&d<=3;const isSoon=d!==null&&d>=4&&d<=7;
           const acc=isExp?'var(--red)':isUrg?'#f97316':isSoon?'var(--amber)':'var(--border)';
-          return<div key={item.id} style={{background:'var(--surface-0)',border:`1px solid ${acc}`,borderLeft:`4px solid ${acc}`,borderRadius:8,padding:'10px 14px',display:'flex',gap:12,alignItems:'center'}}>
+          const tracked = needsStockTracking(item);
+          const isEditingThis = editItem?.id === item.id;
+          return<div key={item.id}>
+            <div style={{background:'var(--surface-0)',border:`1px solid ${acc}`,borderLeft:`4px solid ${acc}`,borderRadius:isEditingThis?'8px 8px 0 0':8,padding:'10px 14px',display:'flex',gap:12,alignItems:'center'}}>
             <div style={{flex:1,minWidth:0}}>
               <div style={{display:'flex',alignItems:'baseline',gap:8,flexWrap:'wrap'}}>
                 <span style={{fontWeight:700,fontSize:14}}>{item.name}</span>
                 {item.brand&&<span style={{fontSize:11,color:'var(--muted)'}}>{item.brand}</span>}
+                {item.quantity<=0&&tracked&&<span style={{fontSize:10,fontWeight:700,color:'#dc2626',background:'#fee2e2',padding:'2px 7px',borderRadius:999}}>OUT OF STOCK</span>}
               </div>
               <div style={{display:'flex',gap:8,marginTop:4,flexWrap:'wrap',alignItems:'center'}}>
-                <span style={{fontSize:12,fontWeight:700,color:item.quantity<=1?'var(--red)':'var(--text)'}}>{item.quantity} {item.unit}</span>
+                <span style={{fontSize:12,fontWeight:700,color:item.quantity<=0?'var(--red)':'var(--text)'}}>{item.quantity} {item.unit}</span>
                 {item.category&&<span style={{fontSize:11,color:'var(--muted)'}}>{item.category}</span>}
                 {item.location&&<span style={{fontSize:11,color:'var(--muted)'}}>· {item.location}</span>}
                 {item.expires&&<span style={{fontSize:11,fontWeight:600,color:isExp?'var(--red)':isUrg?'#f97316':isSoon?'var(--amber)':'var(--muted)'}}>{isExp?`⚠️ EXPIRED ${Math.abs(d!)}d ago`:`Exp: ${invFmt(item.expires)} (${d}d)`}</span>}
               </div>
             </div>
             <div style={{display:'flex',gap:4,alignItems:'center',flexShrink:0}}>
-              <button className="qty-button" onClick={async()=>{if(!supabase)return;const nq=Math.max(0,item.quantity-1);if(nq<=0){await supabase.from('inventory_items').delete().eq('id',item.id);setItems(p=>p.filter(i=>i.id!==item.id));}else{await supabase.from('inventory_items').update({quantity:nq,updated_at:new Date().toISOString()}).eq('id',item.id);setItems(p=>p.map(i=>i.id===item.id?{...i,quantity:nq}:i));}}}>−</button>
+              <button className="qty-button" onClick={async()=>{
+                if(!supabase)return;
+                const nq=Math.max(0,item.quantity-1);
+                if(nq<=0&&!tracked){
+                  await supabase.from('inventory_items').delete().eq('id',item.id);
+                  setItems(p=>p.filter(i=>i.id!==item.id));
+                }else{
+                  await supabase.from('inventory_items').update({quantity:nq,updated_at:new Date().toISOString()}).eq('id',item.id);
+                  setItems(p=>p.map(i=>i.id===item.id?{...i,quantity:nq}:i));
+                }
+              }}>−</button>
               <span style={{fontSize:13,fontWeight:700,minWidth:24,textAlign:'center'}}>{item.quantity}</span>
               <button className="qty-button" onClick={async()=>{if(!supabase)return;const nq=item.quantity+1;await supabase.from('inventory_items').update({quantity:nq,updated_at:new Date().toISOString()}).eq('id',item.id);setItems(p=>p.map(i=>i.id===item.id?{...i,quantity:nq}:i));}}>+</button>
-              <button className="qty-button" onClick={()=>{setEditItem(item);setFName(item.name);setFBrand(item.brand??'');setFCat(item.category??'Pantry');setFLoc(item.location??'Pantry');setFQty(item.quantity);setFUnit(item.unit??'each');setFExp(item.expires??'');setFImp(item.import_date??invKey(new Date()));setFCost(item.avg_cost_canton?.toString()??'');setFBarcode(item.barcode??'');setFNotes(item.notes??'');setFPerish(item.is_perishable??false);setTab('add');}}>✏️</button>
+              {tracked&&item.quantity>0&&(
+                <button className="qty-button" title="Mark out of stock" style={{color:'#dc2626',fontSize:10,fontWeight:700,width:'auto',padding:'0 8px'}} onClick={async()=>{
+                  if(!supabase)return;
+                  await supabase.from('inventory_items').update({quantity:0,updated_at:new Date().toISOString()}).eq('id',item.id);
+                  setItems(p=>p.map(i=>i.id===item.id?{...i,quantity:0}:i));
+                }}>Out</button>
+              )}
+              <button className="qty-button" onClick={()=>{
+                if(isEditingThis){resetInvForm();return;}
+                setEditItem(item);setFName(item.name);setFBrand(item.brand??'');setFCat(item.category??'Pantry');setFLoc(item.location??'Kitchen');setFQty(item.quantity);setFUnit(item.unit??'each');setFExp(item.expires??'');setFImp(item.import_date??invKey(new Date()));setFCost(item.avg_cost_canton?.toString()??'');setFBarcode(item.barcode??'');setFNotes(item.notes??'');setFPerish(item.is_perishable??false);
+              }}>✏️</button>
               <button className="qty-button" style={{color:'var(--red)'}} onClick={()=>delInvItem(item.id)}>🗑</button>
             </div>
+            </div>
+            {isEditingThis&&<section className="panel" style={{borderLeft:'4px solid var(--green)',borderRadius:'0 0 8px 8px',marginTop:-1,marginBottom:0}}>
+              {renderInvForm(()=>resetInvForm())}
+            </section>}
           </div>;
         })}
       </div>
@@ -3412,48 +3502,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     </div>}
 
     {tab==='add'&&<section className="panel" style={{borderLeft:'4px solid var(--green)'}}>
-      <div className="panel-head"><h2>{editItem?`Edit — ${editItem.name}`:'Add Item'}</h2><button className="btn ghost" onClick={()=>{resetInvForm();setTab('items');}}><XIcon size={14}/> Cancel</button></div>
-      <div className="form-grid" style={{marginBottom:12}}>
-        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Item name *<input value={fName} onChange={e=>setFName(e.target.value)} placeholder="e.g. Canned Tomatoes"/></label>
-        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Brand<input value={fBrand} onChange={e=>setFBrand(e.target.value)} placeholder="e.g. Hunt's"/></label>
-        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Barcode<input value={fBarcode} onChange={e=>setFBarcode(e.target.value)} placeholder="UPC / EAN"/></label>
-        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Category<select value={fCat} onChange={e=>{
-          const cat = e.target.value;
-          setFCat(cat);
-          if (FOOD_CATS.includes(cat)) {
-            setFPerish(true);
-            if (!fExp) {
-              const days = FOOD_CAT_DEFAULT_DAYS[cat] ?? 365;
-              const d = new Date(); d.setDate(d.getDate() + days);
-              setFExp(invKey(d));
-            }
-          }
-        }}>{INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></label>
-        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Quantity<input type="number" min={0} value={fQty} onChange={e=>setFQty(parseInt(e.target.value)||0)}/></label>
-        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Unit<select value={fUnit} onChange={e=>setFUnit(e.target.value)}>{INV_UNITS.map(u=><option key={u} value={u}>{u}</option>)}</select></label>
-        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Avg cost (Canton GA)<input type="number" step="0.01" value={fCost} onChange={e=>setFCost(e.target.value)} placeholder="e.g. 2.49"/></label>
-        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Purchase date<input type="date" value={fImp} onChange={e=>setFImp(e.target.value)}/></label>
-        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Expiration date<input type="date" value={fExp} onChange={e=>setFExp(e.target.value)}/></label>
-      </div>
-      <div style={{marginBottom:12}}>
-        <div style={{fontSize:12,color:'var(--muted)',marginBottom:6}}>Room</div>
-        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-          {INV_LOCS.map(loc=>(
-            <button key={loc} type="button" onClick={()=>setFLoc(loc)} style={{
-              padding:'7px 16px',borderRadius:999,fontSize:13,fontWeight:fLoc===loc?700:500,
-              border:`1.5px solid ${fLoc===loc?'var(--green)':'var(--border)'}`,
-              background:fLoc===loc?'var(--green)':'transparent',
-              color:fLoc===loc?'#fff':'var(--text)',cursor:'pointer',transition:'all 0.15s',
-            }}>{loc}</button>
-          ))}
-        </div>
-      </div>
-      <label style={{display:'flex',alignItems:'center',gap:10,fontSize:13,cursor:'pointer',marginBottom:12,padding:'8px 12px',background:fPerish?'#fef9c3':'var(--surface-1)',borderRadius:8,border:`1px solid ${fPerish?'#eab308':'var(--border)'}`}}>
-        <input type="checkbox" checked={fPerish} onChange={e=>setFPerish(e.target.checked)} style={{accentColor:'#eab308'}}/>
-        Perishable / food item (tracks expiration alerts)
-      </label>
-      <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)',marginBottom:14}}>Notes<textarea value={fNotes} onChange={e=>setFNotes(e.target.value)} placeholder="Any notes..." style={{minHeight:50}}/></label>
-      <button className="btn primary" onClick={saveInvItem} disabled={saving||!fName.trim()}>{saving?'Saving...':editItem?'Save Changes':'Add to Inventory'}</button>
+      {renderInvForm(()=>{resetInvForm();setTab('items');})}
     </section>}
 
     {tab==='history'&&<section className="panel">
