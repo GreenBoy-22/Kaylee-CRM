@@ -163,6 +163,19 @@ const PROVIDER_DOMAINS: [RegExp, string][] = [
   [/six flags/i, 'sixflags.com'],
   [/autocamp/i, 'autocamp.com'],
   [/amtrak/i, 'amtrak.com'],
+  [/ticketmaster/i, 'ticketmaster.com'],
+  [/stubhub/i, 'stubhub.com'],
+  [/eventbrite/i, 'eventbrite.com'],
+  [/\baxs\b/i, 'axs.com'],
+  [/seatgeek/i, 'seatgeek.com'],
+  [/vivid ?seats/i, 'vividseats.com'],
+  [/live nation|livenation/i, 'livenation.com'],
+  [/dice\.fm|\bdice\b/i, 'dice.fm'],
+  [/fandango/i, 'fandango.com'],
+  [/viator/i, 'viator.com'],
+  [/get ?your ?guide/i, 'getyourguide.com'],
+  [/opentable/i, 'opentable.com'],
+  [/resy/i, 'resy.com'],
 ];
 
 function getProviderLogo(provider: string | null): string | null {
@@ -620,7 +633,9 @@ export default function Travel({ userId }: { userId: string }) {
                     )
                     : group.item.type === 'hotel'
                       ? <HotelItineraryCard key={group.item.id} item={group.item} onDelete={() => deleteItem(trip.id, group.item.id)} />
-                      : <TravelItemCard key={group.item.id} item={group.item} onDelete={() => deleteItem(trip.id, group.item.id)} />
+                      : group.item.type === 'activity'
+                        ? <EventTicketCard key={group.item.id} item={group.item} onDelete={() => deleteItem(trip.id, group.item.id)} />
+                        : <TravelItemCard key={group.item.id} item={group.item} onDelete={() => deleteItem(trip.id, group.item.id)} />
                 )}
 
                 {/* Add item button */}
@@ -1129,6 +1144,140 @@ function HotelItineraryCard({ item, onDelete }: { item: TravelItem; onDelete: ()
           </a>
         )}
       </div>
+      {item.email_subject && (
+        <div style={{ padding: '0 16px 10px', fontSize: 11, color: 'var(--muted)', display: 'flex', gap: 4, alignItems: 'center' }}>
+          <Mail size={10} /> From email: {item.email_subject}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── EventTicketCard ──────────────────────────────────────────────────────────
+// Styled like a ticket stub for concerts, shows, theme park tickets, tours,
+// and other "things to do" bookings — event name up top, venue/date front
+// and center, a perforated divider, then seat/section-style details.
+
+function EventTicketCard({ item, onDelete }: { item: TravelItem; onDelete: () => void }) {
+  const [showHistory, setShowHistory] = useState(false);
+  const [logoFailed, setLogoFailed] = useState(false);
+  const cfg = ITEM_CONFIG.activity;
+  const logoUrl = getProviderLogo(item.provider);
+  const history = item.history ?? [];
+  const updateEntries = history.filter(h => h.changes && Object.keys(h.changes).length > 0);
+  const hasUpdates = updateEntries.length > 0;
+  const detailEntries = Object.entries(item.details ?? {});
+  const mapsUrl = item.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.address)}` : null;
+
+  return (
+    <div style={{ borderRadius: 10, border: '1px solid var(--border, rgba(0,0,0,0.08))', marginBottom: 10, overflow: 'hidden', background: 'var(--surface, #fff)' }}>
+      {item.passenger_name && (
+        <div style={{ padding: '6px 16px', background: '#0891b222', fontSize: 11, fontWeight: 700, color: '#0891b2', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <Star size={10} /> FOR: {item.passenger_name.toUpperCase()}
+        </div>
+      )}
+
+      {/* Ticket header: event name on a colored band */}
+      <div style={{ background: `${cfg.color}`, padding: '16px', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{ width: 36, height: 36, borderRadius: 8, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
+          {logoUrl && !logoFailed ? (
+            <img src={logoUrl} alt={item.provider ?? ''} onError={() => setLogoFailed(true)} style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }} />
+          ) : (
+            <Ticket size={18} style={{ color: cfg.color }} />
+          )}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: '#fff', fontWeight: 800, fontSize: 16, lineHeight: 1.2 }}>{item.title}</div>
+          {item.provider && <div style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: 2 }}>{item.provider}</div>}
+        </div>
+        <button onClick={onDelete} title="Remove ticket" style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#fff', padding: 5, flexShrink: 0 }}>
+          <Trash2 size={13} />
+        </button>
+      </div>
+
+      {/* Venue + date/time strip */}
+      <div style={{ padding: '14px 16px', display: 'flex', flexWrap: 'wrap', gap: 20, borderBottom: '1px dashed var(--border, rgba(0,0,0,0.15))' }}>
+        {(item.location || item.address) && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flex: 1, minWidth: 160 }}>
+            <MapPin size={16} style={{ color: cfg.color, flexShrink: 0, marginTop: 2 }} />
+            <div>
+              {item.location && <div style={{ fontSize: 13, fontWeight: 600 }}>{item.location}</div>}
+              {item.address && <div style={{ fontSize: 12, color: 'var(--muted)' }}>{item.address}</div>}
+              {mapsUrl && (
+                <a href={mapsUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 700, textDecoration: 'underline', color: 'var(--link)' }}>
+                  Maps &amp; Directions »
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+        {item.start_date && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <Calendar size={16} style={{ color: cfg.color, flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{fmt(item.start_date)}</div>
+              {item.start_time && <div style={{ fontSize: 12, color: 'var(--muted)' }}>{formatTime12h(item.start_time)}{item.end_time ? ` – ${formatTime12h(item.end_time)}` : ''}</div>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Updated banner */}
+      {hasUpdates && (
+        <div style={{ padding: '8px 16px', background: '#D9770622', fontSize: 12, fontWeight: 700, color: '#D97706', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>⚠ Updated ticket information</span>
+          <button onClick={() => setShowHistory(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#D97706', fontWeight: 700, fontSize: 12, textDecoration: 'underline' }}>
+            {showHistory ? 'Hide history' : `View history (${updateEntries.length})`}
+          </button>
+        </div>
+      )}
+      {showHistory && (
+        <div style={{ padding: '8px 16px', background: 'var(--surface-2)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {history.slice().reverse().map((h, i) => (
+            <div key={i} style={{ fontSize: 11, color: 'var(--muted)' }}>
+              <span style={{ fontWeight: 700 }}>{new Date(h.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}:</span> {h.note} {h.source ? `(${h.source})` : ''}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Ticket details: section/row/seat, quantity, ticket type, etc. */}
+      {(detailEntries.length > 0 || item.notes) && (
+        <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, borderBottom: '1px solid var(--border, rgba(0,0,0,0.06))' }}>
+          {detailEntries.map(([label, value]) => (
+            <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
+              <span style={{ fontWeight: 700, color: 'var(--muted)' }}>{label}</span>
+              <span style={{ textAlign: 'right' }}>{value}</span>
+            </div>
+          ))}
+          {item.notes && detailEntries.length === 0 && (
+            <div style={{ fontSize: 13, color: 'var(--muted)', fontStyle: 'italic' }}>{item.notes}</div>
+          )}
+        </div>
+      )}
+
+      {/* Footer: confirmation #, price, manage-tickets link */}
+      <div style={{ padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {item.confirmation_number && (
+            <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: cfg.color, background: `${cfg.color}18`, padding: '2px 8px', borderRadius: 4 }}>
+              #{item.confirmation_number}
+            </span>
+          )}
+          {item.price && <span style={{ fontSize: 13, fontWeight: 700, color: '#059669' }}>{item.price}</span>}
+        </div>
+        {item.website && (
+          <a href={item.website} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, textDecoration: 'underline', color: 'var(--link)' }}>
+            View / Manage Tickets »
+          </a>
+        )}
+      </div>
+      {item.phone && (
+        <div style={{ padding: '0 16px 10px', display: 'flex', gap: 6, alignItems: 'center' }}>
+          <Phone size={12} style={{ color: 'var(--muted)' }} />
+          <a href={`tel:${item.phone}`} style={{ fontSize: 12, color: 'var(--link)' }}>{item.phone}</a>
+        </div>
+      )}
       {item.email_subject && (
         <div style={{ padding: '0 16px 10px', fontSize: 11, color: 'var(--muted)', display: 'flex', gap: 4, alignItems: 'center' }}>
           <Mail size={10} /> From email: {item.email_subject}
