@@ -107,6 +107,22 @@ const STATUS_CONFIG: Record<Status, { label: string; color: string; bg: string; 
   needed:    { label: 'Needed this year',    color: '#71717a', bg: '#f4f4f5', icon: Calendar },
 };
 
+// A lot of these (dermatologist, dentist, OBGYN, etc.) need to be booked
+// months out, so it's not enough to know the current cycle is covered —
+// we also want to see something already on the books within 45 days
+// either side of the cycle's due date, so the next renewal doesn't sneak
+// up with no appointment booked.
+const NEXT_APPT_WINDOW_DAYS = 45;
+
+function findNextAppointment(row: AppointmentRow): Visit | null {
+  const windowStart = addDays(row.due_date, -NEXT_APPT_WINDOW_DAYS);
+  const windowEnd = addDays(row.due_date, NEXT_APPT_WINDOW_DAYS);
+  const candidates = row.visits.filter(v => v.date >= windowStart && v.date <= windowEnd);
+  if (candidates.length === 0) return null;
+  // Prefer the one closest to (or latest before/after) the due date.
+  return candidates.sort((a, b) => b.date.localeCompare(a.date))[0];
+}
+
 // ── Main Component ───────────────────────────────────────────────────────
 
 export default function Appointments() {
@@ -293,6 +309,7 @@ export default function Appointments() {
         const completedCount = row.visits.filter(v => v.status === 'completed').length;
         const remaining = Math.max(0, row.target_count - completedCount);
         const dLeft = daysUntil(row.due_date);
+        const nextAppt = findNextAppointment(row);
 
         return (
           <section key={row.id} className="panel" style={{ borderLeft: `3px solid ${sc.color}`, padding: 0, overflow: 'hidden', marginBottom: 10 }}>
@@ -318,6 +335,26 @@ export default function Appointments() {
                   {row.location && <span><MapPin size={10} style={{ marginRight: 2 }} />{row.location}</span>}
                 </div>
               </div>
+
+              {/* Next-cycle appointment booked? — a lot of these need to be
+                  scheduled months out, so this flags whether something is
+                  already on the books within 45 days of the renewal date. */}
+              <div
+                style={{
+                  flexShrink: 0, width: 132, textAlign: 'center', borderRadius: 8, padding: '6px 8px',
+                  background: nextAppt ? '#dcfce7' : '#fff7ed',
+                  border: `1px solid ${nextAppt ? '#16a34a' : '#f97316'}`,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, fontSize: 10, fontWeight: 700, color: nextAppt ? '#16a34a' : '#f97316' }}>
+                  {nextAppt ? <CheckCircle2 size={11} /> : <AlertTriangle size={11} />}
+                  {nextAppt ? 'NEXT ONE BOOKED' : 'NOT BOOKED YET'}
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 700, marginTop: 2, color: nextAppt ? '#16a34a' : '#f97316' }}>
+                  {nextAppt ? fmtDate(nextAppt.date) : `Book by ${fmtDate(addDays(row.due_date, NEXT_APPT_WINDOW_DAYS))}`}
+                </div>
+              </div>
+
               <button onClick={e => { e.stopPropagation(); deleteCategory(row.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', padding: 4, flexShrink: 0 }} title="Delete this appointment type">
                 <Trash2 size={13} />
               </button>
