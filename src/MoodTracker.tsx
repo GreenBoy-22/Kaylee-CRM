@@ -12,11 +12,13 @@ import { supabase } from './lib/supabase';
 
 type Severity = 'low' | 'medium' | 'high';
 type TrackedPerson = 'dad' | 'kaylee' | 'adam';
+type Mood = 'great' | 'good' | 'meh' | 'tired' | 'stressed' | 'anxious' | 'sad' | 'depressed' | 'angry' | 'sick';
 
 interface MoodEntry {
   id: string;
   entry_date: string;
-  severity: Severity;
+  severity: Severity | null;
+  mood: Mood | null;
   behaviors: string[];
   trigger_notes: string | null;
   additional_notes: string | null;
@@ -26,6 +28,33 @@ interface MoodEntry {
   targets: string[];
   person?: TrackedPerson;
 }
+
+// Dad uses the severity/behavior anger-tracker below.
+// Adam and Kaylee use this general mood log instead.
+const MOOD_ONLY_PEOPLE: TrackedPerson[] = ['kaylee', 'adam'];
+
+const MOOD_OPTIONS: { key: Mood; label: string; emoji: string; color: string; bg: string }[] = [
+  { key: 'great',     label: 'Great / All Good',    emoji: '😄', color: '#16a34a', bg: '#dcfce7' },
+  { key: 'good',      label: 'Good',                emoji: '🙂', color: '#65a30d', bg: '#ecfccb' },
+  { key: 'meh',       label: 'Meh',                 emoji: '😐', color: '#71717a', bg: '#f4f4f5' },
+  { key: 'tired',     label: 'Tired / Exhausted',   emoji: '😴', color: '#0ea5e9', bg: '#e0f2fe' },
+  { key: 'stressed',  label: 'Stressed',            emoji: '😣', color: '#f97316', bg: '#ffedd5' },
+  { key: 'anxious',   label: 'Anxious',             emoji: '😰', color: '#eab308', bg: '#fef9c3' },
+  { key: 'sad',       label: 'Sad',                 emoji: '😢', color: '#3b82f6', bg: '#dbeafe' },
+  { key: 'depressed', label: 'Depressed',           emoji: '😞', color: '#4c1d95', bg: '#ede9fe' },
+  { key: 'angry',     label: 'Angry / Frustrated',  emoji: '😠', color: '#ef4444', bg: '#fee2e2' },
+  { key: 'sick',      label: 'Sick / Unwell',       emoji: '🤒', color: '#14b8a6', bg: '#ccfbf1' },
+];
+
+const MOOD_MAP: Record<Mood, typeof MOOD_OPTIONS[number]> = MOOD_OPTIONS.reduce((acc, m) => {
+  acc[m.key] = m;
+  return acc;
+}, {} as Record<Mood, typeof MOOD_OPTIONS[number]>);
+
+// Rough grouping used for the stats row and 30-day summary.
+const GOOD_MOODS: Mood[] = ['great', 'good'];
+const NEUTRAL_MOODS: Mood[] = ['meh', 'tired'];
+const HARD_MOODS: Mood[] = ['stressed', 'anxious', 'sad', 'depressed', 'angry', 'sick'];
 
 // __ Constants ___________________________________________________________
 
@@ -90,11 +119,12 @@ function fmtDate(iso: string) {
 
 export default function MoodTracker() {
   const [activePerson, setActivePerson] = useState<TrackedPerson>('dad');
+  const isMoodPerson = MOOD_ONLY_PEOPLE.includes(activePerson);
   const [tab, setTab] = useState<'log' | 'history' | 'calendar'>('log');
   const [allEntries, setAllEntries] = useState<MoodEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Form state
+  // Form state (Dad's anger tracker)
   const today = toKey(new Date());
   const [date, setDate]                   = useState(today);
   const [severity, setSeverity]           = useState<Severity>('low');
@@ -108,6 +138,10 @@ export default function MoodTracker() {
   const [eventName, setEventName]         = useState('');
   const [saving, setSaving]               = useState(false);
   const [saved, setSaved]                 = useState(false);
+
+  // Form state (Adam / Kaylee general mood log)
+  const [selectedMood, setSelectedMood]   = useState<Mood | null>(null);
+  const [moodNote, setMoodNote]           = useState('');
 
   // Calendar state
   const [calYear, setCalYear]   = useState(new Date().getFullYear());
@@ -153,6 +187,7 @@ export default function MoodTracker() {
     setBehaviors([]); setTriggerNotes(''); setAdditionalNotes('');
     setSeverity('low'); setTargets([]); setOtherTarget('');
     setIsHoliday(false); setIsSpecialEvent(false); setEventName('');
+    setSelectedMood(null); setMoodNote('');
   }
 
   // When switching people, reset form and selected entry
@@ -165,19 +200,35 @@ export default function MoodTracker() {
 
   async function handleSave() {
     if (!supabase) return;
+    if (isMoodPerson && !selectedMood) return;
     setSaving(true);
-    const payload = {
-      entry_date: date,
-      severity,
-      behaviors,
-      trigger_notes: triggerNotes.trim() || null,
-      additional_notes: additionalNotes.trim() || null,
-      targets: otherTarget.trim() ? [...targets, `Other: ${otherTarget.trim()}`] : targets,
-      is_holiday: isHoliday,
-      is_special_event: isSpecialEvent,
-      event_name: (isHoliday || isSpecialEvent) ? (eventName.trim() || null) : null,
-      person: activePerson,
-    };
+    const payload = isMoodPerson
+      ? {
+          entry_date: date,
+          severity: null,
+          mood: selectedMood,
+          behaviors: [],
+          trigger_notes: null,
+          additional_notes: moodNote.trim() || null,
+          targets: [],
+          is_holiday: false,
+          is_special_event: false,
+          event_name: null,
+          person: activePerson,
+        }
+      : {
+          entry_date: date,
+          severity,
+          mood: null,
+          behaviors,
+          trigger_notes: triggerNotes.trim() || null,
+          additional_notes: additionalNotes.trim() || null,
+          targets: otherTarget.trim() ? [...targets, `Other: ${otherTarget.trim()}`] : targets,
+          is_holiday: isHoliday,
+          is_special_event: isSpecialEvent,
+          event_name: (isHoliday || isSpecialEvent) ? (eventName.trim() || null) : null,
+          person: activePerson,
+        };
     if (todayEntry) {
       await supabase.from('mood_log').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', todayEntry.id);
     } else {
@@ -200,7 +251,13 @@ export default function MoodTracker() {
   // Calendar / stats derived from active person's entries
   const entryMap = useMemo(() => {
     const m: Record<string, Severity> = {};
-    for (const e of entries) m[e.entry_date] = e.severity;
+    for (const e of entries) if (e.severity) m[e.entry_date] = e.severity;
+    return m;
+  }, [entries]);
+
+  const moodEntryMap = useMemo(() => {
+    const m: Record<string, Mood> = {};
+    for (const e of entries) if (e.mood) m[e.entry_date] = e.mood;
     return m;
   }, [entries]);
 
@@ -209,8 +266,15 @@ export default function MoodTracker() {
   const medCount     = entries.filter(e => e.severity === 'medium').length;
   const lowCount     = entries.filter(e => e.severity === 'low').length;
 
+  const goodMoodCount = entries.filter(e => e.mood && GOOD_MOODS.includes(e.mood)).length;
+  const neutralMoodCount = entries.filter(e => e.mood && NEUTRAL_MOODS.includes(e.mood)).length;
+  const hardMoodCount = entries.filter(e => e.mood && HARD_MOODS.includes(e.mood)).length;
+
   const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   const recentEntries = entries.filter(e => new Date(e.entry_date) >= thirtyDaysAgo);
+  const recentGood    = recentEntries.filter(e => e.mood && GOOD_MOODS.includes(e.mood)).length;
+  const recentNeutral = recentEntries.filter(e => e.mood && NEUTRAL_MOODS.includes(e.mood)).length;
+  const recentHard    = recentEntries.filter(e => e.mood && HARD_MOODS.includes(e.mood)).length;
 
   const personInfo = PEOPLE.find(p => p.key === activePerson)!;
 
@@ -219,7 +283,7 @@ export default function MoodTracker() {
       <div className="page-header">
         <div>
           <h1>Mood Log</h1>
-          <p>Household behavior tracker — severity, behaviors, and triggers</p>
+          <p>{isMoodPerson ? "Mood check-ins for Adam and Kaylee" : 'Household behavior tracker — severity, behaviors, and triggers'}</p>
         </div>
       </div>
 
@@ -258,14 +322,22 @@ export default function MoodTracker() {
       </div>
 
       {/* Stats row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 14 }}>
-        {[
-          { label: 'Total logged',   value: totalEntries,                                                     color: 'var(--text)',          sub: 'all time' },
-          { label: 'Low days',       value: lowCount,                                                          color: SEVERITY_COLORS.low,    sub: 'yellow' },
-          { label: 'Medium days',    value: medCount,                                                          color: SEVERITY_COLORS.medium, sub: 'orange' },
-          { label: 'High days',      value: highCount,                                                         color: SEVERITY_COLORS.high,   sub: 'red' },
-          { label: 'Ruined events',  value: entries.filter(e => e.is_holiday || e.is_special_event).length,   color: '#854d0e',               sub: 'holiday/special' },
-        ].map(s => (
+      <div style={{ display: 'grid', gridTemplateColumns: isMoodPerson ? 'repeat(4, 1fr)' : 'repeat(5, 1fr)', gap: 10, marginBottom: 14 }}>
+        {(isMoodPerson
+          ? [
+              { label: 'Total logged',   value: totalEntries,     color: 'var(--text)', sub: 'all time' },
+              { label: 'Good days',      value: goodMoodCount,    color: '#16a34a',     sub: 'great / good' },
+              { label: 'Meh / tired',    value: neutralMoodCount, color: '#71717a',     sub: 'so-so days' },
+              { label: 'Hard days',      value: hardMoodCount,    color: '#ef4444',     sub: 'stressed, sad, etc.' },
+            ]
+          : [
+              { label: 'Total logged',   value: totalEntries,                                                     color: 'var(--text)',          sub: 'all time' },
+              { label: 'Low days',       value: lowCount,                                                          color: SEVERITY_COLORS.low,    sub: 'yellow' },
+              { label: 'Medium days',    value: medCount,                                                          color: SEVERITY_COLORS.medium, sub: 'orange' },
+              { label: 'High days',      value: highCount,                                                         color: SEVERITY_COLORS.high,   sub: 'red' },
+              { label: 'Ruined events',  value: entries.filter(e => e.is_holiday || e.is_special_event).length,   color: '#854d0e',               sub: 'holiday/special' },
+            ]
+        ).map(s => (
           <section key={s.label} className="panel" style={{ textAlign: 'center', padding: '12px 8px', borderTop: `3px solid ${s.color}` }}>
             <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{s.label}</div>
             <div style={{ fontSize: 28, fontWeight: 800, color: s.color }}>{s.value}</div>
@@ -275,7 +347,19 @@ export default function MoodTracker() {
       </div>
 
       {/* Last 30 days alert */}
-      {recentEntries.length > 0 && (
+      {recentEntries.length > 0 && isMoodPerson && (
+        <div className="brief-item" style={{
+          borderLeft: `4px solid ${recentHard >= 3 ? '#ef4444' : '#0ea5e9'}`,
+          marginBottom: 12,
+        }}>
+          <span style={{ fontSize: 13 }}>
+            <strong>{personInfo.emoji} {personInfo.label} — last 30 days:</strong>{' '}
+            {recentEntries.length} day{recentEntries.length !== 1 ? 's' : ''} logged —{' '}
+            {recentGood} good, {recentNeutral} meh/tired, {recentHard} hard
+          </span>
+        </div>
+      )}
+      {recentEntries.length > 0 && !isMoodPerson && (
         <div className="brief-item" style={{
           borderLeft: `4px solid ${recentEntries.filter(e => e.severity === 'high').length >= 3 ? SEVERITY_COLORS.high : SEVERITY_COLORS.medium}`,
           marginBottom: 12,
@@ -299,8 +383,8 @@ export default function MoodTracker() {
         <button className={tab === 'calendar' ? 'active' : ''} onClick={() => setTab('calendar')}>Calendar</button>
       </div>
 
-      {/* ── LOG ENTRY TAB ── */}
-      {tab === 'log' && (
+      {/* ── LOG ENTRY TAB (Dad's anger tracker) ── */}
+      {tab === 'log' && !isMoodPerson && (
         <section className="panel" style={{ borderTop: `3px solid ${personInfo.color}` }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
             <span style={{ fontSize: 22 }}>{personInfo.emoji}</span>
@@ -310,7 +394,7 @@ export default function MoodTracker() {
             </div>
           </div>
 
-          {todayEntry && (
+          {todayEntry && todayEntry.severity && (
             <div className="brief-item" style={{ borderLeft: `4px solid ${SEVERITY_COLORS[todayEntry.severity]}`, marginBottom: 12 }}>
               <span style={{ fontSize: 13 }}>
                 {personInfo.label} is already logged on this date as{' '}
@@ -494,6 +578,81 @@ export default function MoodTracker() {
         </section>
       )}
 
+      {/* ── LOG ENTRY TAB (Adam / Kaylee general mood log) ── */}
+      {tab === 'log' && isMoodPerson && (
+        <section className="panel" style={{ borderTop: `3px solid ${personInfo.color}` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <span style={{ fontSize: 22 }}>{personInfo.emoji}</span>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15, color: personInfo.color }}>How's {personInfo.label} doing?</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>Pick whatever fits today — no need to overthink it</div>
+            </div>
+          </div>
+
+          {todayEntry && todayEntry.mood && (
+            <div className="brief-item" style={{ borderLeft: `4px solid ${MOOD_MAP[todayEntry.mood].color}`, marginBottom: 12 }}>
+              <span style={{ fontSize: 13 }}>
+                {personInfo.label} is already logged on this date as{' '}
+                <strong style={{ color: MOOD_MAP[todayEntry.mood].color }}>
+                  {MOOD_MAP[todayEntry.mood].emoji} {MOOD_MAP[todayEntry.mood].label}
+                </strong>. Saving again will update it.
+              </span>
+            </div>
+          )}
+
+          {/* Date */}
+          <div className="form-grid" style={{ marginBottom: 14 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
+              Date
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+            </label>
+          </div>
+
+          {/* Mood picker grid */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, fontWeight: 600 }}>Mood</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 8 }}>
+              {MOOD_OPTIONS.map(m => (
+                <button
+                  key={m.key}
+                  onClick={() => setSelectedMood(m.key)}
+                  style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                    padding: '12px 8px', borderRadius: 10, cursor: 'pointer', transition: 'all 0.15s',
+                    border: `2px solid ${selectedMood === m.key ? m.color : 'var(--border)'}`,
+                    background: selectedMood === m.key ? m.bg : 'transparent',
+                  }}
+                >
+                  <span style={{ fontSize: 26 }}>{m.emoji}</span>
+                  <span style={{ fontSize: 12, fontWeight: selectedMood === m.key ? 700 : 500, color: selectedMood === m.key ? m.color : 'var(--text)', textAlign: 'center', lineHeight: 1.2 }}>
+                    {m.label}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Optional note */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', fontWeight: 600 }}>
+              Anything you want to add? (optional)
+              <textarea
+                value={moodNote}
+                onChange={e => setMoodNote(e.target.value)}
+                placeholder="What's going on, if you want to note it..."
+                style={{ minHeight: 70, fontFamily: 'inherit' }}
+              />
+            </label>
+          </div>
+
+          <button className="btn primary" onClick={handleSave} disabled={saving || !selectedMood}
+            style={{ background: personInfo.color, borderColor: personInfo.color }}
+          >
+            {saving ? 'Saving...' : saved ? '✓ Saved!' : `Save ${personInfo.label}'s Mood`}
+          </button>
+        </section>
+      )}
+
       {/* ── HISTORY TAB ── */}
       {tab === 'history' && (
         <section className="panel">
@@ -504,15 +663,71 @@ export default function MoodTracker() {
           {loading && <div style={{ color: 'var(--muted)', fontSize: 13 }}>Loading...</div>}
           {!loading && entries.length === 0 && (
             <div style={{ color: 'var(--muted)', fontSize: 13 }}>
-              No entries yet for {personInfo.label}. Log an incident on the Log Entry tab.
+              {isMoodPerson
+                ? `No moods logged yet for ${personInfo.label}. Log one on the Log Entry tab.`
+                : `No entries yet for ${personInfo.label}. Log an incident on the Log Entry tab.`}
             </div>
           )}
-          {entries.map(e => (
+
+          {/* Mood entries (Adam / Kaylee) */}
+          {isMoodPerson && entries.map(e => {
+            if (!e.mood) return null;
+            const m = MOOD_MAP[e.mood];
+            return (
+              <div
+                key={e.id}
+                onClick={() => setSelectedEntry(selectedEntry?.id === e.id ? null : e)}
+                style={{
+                  borderLeft: `4px solid ${m.color}`,
+                  padding: '10px 12px', marginBottom: 8, borderRadius: 8,
+                  background: selectedEntry?.id === e.id ? 'var(--surface-1)' : 'transparent',
+                  cursor: 'pointer',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>{fmtDate(e.entry_date)}</span>
+                    <span style={{
+                      marginLeft: 10, fontSize: 11, fontWeight: 700,
+                      color: m.color, background: m.bg,
+                      padding: '2px 8px', borderRadius: 999,
+                    }}>
+                      {m.emoji} {m.label}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                    {selectedEntry?.id === e.id ? '▲' : '▼'}
+                  </span>
+                </div>
+
+                {selectedEntry?.id === e.id && (
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                    {e.additional_notes && (
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>NOTE</div>
+                        <div style={{ fontSize: 13 }}>{e.additional_notes}</div>
+                      </div>
+                    )}
+                    <button
+                      className="btn ghost"
+                      onClick={ev => { ev.stopPropagation(); handleDelete(e.id); }}
+                      style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}
+                    >
+                      Delete entry
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Anger-tracker entries (Dad) */}
+          {!isMoodPerson && entries.map(e => (
             <div
               key={e.id}
               onClick={() => setSelectedEntry(selectedEntry?.id === e.id ? null : e)}
               style={{
-                borderLeft: `4px solid ${SEVERITY_COLORS[e.severity]}`,
+                borderLeft: `4px solid ${SEVERITY_COLORS[e.severity ?? 'low']}`,
                 padding: '10px 12px', marginBottom: 8, borderRadius: 8,
                 background: selectedEntry?.id === e.id ? 'var(--surface-1)' : 'transparent',
                 cursor: 'pointer',
@@ -521,13 +736,15 @@ export default function MoodTracker() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <span style={{ fontWeight: 700, fontSize: 13 }}>{fmtDate(e.entry_date)}</span>
-                  <span style={{
-                    marginLeft: 10, fontSize: 11, fontWeight: 700,
-                    color: SEVERITY_COLORS[e.severity], background: SEVERITY_BG[e.severity],
-                    padding: '2px 8px', borderRadius: 999,
-                  }}>
-                    {e.severity.toUpperCase()}
-                  </span>
+                  {e.severity && (
+                    <span style={{
+                      marginLeft: 10, fontSize: 11, fontWeight: 700,
+                      color: SEVERITY_COLORS[e.severity], background: SEVERITY_BG[e.severity],
+                      padding: '2px 8px', borderRadius: 999,
+                    }}>
+                      {e.severity.toUpperCase()}
+                    </span>
+                  )}
                   {(e.is_holiday || e.is_special_event) && (
                     <span style={{ marginLeft: 8, fontSize: 11, color: '#854d0e', background: '#fef9c3', padding: '2px 8px', borderRadius: 999, fontWeight: 600 }}>
                       {e.is_holiday ? '🎄 Holiday' : '⭐ Special Event'}{e.event_name ? `: ${e.event_name}` : ''}
@@ -607,16 +824,27 @@ export default function MoodTracker() {
 
           {/* Legend */}
           <div style={{ display: 'flex', gap: 14, marginBottom: 14, flexWrap: 'wrap' }}>
-            {(['low', 'medium', 'high'] as Severity[]).map(s => (
-              <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{ width: 13, height: 13, borderRadius: 3, background: SEVERITY_BG[s], border: `2px solid ${SEVERITY_COLORS[s]}` }} />
-                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{SEVERITY_LABELS[s]}</span>
-              </div>
-            ))}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 13, height: 13, borderRadius: 3, background: 'transparent', border: '2px solid #eab308', outline: '2px solid #eab308', outlineOffset: '-2px' }} />
-              <span style={{ fontSize: 12, color: 'var(--muted)' }}>Holiday / Special Event</span>
-            </div>
+            {isMoodPerson
+              ? MOOD_OPTIONS.map(m => (
+                  <div key={m.key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 13, height: 13, borderRadius: 3, background: m.bg, border: `2px solid ${m.color}` }} />
+                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>{m.emoji} {m.label}</span>
+                  </div>
+                ))
+              : (
+                <>
+                  {(['low', 'medium', 'high'] as Severity[]).map(s => (
+                    <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ width: 13, height: 13, borderRadius: 3, background: SEVERITY_BG[s], border: `2px solid ${SEVERITY_COLORS[s]}` }} />
+                      <span style={{ fontSize: 12, color: 'var(--muted)' }}>{SEVERITY_LABELS[s]}</span>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 13, height: 13, borderRadius: 3, background: 'transparent', border: '2px solid #eab308', outline: '2px solid #eab308', outlineOffset: '-2px' }} />
+                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>Holiday / Special Event</span>
+                  </div>
+                </>
+              )}
           </div>
 
           {/* 12-month annual grid */}
@@ -649,25 +877,36 @@ export default function MoodTracker() {
                       const dayNum  = i + 1;
                       const key     = `${calYear}-${pad(monthIdx + 1)}-${pad(dayNum)}`;
                       const sev     = entryMap[key];
+                      const mood    = moodEntryMap[key];
+                      const m       = mood ? MOOD_MAP[mood] : null;
                       const isToday = key === today;
                       const entry   = entries.find(e => e.entry_date === key);
                       const hasEvent = entry && (entry.is_holiday || entry.is_special_event);
+
+                      const bg     = isMoodPerson ? (m ? m.bg : (isToday ? personInfo.bg : 'transparent')) : (sev ? SEVERITY_BG[sev] : (isToday ? personInfo.bg : 'transparent'));
+                      const border = isMoodPerson
+                        ? (isToday ? `1px solid ${personInfo.color}` : m ? `1px solid ${m.color}` : '1px solid transparent')
+                        : (isToday ? `1px solid ${personInfo.color}` : sev ? `1px solid ${SEVERITY_COLORS[sev]}` : '1px solid transparent');
+                      const fg     = isMoodPerson ? (m ? m.color : (isToday ? personInfo.color : 'var(--muted)')) : (sev ? SEVERITY_COLORS[sev] : (isToday ? personInfo.color : 'var(--muted)'));
+                      const clickable = isMoodPerson ? !!m : !!sev;
+                      const titleText = isMoodPerson
+                        ? (m ? `${new Date(key + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: ${m.emoji} ${m.label}` : undefined)
+                        : (sev ? `${new Date(key + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: ${SEVERITY_LABELS[sev]}${entry?.event_name ? ' — ' + entry.event_name : ''}` : undefined);
+
                       return (
                         <div
                           key={key}
-                          title={sev ? `${new Date(key + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: ${SEVERITY_LABELS[sev]}${entry?.event_name ? ' — ' + entry.event_name : ''}` : undefined}
-                          onClick={() => { if (entry) { setSelectedEntry(entry); setTab('history'); } }}
+                          title={titleText}
+                          onClick={() => { if (entry && clickable) { setSelectedEntry(entry); setTab('history'); } }}
                           style={{
                             aspectRatio: '1', borderRadius: 3,
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             fontSize: 7, fontWeight: isToday ? 800 : 400,
-                            background: sev ? SEVERITY_BG[sev] : isToday ? personInfo.bg : 'transparent',
-                            border: isToday
-                              ? `1px solid ${personInfo.color}`
-                              : sev ? `1px solid ${SEVERITY_COLORS[sev]}` : '1px solid transparent',
-                            color: sev ? SEVERITY_COLORS[sev] : isToday ? personInfo.color : 'var(--muted)',
-                            cursor: sev ? 'pointer' : 'default',
-                            outline: hasEvent ? '1px solid #eab308' : 'none',
+                            background: bg,
+                            border,
+                            color: fg,
+                            cursor: clickable ? 'pointer' : 'default',
+                            outline: !isMoodPerson && hasEvent ? '1px solid #eab308' : 'none',
                             outlineOffset: '-1px',
                           }}
                         >
@@ -681,7 +920,9 @@ export default function MoodTracker() {
             })}
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
-            Click any colored day to view that entry in History. Yellow outline = holiday or special event.
+            {isMoodPerson
+              ? 'Click any colored day to view that entry in History.'
+              : 'Click any colored day to view that entry in History. Yellow outline = holiday or special event.'}
           </div>
         </div>
       )}
