@@ -2845,6 +2845,13 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
 
   const INV_CATS = ['Pantry','Refrigerator','Freezer','Cleaning','Personal Care','Pet Supplies','Medicine','Garden','Paper Products','Beverages','Snacks','Baking','Canned Goods','Condiments','Other'];
   const INV_UNITS = ['each','oz','lbs','gal','qt','pint','fl oz','cups','count','pkg','box','can','jar','bottle'];
+  // Any of these categories count as "food" — used to auto-check the
+  // perishable flag and suggest a default expiration window.
+  const FOOD_CATS = ['Pantry','Refrigerator','Freezer','Beverages','Snacks','Baking','Canned Goods','Condiments'];
+  const FOOD_CAT_DEFAULT_DAYS: Record<string, number> = {
+    'Refrigerator': 14, 'Freezer': 365, 'Pantry': 365, 'Beverages': 270,
+    'Snacks': 120, 'Baking': 730, 'Canned Goods': 730, 'Condiments': 365,
+  };
   const INV_LOCS = [
     'Kitchen','Backstock Closet',
     'Living Room','Master Bedroom','Library','Office','Jules\' Room',
@@ -2869,7 +2876,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   const [aiRecipes,setAiRecipes]=useState('');const [aiLoading,setAiLoading]=useState(false);
 
   // Receipt-style scan list
-  type ReceiptLine = {barcode:string;name:string;brand:string;category:string;location:string;qty:number;marketPrice:number|null;isNew:boolean;looking:boolean;id:string|null};
+  type ReceiptLine = {barcode:string;name:string;brand:string;category:string;location:string;qty:number;marketPrice:number|null;expires:string|null;isNew:boolean;looking:boolean;id:string|null};
   const [receiptLines, setReceiptLines] = useState<ReceiptLine[]>([]);
   const [receiptSaving, setReceiptSaving] = useState(false);
   const [scanLocation, setScanLocation] = useState('Kitchen');
@@ -2911,7 +2918,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   // The edge function chains: OFF → Open Library → UPCitemdb → Brocade →
   //   Go-UPC → Barcode Spider → Walmart → Claude AI web search
 
-  async function lookupUPC(rawCode: string): Promise<{name:string;brand:string;category:string;isPerishable:boolean}|null> {
+  async function lookupUPC(rawCode: string): Promise<{name:string;brand:string;category:string;isPerishable:boolean;expires:string|null;avgCost:number|null}|null> {
     try {
       const { data: sd } = await supabase!.auth.getSession();
       const token = sd.session?.access_token;
@@ -2923,7 +2930,14 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
       });
       const d = await resp.json();
       if (d.product?.name) {
-        return { name: d.product.name, brand: d.product.brand || '', category: d.product.category || 'Other', isPerishable: d.product.is_perishable ?? false };
+        return {
+          name: d.product.name,
+          brand: d.product.brand || '',
+          category: d.product.category || 'Other',
+          isPerishable: d.product.is_perishable ?? false,
+          expires: d.product.expires ?? null,
+          avgCost: d.product.avg_cost ?? null,
+        };
       }
     } catch { /* give up */ }
     return null;
@@ -2946,12 +2960,12 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     }
 
     // Add placeholder line immediately so user sees feedback
-    const placeholder:ReceiptLine = {barcode:code,name:'',brand:'',category:'Pantry',location:'Kitchen',qty:1,marketPrice:null,isNew:false,looking:true,id:null};
+    const placeholder:ReceiptLine = {barcode:code,name:'',brand:'',category:'Pantry',location:'Kitchen',qty:1,marketPrice:null,expires:null,isNew:false,looking:true,id:null};
 
     // Check if already in inventory
     const existing = items.find(i=>i.barcode===code);
     if(existing){
-      setReceiptLines(prev=>[{...placeholder,name:existing.name,brand:existing.brand??'',category:existing.category??'Pantry',location:existing.location??'Kitchen',looking:false,id:existing.id},...prev]);
+      setReceiptLines(prev=>[{...placeholder,name:existing.name,brand:existing.brand??'',category:existing.category??'Pantry',location:existing.location??'Kitchen',marketPrice:existing.avg_cost_canton??null,expires:existing.expires??null,looking:false,id:existing.id},...prev]);
       setScanStatus(`✅ ${existing.name} added to list`);
       scanRef.current?.focus();
       return;
@@ -2968,7 +2982,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     const location = ['Pantry','Refrigerator','Freezer'].includes(category) ? 'Kitchen' : scanLocation;
 
     setReceiptLines(prev=>prev.map(r=>r.barcode===code
-      ? {...r, name, brand, category, location, looking:false, isNew:true}
+      ? {...r, name, brand, category, location, marketPrice: product?.avgCost ?? null, expires: product?.expires ?? null, looking:false, isNew:true}
       : r
     ));
     setScanStatus(product ? `✅ Found: ${name}` : `⚠️ Not found — added as "${name}", tap to rename`);
@@ -3007,12 +3021,12 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
           location: line.location||scanLocation,
           quantity: Math.max(0,qtyChange),
           unit: 'each',
-          expires: null,
+          expires: line.expires ?? null,
           import_date: invKey(new Date()),
           avg_cost_canton: line.marketPrice,
           barcode: line.barcode,
           notes: null,
-          is_perishable: ['Refrigerator','Freezer'].includes(line.category),
+          is_perishable: FOOD_CATS.includes(line.category),
           user_id: uid,
           updated_at: new Date().toISOString()
         };
@@ -3340,6 +3354,29 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
                       </select>
                       {line.isNew&&<span style={{fontSize:10,color:'#16a34a',fontWeight:700,padding:'3px 6px',background:'#dcfce7',borderRadius:6}}>NEW</span>}
                     </div>
+                    <div style={{display:'flex',gap:6,marginTop:4,flexWrap:'wrap',alignItems:'center'}}>
+                      {FOOD_CATS.includes(line.category) && (
+                        <label style={{display:'flex',alignItems:'center',gap:4,fontSize:10,color:'var(--muted)'}}>
+                          Exp:
+                          <input
+                            type="date"
+                            value={line.expires ?? ''}
+                            onChange={e=>setReceiptLines(prev=>prev.map(r=>r.barcode===line.barcode?{...r,expires:e.target.value||null}:r))}
+                            style={{fontSize:11,padding:'3px 5px',borderRadius:6,border:'1px solid var(--border)',background:'var(--surface-1)',color:'var(--text)'}}
+                          />
+                        </label>
+                      )}
+                      <label style={{display:'flex',alignItems:'center',gap:4,fontSize:10,color:'var(--muted)'}}>
+                        Cost: $
+                        <input
+                          type="number" step="0.01" min={0}
+                          value={line.marketPrice ?? ''}
+                          onChange={e=>setReceiptLines(prev=>prev.map(r=>r.barcode===line.barcode?{...r,marketPrice:e.target.value?parseFloat(e.target.value):null}:r))}
+                          placeholder="—"
+                          style={{fontSize:11,padding:'3px 5px',borderRadius:6,border:'1px solid var(--border)',background:'var(--surface-1)',color:'var(--text)',width:60}}
+                        />
+                      </label>
+                    </div>
                   </>
                 }
               </div>
@@ -3380,7 +3417,18 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Item name *<input value={fName} onChange={e=>setFName(e.target.value)} placeholder="e.g. Canned Tomatoes"/></label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Brand<input value={fBrand} onChange={e=>setFBrand(e.target.value)} placeholder="e.g. Hunt's"/></label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Barcode<input value={fBarcode} onChange={e=>setFBarcode(e.target.value)} placeholder="UPC / EAN"/></label>
-        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Category<select value={fCat} onChange={e=>setFCat(e.target.value)}>{INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></label>
+        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Category<select value={fCat} onChange={e=>{
+          const cat = e.target.value;
+          setFCat(cat);
+          if (FOOD_CATS.includes(cat)) {
+            setFPerish(true);
+            if (!fExp) {
+              const days = FOOD_CAT_DEFAULT_DAYS[cat] ?? 365;
+              const d = new Date(); d.setDate(d.getDate() + days);
+              setFExp(invKey(d));
+            }
+          }
+        }}>{INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Quantity<input type="number" min={0} value={fQty} onChange={e=>setFQty(parseInt(e.target.value)||0)}/></label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Unit<select value={fUnit} onChange={e=>setFUnit(e.target.value)}>{INV_UNITS.map(u=><option key={u} value={u}>{u}</option>)}</select></label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Avg cost (Canton GA)<input type="number" step="0.01" value={fCost} onChange={e=>setFCost(e.target.value)} placeholder="e.g. 2.49"/></label>
