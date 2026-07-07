@@ -2883,6 +2883,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   const [searchQ, setSearchQ] = useState('');
   const [filterCat, setFilterCat] = useState('all');
   const [filterLoc, setFilterLoc] = useState('all');
+  const [showOutOfStockOnly, setShowOutOfStockOnly] = useState(false);
   const [editItem, setEditItem] = useState<InvItem|null>(null);
   // Remembers barcode → category corrections you've made before, so the
   // next time that same barcode gets scanned it's categorized right away
@@ -2899,7 +2900,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     barcode: string;
     scanned_at: string;
     matched_item_id: string | null;
-    suggested_data: { name?: string | null; brand?: string; category?: string; expires?: string | null; avg_cost?: number | null };
+    suggested_data: { name?: string | null; brand?: string; category?: string; expires?: string | null; avg_cost?: number | null; location?: string; unit?: string; notes?: string | null; is_perishable?: boolean; from_archive?: boolean };
     status: 'pending' | 'processed' | 'ignored';
     selected: boolean;
     action: 'in' | 'out' | 'undecided';
@@ -2966,7 +2967,37 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     if (!wasEditing) setTab(hadBarcode ? 'scan' : 'items');
   }
 
-  async function delInvItem(id:string){if(!supabase||!confirm('Delete this item?'))return;await supabase.from('inventory_items').delete().eq('id',id);setItems(p=>p.filter(i=>i.id!==id));}
+  // Whenever an item leaves active inventory (deleted, or scanned to zero
+  // for a non-tracked category/room), remember its details by barcode so
+  // that if it's ever scanned again — even a year later for something
+  // seasonal — we already know what it is, its category, room, cost, etc.
+  async function archiveItem(item: InvItem) {
+    if (!supabase || !item.barcode) return;
+    const { data: sd } = await supabase.auth.getSession();
+    const uid = sd.session?.user?.id;
+    if (!uid) return;
+    await supabase.from('item_archive').upsert({
+      user_id: uid,
+      barcode: item.barcode,
+      name: item.name,
+      brand: item.brand,
+      category: item.category,
+      location: item.location,
+      unit: item.unit,
+      avg_cost_canton: item.avg_cost_canton,
+      notes: item.notes,
+      is_perishable: item.is_perishable,
+      archived_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,barcode' });
+  }
+
+  async function delInvItem(id:string){
+    if(!supabase||!confirm('Delete this item?'))return;
+    const item = items.find(i=>i.id===id);
+    if(item) await archiveItem(item);
+    await supabase.from('inventory_items').delete().eq('id',id);
+    setItems(p=>p.filter(i=>i.id!==id));
+  }
 
   // Shared form body used both for the full "+ Add Item" flow and for
   // editing an item inline, right where it sits in the list.
@@ -3120,10 +3151,22 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     if(existing){
       suggested = { name: existing.name, brand: existing.brand ?? '', category: existing.category ?? 'Pantry', expires: existing.expires, avg_cost: existing.avg_cost_canton };
     } else {
-      setScanStatus(`🔍 Looking up ${code}...`);
-      const product = await lookupUPC(code);
-      const category = categoryOverrides[code] || product?.category || 'Pantry';
-      suggested = { name: product?.name ?? null, brand: product?.brand ?? '', category, expires: product?.expires ?? null, avg_cost: product?.avgCost ?? null };
+      // Not currently in inventory — check if we've seen this barcode
+      // before (something seasonal that was used up and removed), so we
+      // don't have to look it up fresh or ask for details all over again.
+      const { data: archived } = await supabase.from('item_archive').select('*').eq('user_id', uid).eq('barcode', code).maybeSingle();
+      if (archived) {
+        suggested = {
+          name: archived.name, brand: archived.brand ?? '', category: archived.category ?? 'Pantry',
+          avg_cost: archived.avg_cost_canton, location: archived.location, unit: archived.unit,
+          notes: archived.notes, is_perishable: archived.is_perishable, from_archive: true,
+        };
+      } else {
+        setScanStatus(`🔍 Looking up ${code}...`);
+        const product = await lookupUPC(code);
+        const category = categoryOverrides[code] || product?.category || 'Pantry';
+        suggested = { name: product?.name ?? null, brand: product?.brand ?? '', category, expires: product?.expires ?? null, avg_cost: product?.avgCost ?? null };
+      }
     }
 
     await supabase.from('scan_queue').insert({
@@ -3135,9 +3178,11 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     setScanLog(prev=>[{barcode:code,name:displayName,qty:1,action:scanMode,time:new Date().toLocaleTimeString()},...prev.slice(0,29)]);
     setScanStatus(existing
       ? `📥 Queued: ${displayName} (already in inventory — review in Scanner Inbox)`
-      : suggested.name
-        ? `📥 Queued: ${displayName} — review in Scanner Inbox`
-        : `📥 Queued unknown barcode ${code} — you'll enter details when you apply it`);
+      : suggested.from_archive
+        ? `📥 Queued: ${displayName} (recognized from history — review in Scanner Inbox)`
+        : suggested.name
+          ? `📥 Queued: ${displayName} — review in Scanner Inbox`
+          : `📥 Queued unknown barcode ${code} — you'll enter details when you apply it`);
 
     const{data:sq}=await supabase.from('scan_queue').select('*').eq('user_id',uid).eq('status','pending').order('scanned_at',{ascending:false});
     setQueueRows((sq as ScanQueueRow[])??[]);
@@ -3175,12 +3220,27 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     setFBrand(entry.suggested?.brand ?? '');
     const cat = entry.suggested?.category || 'Pantry';
     setFCat(cat);
-    setFPerish(FOOD_CATS.includes(cat));
-    setFExp(entry.suggested?.expires ?? '');
+    const isPerishable = entry.suggested?.is_perishable ?? FOOD_CATS.includes(cat);
+    setFPerish(isPerishable);
+    if (entry.suggested?.from_archive) {
+      // History never carries forward an old expiration date — a
+      // seasonal item coming back a year later needs a fresh one, not
+      // last year's. Compute it the same way a category pick would.
+      if (isPerishable) {
+        const days = FOOD_CAT_DEFAULT_DAYS[cat] ?? 365;
+        const d = new Date(); d.setDate(d.getDate() + days);
+        setFExp(invKey(d));
+      }
+      setFUnit(entry.suggested?.unit || 'each');
+      setFNotes(entry.suggested?.notes || '');
+      setFLoc(entry.suggested?.location || 'Kitchen');
+    } else {
+      setFExp(entry.suggested?.expires ?? '');
+      setFLoc('Kitchen');
+    }
     setFCost(entry.suggested?.avg_cost != null ? String(entry.suggested.avg_cost) : '');
     setFBarcode(entry.barcode);
     setFQty(entry.count);
-    setFLoc('Kitchen');
   }
 
   async function applyScanQueue(){
@@ -3208,6 +3268,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
       const newQty = Math.max(0, current.quantity + delta);
       const tracked = needsStockTracking(current);
       if(newQty<=0 && !tracked){
+        await archiveItem(current);
         await supabase.from('inventory_items').delete().eq('id',itemId);
       } else {
         await supabase.from('inventory_items').update({quantity:newQty,updated_at:new Date().toISOString()}).eq('id',itemId);
@@ -3378,8 +3439,9 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
 
   const filteredItems = useMemo(()=>{
     let l=items;if(filterCat!=='all')l=l.filter(i=>i.category===filterCat);if(filterLoc!=='all')l=l.filter(i=>i.location===filterLoc);
+    if(showOutOfStockOnly)l=l.filter(i=>i.quantity<=0&&needsStockTracking(i));
     if(searchQ.trim()){const q=searchQ.toLowerCase();l=l.filter(i=>i.name.toLowerCase().includes(q)||(i.brand??'').toLowerCase().includes(q)||(i.barcode??'').includes(q));}return l;
-  },[items,filterCat,filterLoc,searchQ]);
+  },[items,filterCat,filterLoc,searchQ,showOutOfStockOnly]);
 
   const filteredExpiring = useMemo(()=>items.filter(i=>i.expires&&i.is_perishable).map(i=>({...i,_days:invDays(i.expires!)})).sort((a,b)=>(a._days??999)-(b._days??999)),[items]);
   const expiredCount=filteredExpiring.filter(i=>(i._days??0)<0).length;
@@ -3390,24 +3452,29 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
       {editable&&<button className="btn primary" onClick={()=>{resetInvForm();setTab('add');}}><Plus size={14}/> Add Item</button>}
     </div>
 
-    <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:14}}>
-      {[['Total Items',items.length,'var(--purple)'],['Expired',expiredCount,'var(--red)'],['Expiring Soon',filteredExpiring.filter(i=>(i._days??99)>=0&&(i._days??99)<=7).length,'var(--amber)'],['Out of Stock',items.filter(i=>i.quantity<=0&&needsStockTracking(i)).length,'#0891b2']].map(([l,v,c])=>(
-        <section key={String(l)} className="panel" style={{textAlign:'center',padding:'10px 8px'}}>
-          <div style={{fontSize:11,color:'var(--muted)',marginBottom:4}}>{l}</div>
-          <div style={{fontSize:26,fontWeight:800,color:String(c)}}>{v}</div>
+    <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:14}}>
+      {[
+        {label:'Total Items', value:items.length, color:'var(--purple)', active: tab==='items'&&!showOutOfStockOnly, onClick:()=>{setTab('items');setShowOutOfStockOnly(false);}},
+        {label:'Expired', value:expiredCount, color:'var(--red)', active: tab==='expiring', onClick:()=>setTab('expiring')},
+        {label:'Expiring Soon', value:filteredExpiring.filter(i=>(i._days??99)>=0&&(i._days??99)<=7).length, color:'var(--amber)', active: tab==='expiring', onClick:()=>setTab('expiring')},
+        {label:'Out of Stock', value:items.filter(i=>i.quantity<=0&&needsStockTracking(i)).length, color:'#0891b2', active: tab==='items'&&showOutOfStockOnly, onClick:()=>{setTab('items');setShowOutOfStockOnly(true);}},
+        {label:'Scanner', value:queueRows.length, color:'#16a34a', active: tab==='scan', onClick:()=>setTab('scan')},
+        {label:'History', value:txs.length, color:'#7c3aed', active: tab==='history', onClick:()=>setTab('history')},
+      ].map(s=>(
+        <section key={s.label} className="panel" onClick={s.onClick} style={{textAlign:'center',padding:'10px 8px',cursor:'pointer',border:s.active?`2px solid ${s.color}`:'1px solid var(--border)'}}>
+          <div style={{fontSize:11,color:'var(--muted)',marginBottom:4}}>{s.label}</div>
+          <div style={{fontSize:26,fontWeight:800,color:s.color}}>{s.value}</div>
         </section>
       ))}
     </div>
 
-    <div className="tabs" style={{marginBottom:14}}>
-      <button className={tab==='items'?'active':''} onClick={()=>setTab('items')}>All Items ({items.length})</button>
-      <button className={tab==='expiring'?'active':''} onClick={()=>setTab('expiring')} style={{color:expiredCount>0?'var(--red)':undefined}}>Expiring{filteredExpiring.length>0?` (${filteredExpiring.length})`:''}</button>
-      <button className={tab==='scan'?'active':''} onClick={()=>setTab('scan')}>📷 Scanner</button>
-      <button className={tab==='add'?'active':''} onClick={()=>{resetInvForm();setTab('add');}}>+ Add</button>
-      <button className={tab==='history'?'active':''} onClick={()=>setTab('history')}>History</button>
-    </div>
-
     {tab==='items'&&<div>
+      {showOutOfStockOnly && (
+        <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',borderRadius:8,marginBottom:10,background:'#e0f2fe',border:'1px solid #0891b2'}}>
+          <span style={{fontSize:12,fontWeight:700,color:'#0891b2'}}>Showing Out of Stock items only</span>
+          <button onClick={()=>setShowOutOfStockOnly(false)} style={{marginLeft:'auto',fontSize:12,fontWeight:700,color:'#0891b2',background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}>Show all items</button>
+        </div>
+      )}
       <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:12}}>
         <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
           <input value={searchQ} onChange={e=>setSearchQ(e.target.value)} placeholder="Search name, brand, barcode..." style={{flex:'1 1 200px',fontSize:13}}/>
@@ -3452,6 +3519,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
                 if(!supabase)return;
                 const nq=Math.max(0,item.quantity-1);
                 if(nq<=0&&!tracked){
+                  await archiveItem(item);
                   await supabase.from('inventory_items').delete().eq('id',item.id);
                   setItems(p=>p.filter(i=>i.id!==item.id));
                 }else{
@@ -3685,7 +3753,10 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
                   New item {resolveIdx+1} of {resolveQueue.length}
                 </div>
                 <div style={{fontSize:12,color:'var(--muted)',marginBottom:14}}>
-                  Barcode {resolveQueue[resolveIdx]?.barcode} was scanned {resolveQueue[resolveIdx]?.count}× and isn't in your inventory yet — fill in the details to add it.
+                  {resolveQueue[resolveIdx]?.suggested?.from_archive
+                    ? <>📜 We've seen this barcode before — recognized as <strong>{resolveQueue[resolveIdx]?.suggested?.name}</strong> from your history. Just confirm the room and quantity.</>
+                    : <>Barcode {resolveQueue[resolveIdx]?.barcode} was scanned {resolveQueue[resolveIdx]?.count}× and isn't in your inventory yet — fill in the details to add it.</>
+                  }
                 </div>
                 {renderResolveForm()}
                 <div style={{display:'flex',gap:8,marginTop:-8,marginBottom:16}}>
