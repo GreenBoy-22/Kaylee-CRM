@@ -3591,6 +3591,30 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
             overflow: auto !important;
             transform: none !important;
           }
+          .kh-scan-row {
+            display: flex !important;
+            align-items: center !important;
+            gap: 10px !important;
+            padding: 10px 0 !important;
+            border-bottom: 1px solid var(--border) !important;
+            flex-wrap: wrap !important;
+            width: 100% !important;
+          }
+          .kh-scan-row input[type="checkbox"] {
+            flex: 0 0 16px !important;
+            width: 16px !important; height: 16px !important;
+            margin: 0 !important;
+          }
+          .kh-scan-row-info {
+            flex: 1 1 200px !important;
+            min-width: 150px !important;
+          }
+          .kh-scan-row-actions {
+            display: flex !important;
+            gap: 4px !important;
+            flex: 0 0 auto !important;
+            align-items: center !important;
+          }
         `}</style>
         <div className="kh-scanner-inbox-overlay" onClick={()=>{if(resolveQueue.length===0){setShowInbox(false);setApplySummary('');}}}>
         <div style={{background:'var(--surface-0, #ffffff)',borderRadius:14,width:'100%',maxWidth:640,maxHeight:'88vh',display:'flex',flexDirection:'column',overflow:'hidden'}} onClick={e=>e.stopPropagation()}>
@@ -3640,16 +3664,16 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
                   const matchedItem = row.matched_item_id ? items.find(i=>i.id===row.matched_item_id) : null;
                   const displayName = matchedItem?.name || row.suggested_data?.name || null;
                   return (
-                    <div key={row.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'1px solid var(--border)'}}>
+                    <div key={row.id} className="kh-scan-row">
                       <input type="checkbox" checked={row.selected} onChange={e=>toggleQueueSelected(row.id,e.target.checked)} />
-                      <div style={{flex:1,minWidth:0}}>
+                      <div className="kh-scan-row-info">
                         <div style={{fontWeight:600,fontSize:13}}>
                           {displayName ?? <span style={{color:'#dc2626'}}>Unknown barcode</span>}
                           {matchedItem && <span style={{fontSize:10,fontWeight:700,color:'#0891b2',background:'#e0f2fe',padding:'1px 6px',borderRadius:999,marginLeft:6}}>IN INVENTORY</span>}
                         </div>
                         <div style={{fontSize:11,color:'var(--muted)'}}>{row.barcode} · {new Date(row.scanned_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</div>
                       </div>
-                      <div style={{display:'flex',gap:4,flexShrink:0}}>
+                      <div className="kh-scan-row-actions">
                         {(['in','out','undecided'] as const).map(a=>(
                           <button key={a} onClick={()=>setQueueAction(row.id,a)} style={{
                             fontSize:10,fontWeight:700,padding:'5px 8px',borderRadius:6,cursor:'pointer',
