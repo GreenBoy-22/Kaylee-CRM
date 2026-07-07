@@ -2879,6 +2879,10 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   const [filterCat, setFilterCat] = useState('all');
   const [filterLoc, setFilterLoc] = useState('all');
   const [editItem, setEditItem] = useState<InvItem|null>(null);
+  // Remembers barcode → category corrections you've made before, so the
+  // next time that same barcode gets scanned it's categorized right away
+  // instead of defaulting back to whatever the lookup guessed.
+  const [categoryOverrides, setCategoryOverrides] = useState<Record<string,string>>({});
   const [fName,setFName]=useState('');const [fBrand,setFBrand]=useState('');const [fCat,setFCat]=useState('Pantry');const [fLoc,setFLoc]=useState('Kitchen');const [fQty,setFQty]=useState(1);const [fUnit,setFUnit]=useState('each');const [fExp,setFExp]=useState('');const [fImp,setFImp]=useState(invKey(new Date()));const [fCost,setFCost]=useState('');const [fBarcode,setFBarcode]=useState('');const [fNotes,setFNotes]=useState('');const [fPerish,setFPerish]=useState(false);const [saving,setSaving]=useState(false);
   const [scanMode,setScanMode]=useState<'in'|'out'>('in');const [bulkMode,setBulkMode]=useState(false);const [scanInput,setScanInput]=useState('');const [scanLog,setScanLog]=useState<{barcode:string;name:string;qty:number;action:string;time:string}[]>([]);const [scanStatus,setScanStatus]=useState('');const [pendingBulk,setPendingBulk]=useState<{barcode:string;name:string;count:number}[]>([]);
   const [aiRecipes,setAiRecipes]=useState('');const [aiLoading,setAiLoading]=useState(false);
@@ -2898,11 +2902,31 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   const loadInv = useCallback(async()=>{
     if(!supabase)return;setLoading(true);
     const{data:sd}=await supabase.auth.getSession();const uid=sd.session?.user?.id;if(!uid){setLoading(false);return;}
-    const[ir,tr]=await Promise.all([supabase.from('inventory_items').select('*').eq('user_id',uid).order('name'),supabase.from('inventory_transactions').select('*').eq('user_id',uid).order('created_at',{ascending:false}).limit(100)]);
+    const[ir,tr,ovr]=await Promise.all([
+      supabase.from('inventory_items').select('*').eq('user_id',uid).order('name'),
+      supabase.from('inventory_transactions').select('*').eq('user_id',uid).order('created_at',{ascending:false}).limit(100),
+      supabase.from('barcode_overrides').select('barcode,category').eq('user_id',uid),
+    ]);
     setItems((ir.data as InvItem[])??[]);setTxs((tr.data as InvTx[])??[]);setLoading(false);
+    const overrideMap: Record<string,string> = {};
+    for (const row of (ovr.data ?? []) as {barcode:string;category:string}[]) overrideMap[row.barcode] = row.category;
+    setCategoryOverrides(overrideMap);
   },[]);
   useEffect(()=>{loadInv();},[loadInv]);
   useEffect(()=>{if(tab==='scan'&&scanRef.current)scanRef.current.focus();},[tab]);
+
+  // Save (or update) a barcode → category correction for future scans.
+  async function rememberCategoryOverride(barcode: string, category: string) {
+    if (!supabase || !barcode.trim()) return;
+    const { data: sd } = await supabase.auth.getSession();
+    const uid = sd.session?.user?.id;
+    if (!uid) return;
+    await supabase.from('barcode_overrides').upsert(
+      { user_id: uid, barcode: barcode.trim(), category, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id,barcode' }
+    );
+    setCategoryOverrides(prev => ({ ...prev, [barcode.trim()]: category }));
+  }
 
   function resetInvForm(){setFName('');setFBrand('');setFCat('Pantry');setFLoc('Kitchen');setFQty(1);setFUnit('each');setFExp('');setFImp(invKey(new Date()));setFCost('');setFBarcode('');setFNotes('');setFPerish(false);setEditItem(null);}
 
@@ -2934,14 +2958,24 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
           <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Barcode<input value={fBarcode} onChange={e=>setFBarcode(e.target.value)} placeholder="UPC / EAN"/></label>
           <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Category<select value={fCat} onChange={e=>{
             const cat = e.target.value;
+            const prevCat = fCat;
             setFCat(cat);
             if (FOOD_CATS.includes(cat)) {
               setFPerish(true);
+              const days = FOOD_CAT_DEFAULT_DAYS[cat] ?? 365;
+              const d = new Date(); d.setDate(d.getDate() + days);
+              const suggested = invKey(d);
+              // Only bother asking if this would actually change something —
+              // don't nag if the expiration is already blank or already set
+              // to this same suggestion.
               if (!fExp) {
-                const days = FOOD_CAT_DEFAULT_DAYS[cat] ?? 365;
-                const d = new Date(); d.setDate(d.getDate() + days);
-                setFExp(invKey(d));
+                setFExp(suggested);
+              } else if (fExp !== suggested && confirm(`Update expiration date to the typical default for ${cat} (${invFmt(suggested)})?`)) {
+                setFExp(suggested);
               }
+            }
+            if (cat !== prevCat && fBarcode.trim()) {
+              rememberCategoryOverride(fBarcode.trim(), cat);
             }
           }}>{INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></label>
           <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Quantity<input type="number" min={0} value={fQty} onChange={e=>setFQty(parseInt(e.target.value)||0)}/></label>
@@ -3040,7 +3074,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     const product = await lookupUPC(code);
     const name = product?.name || `Unknown item (${code})`;
     const brand = product?.brand || '';
-    const category = product?.category || 'Pantry';
+    const category = categoryOverrides[code] || product?.category || 'Pantry';
     const location = ['Pantry','Refrigerator','Freezer'].includes(category) ? 'Kitchen' : scanLocation;
 
     setReceiptLines(prev=>prev.map(r=>r.barcode===code
@@ -3437,7 +3471,19 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
                       </select>
                       <select
                         value={line.category}
-                        onChange={e=>setReceiptLines(prev=>prev.map(r=>r.barcode===line.barcode?{...r,category:e.target.value}:r))}
+                        onChange={e=>{
+                          const newCat = e.target.value;
+                          rememberCategoryOverride(line.barcode, newCat);
+                          if (FOOD_CATS.includes(newCat)) {
+                            const days = FOOD_CAT_DEFAULT_DAYS[newCat] ?? 365;
+                            const d = new Date(); d.setDate(d.getDate() + days);
+                            const suggested = invKey(d);
+                            const wantsUpdate = confirm(`Update expiration to the typical default for ${newCat} (${invFmt(suggested)})?`);
+                            setReceiptLines(prev=>prev.map(r=>r.barcode===line.barcode?{...r,category:newCat,expires: wantsUpdate ? suggested : r.expires}:r));
+                          } else {
+                            setReceiptLines(prev=>prev.map(r=>r.barcode===line.barcode?{...r,category:newCat}:r));
+                          }
+                        }}
                         style={{fontSize:11,padding:'3px 6px',borderRadius:6,border:'1px solid var(--border)',background:'var(--surface-1)',color:'var(--text)',flex:1}}
                       >
                         {INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}
