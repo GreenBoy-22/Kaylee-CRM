@@ -2966,7 +2966,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
 
   // Shared form body used both for the full "+ Add Item" flow and for
   // editing an item inline, right where it sits in the list.
-  function renderInvForm(onCancel: () => void) {
+  function renderInvForm(onCancel: () => void, onSave?: () => void) {
     return (
       <>
         <div className="panel-head"><h2>{editItem?`Edit — ${editItem.name}`:'Add Item'}</h2><button className="btn ghost" onClick={onCancel}><XIcon size={14}/> Cancel</button></div>
@@ -3020,7 +3020,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
           Perishable / food item (tracks expiration alerts)
         </label>
         <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)',marginBottom:14}}>Notes<textarea value={fNotes} onChange={e=>setFNotes(e.target.value)} placeholder="Any notes..." style={{minHeight:50}}/></label>
-        <button className="btn primary" onClick={saveInvItem} disabled={saving||!fName.trim()}>{saving?'Saving...':editItem?'Save Changes':'Add to Inventory'}</button>
+        <button className="btn primary" onClick={onSave ?? saveInvItem} disabled={saving||!fName.trim()}>{saving?'Saving...':editItem?'Save Changes':'Add to Inventory'}</button>
       </>
     );
   }
@@ -3638,7 +3638,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
                 <div style={{fontSize:12,color:'var(--muted)',marginBottom:14}}>
                   Barcode {resolveQueue[resolveIdx]?.barcode} was scanned {resolveQueue[resolveIdx]?.count}× and isn't in your inventory yet — fill in the details to add it.
                 </div>
-                {renderInvForm(()=>{ /* Cancel just skips this one */ skipCurrentUnknown(); })}
+                {renderInvForm(()=>{ /* Cancel just skips this one */ skipCurrentUnknown(); }, resolveCurrentUnknown)}
                 <div style={{display:'flex',gap:8,marginTop:-8,marginBottom:16}}>
                   <button className="btn ghost" onClick={skipCurrentUnknown} style={{fontSize:12}}>Skip this item</button>
                 </div>
