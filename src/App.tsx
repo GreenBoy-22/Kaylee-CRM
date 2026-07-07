@@ -3578,8 +3578,22 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
 
     {/* ── Scanner Inbox modal (portaled to document.body so it always covers the full viewport, regardless of any parent layout transforms) ── */}
     {showInbox && createPortal(
-      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={()=>{if(resolveQueue.length===0){setShowInbox(false);setApplySummary('');}}}>
-        <div style={{background:'var(--surface-0)',borderRadius:14,width:'100%',maxWidth:640,maxHeight:'88vh',display:'flex',flexDirection:'column',overflow:'hidden'}} onClick={e=>e.stopPropagation()}>
+      <>
+        <style>{`
+          .kh-scanner-inbox-overlay {
+            position: fixed !important;
+            top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+            width: 100vw !important; height: 100vh !important;
+            z-index: 999999 !important;
+            background: rgba(0,0,0,0.6) !important;
+            display: flex !important; align-items: center !important; justify-content: center !important;
+            padding: 16px !important;
+            overflow: auto !important;
+            transform: none !important;
+          }
+        `}</style>
+        <div className="kh-scanner-inbox-overlay" onClick={()=>{if(resolveQueue.length===0){setShowInbox(false);setApplySummary('');}}}>
+        <div style={{background:'var(--surface-0, #ffffff)',borderRadius:14,width:'100%',maxWidth:640,maxHeight:'88vh',display:'flex',flexDirection:'column',overflow:'hidden'}} onClick={e=>e.stopPropagation()}>
           <div style={{padding:'16px 20px',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
             <div>
               <div style={{fontWeight:800,fontSize:17}}>📥 Scanner Inbox</div>
@@ -3662,7 +3676,8 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
             </div>
           )}
         </div>
-      </div>,
+        </div>
+      </>,
       document.body
     )}
   </>;
