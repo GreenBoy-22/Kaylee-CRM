@@ -2858,8 +2858,12 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   // else (tools, decor, one-off purchases) just disappears once it's gone
   // rather than sitting around as a permanent "0 in stock" row.
   const REPLENISH_CATS = ['Cleaning', 'Personal Care'];
-  function needsStockTracking(item: { is_perishable: boolean; category: string | null }): boolean {
-    return item.is_perishable || REPLENISH_CATS.includes(item.category ?? '');
+  // Anything stored in these rooms gets restocked regularly, regardless of
+  // its category — so it should go to "Out of Stock" instead of vanishing,
+  // the same way perishables/cleaning/personal-care items already do.
+  const REPLENISH_LOCATIONS = ['Kitchen', 'Bathroom', 'Laundry Room', 'Garage', 'Backstock Closet'];
+  function needsStockTracking(item: { is_perishable: boolean; category: string | null; location?: string | null }): boolean {
+    return item.is_perishable || REPLENISH_CATS.includes(item.category ?? '') || REPLENISH_LOCATIONS.includes(item.location ?? '');
   }
   const INV_LOCS = [
     'Kitchen','Backstock Closet',
@@ -2966,6 +2970,72 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
 
   // Shared form body used both for the full "+ Add Item" flow and for
   // editing an item inline, right where it sits in the list.
+  function handleCategoryChange(cat: string) {
+    const prevCat = fCat;
+    setFCat(cat);
+    if (FOOD_CATS.includes(cat)) {
+      setFPerish(true);
+      const days = FOOD_CAT_DEFAULT_DAYS[cat] ?? 365;
+      const d = new Date(); d.setDate(d.getDate() + days);
+      const suggested = invKey(d);
+      // Only bother asking if this would actually change something —
+      // don't nag if the expiration is already blank or already set
+      // to this same suggestion.
+      if (!fExp) {
+        setFExp(suggested);
+      } else if (fExp !== suggested && confirm(`Update expiration date to the typical default for ${cat} (${invFmt(suggested)})?`)) {
+        setFExp(suggested);
+      }
+    }
+    if (cat !== prevCat && fBarcode.trim()) {
+      rememberCategoryOverride(fBarcode.trim(), cat);
+    }
+  }
+
+  // Minimal form used only when resolving a genuinely new/unknown barcode
+  // from the Scanner Inbox — just name, category, room, and quantity.
+  // Everything else (unit, cost, expiration, perishable flag) is already
+  // filled in behind the scenes from the barcode lookup and category pick.
+  function renderResolveForm() {
+    return (
+      <>
+        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)',marginBottom:12}}>
+          Item name *
+          <input value={fName} onChange={e=>setFName(e.target.value)} placeholder="What is this item?" style={{fontSize:15,fontWeight:600}}/>
+        </label>
+        <div className="form-grid" style={{marginBottom:12}}>
+          <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>
+            Category
+            <select value={fCat} onChange={e=>handleCategoryChange(e.target.value)}>
+              {INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+          <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>
+            Quantity
+            <input type="number" min={1} value={fQty} onChange={e=>setFQty(parseInt(e.target.value)||1)}/>
+          </label>
+        </div>
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:12,color:'var(--muted)',marginBottom:6}}>Where's it going?</div>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            {INV_LOCS.map(loc=>(
+              <button key={loc} type="button" onClick={()=>setFLoc(loc)} style={{
+                padding:'7px 16px',borderRadius:999,fontSize:13,fontWeight:fLoc===loc?700:500,
+                border:`1.5px solid ${fLoc===loc?'var(--green)':'var(--border)'}`,
+                background:fLoc===loc?'var(--green)':'transparent',
+                color:fLoc===loc?'#fff':'var(--text)',cursor:'pointer',transition:'all 0.15s',
+              }}>{loc}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <button className="btn primary" onClick={resolveCurrentUnknown} disabled={saving||!fName.trim()}>{saving?'Saving...':'Add to Inventory'}</button>
+          <button className="btn ghost" onClick={skipCurrentUnknown}>Skip this item</button>
+        </div>
+      </>
+    );
+  }
+
   function renderInvForm(onCancel: () => void, onSave?: () => void) {
     return (
       <>
@@ -2974,28 +3044,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
           <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Item name *<input value={fName} onChange={e=>setFName(e.target.value)} placeholder="e.g. Canned Tomatoes"/></label>
           <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Brand<input value={fBrand} onChange={e=>setFBrand(e.target.value)} placeholder="e.g. Hunt's"/></label>
           <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Barcode<input value={fBarcode} onChange={e=>setFBarcode(e.target.value)} placeholder="UPC / EAN"/></label>
-          <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Category<select value={fCat} onChange={e=>{
-            const cat = e.target.value;
-            const prevCat = fCat;
-            setFCat(cat);
-            if (FOOD_CATS.includes(cat)) {
-              setFPerish(true);
-              const days = FOOD_CAT_DEFAULT_DAYS[cat] ?? 365;
-              const d = new Date(); d.setDate(d.getDate() + days);
-              const suggested = invKey(d);
-              // Only bother asking if this would actually change something —
-              // don't nag if the expiration is already blank or already set
-              // to this same suggestion.
-              if (!fExp) {
-                setFExp(suggested);
-              } else if (fExp !== suggested && confirm(`Update expiration date to the typical default for ${cat} (${invFmt(suggested)})?`)) {
-                setFExp(suggested);
-              }
-            }
-            if (cat !== prevCat && fBarcode.trim()) {
-              rememberCategoryOverride(fBarcode.trim(), cat);
-            }
-          }}>{INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></label>
+          <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Category<select value={fCat} onChange={e=>handleCategoryChange(e.target.value)}>{INV_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></label>
           <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Quantity<input type="number" min={0} value={fQty} onChange={e=>setFQty(parseInt(e.target.value)||0)}/></label>
           <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Unit<select value={fUnit} onChange={e=>setFUnit(e.target.value)}>{INV_UNITS.map(u=><option key={u} value={u}>{u}</option>)}</select></label>
           <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Avg cost (Canton GA)<input type="number" step="0.01" value={fCost} onChange={e=>setFCost(e.target.value)} placeholder="e.g. 2.49"/></label>
@@ -3638,7 +3687,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
                 <div style={{fontSize:12,color:'var(--muted)',marginBottom:14}}>
                   Barcode {resolveQueue[resolveIdx]?.barcode} was scanned {resolveQueue[resolveIdx]?.count}× and isn't in your inventory yet — fill in the details to add it.
                 </div>
-                {renderInvForm(()=>{ /* Cancel just skips this one */ skipCurrentUnknown(); }, resolveCurrentUnknown)}
+                {renderResolveForm()}
                 <div style={{display:'flex',gap:8,marginTop:-8,marginBottom:16}}>
                   <button className="btn ghost" onClick={skipCurrentUnknown} style={{fontSize:12}}>Skip this item</button>
                 </div>
