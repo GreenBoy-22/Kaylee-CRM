@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import type { Session } from '@supabase/supabase-js';
 import {
   Activity, Cloud, Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
@@ -3575,8 +3576,8 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
       </div>;})}
     </section>}
 
-    {/* ── Scanner Inbox modal ─────────────────────────────────────────── */}
-    {showInbox && (
+    {/* ── Scanner Inbox modal (portaled to document.body so it always covers the full viewport, regardless of any parent layout transforms) ── */}
+    {showInbox && createPortal(
       <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={()=>{if(resolveQueue.length===0){setShowInbox(false);setApplySummary('');}}}>
         <div style={{background:'var(--surface-0)',borderRadius:14,width:'100%',maxWidth:640,maxHeight:'88vh',display:'flex',flexDirection:'column',overflow:'hidden'}} onClick={e=>e.stopPropagation()}>
           <div style={{padding:'16px 20px',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
@@ -3661,7 +3662,8 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
             </div>
           )}
         </div>
-      </div>
+      </div>,
+      document.body
     )}
   </>;
 }
