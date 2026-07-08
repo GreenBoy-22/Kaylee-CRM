@@ -326,6 +326,12 @@ export default function Books() {
   const [lastIcollectSyncAt, setLastIcollectSyncAt]   = useState<string | null>(null);
   const [suggesting, setSuggesting]   = useState(false);
   const [suggestionDismissed, setSuggestionDismissed] = useState(false);
+  // Rendering all 900+ books at once (especially the cover-image grid) is
+  // almost certainly what's crashing the tab on mobile — browsers (iOS
+  // Safari especially) will silently kill and reload a page that uses too
+  // much memory, which lands you back on the Dashboard with no warning.
+  // Paginating keeps the DOM/image count bounded.
+  const [visibleCount, setVisibleCount] = useState(60);
 
   // ── Load books ──────────────────────────────────────────────────────
   // ── Save sync timestamp to user_preferences ─────────────────────────
@@ -750,6 +756,10 @@ export default function Books() {
 
   const currentlyReading = books.filter(b => b.status === 'reading');
 
+  useEffect(() => { setVisibleCount(60); }, [filtered.length, sortKey, sortAsc, statusFilter, genreFilter, search]);
+
+  const visibleBooks = useMemo(() => sorted.slice(0, visibleCount), [sorted, visibleCount]);
+
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortAsc(a => !a);
     else { setSortKey(key); setSortAsc(true); }
@@ -1023,9 +1033,9 @@ export default function Books() {
             <button className={viewMode === 'list' ? 'btn primary tiny' : 'btn ghost tiny'} onClick={() => setViewMode('list')}><List size={13} /></button>
           </div>
         </div>
-        {filtered.length !== books.length && (
-          <p style={{ fontSize: 12, color: 'var(--muted)', margin: '8px 0 0' }}>Showing {filtered.length} of {books.length}</p>
-        )}
+        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '8px 0 0' }}>
+          Showing {Math.min(visibleCount, sorted.length)} of {filtered.length}{filtered.length !== books.length ? ` (filtered from ${books.length})` : ''}
+        </p>
       </section>
 
       {/* Book grid / list */}
@@ -1040,16 +1050,25 @@ export default function Books() {
       )}
 
       {!loading && sorted.length > 0 && viewMode === 'grid' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12, padding: '4px 0' }}>
-          {sorted.map(book => (
-            <BookCard key={book.id} book={book} onUpdate={updateBook} onDelete={deleteBook} />
-          ))}
-        </div>
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12, padding: '4px 0' }}>
+            {visibleBooks.map(book => (
+              <BookCard key={book.id} book={book} onUpdate={updateBook} onDelete={deleteBook} />
+            ))}
+          </div>
+          {visibleCount < sorted.length && (
+            <div style={{ textAlign: 'center', marginTop: 14 }}>
+              <button className="btn ghost" onClick={() => setVisibleCount(c => c + 60)}>
+                Load {Math.min(60, sorted.length - visibleCount)} More ({sorted.length - visibleCount} remaining)
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {!loading && sorted.length > 0 && viewMode === 'list' && (
         <section className="panel" style={{ paddingBottom: 4 }}>
-          {sorted.map(book => (
+          {visibleBooks.map(book => (
             <BookListRow
               key={book.id}
               book={book}
@@ -1059,6 +1078,13 @@ export default function Books() {
               onDelete={deleteBook}
             />
           ))}
+          {visibleCount < sorted.length && (
+            <div style={{ textAlign: 'center', padding: '14px 0' }}>
+              <button className="btn ghost" onClick={() => setVisibleCount(c => c + 60)}>
+                Load {Math.min(60, sorted.length - visibleCount)} More ({sorted.length - visibleCount} remaining)
+              </button>
+            </div>
+          )}
         </section>
       )}
     </>

@@ -3149,16 +3149,11 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
 
   async function lookupUPC(rawCode: string): Promise<{name:string;brand:string;category:string;isPerishable:boolean;expires:string|null;avgCost:number|null}|null> {
     try {
-      const { data: sd } = await supabase!.auth.getSession();
-      const token = sd.session?.access_token;
-      if (!token) return null;
-      const resp = await fetch('https://uccehajbwxzqdzvexzuc.supabase.co/functions/v1/ai-proxy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ _upc_lookup: true, barcode: rawCode, use_ai: useAIFallback }),
+      const { data: d, error } = await supabase!.functions.invoke('ai-proxy', {
+        body: { _upc_lookup: true, barcode: rawCode, use_ai: useAIFallback },
       });
-      const d = await resp.json();
-      if (d.product?.name) {
+      if (error) return null;
+      if (d?.product?.name) {
         return {
           name: d.product.name,
           brand: d.product.brand || '',
@@ -3473,11 +3468,12 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     if(!confirm('Generate AI recipe ideas using your Anthropic API credits?\n\nThis costs ~$0.01 from your API balance. Press OK to continue.'))return;
     setAiLoading(true);setAiRecipes('');
     try{
-      const{data:sd}=await supabase!.auth.getSession();const token=sd.session?.access_token;
-      const r=await fetch('https://uccehajbwxzqdzvexzuc.supabase.co/functions/v1/ai-proxy',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,messages:[{role:'user',content:`Suggest 3-4 simple weeknight recipes for a family in Canton GA using these expiring items:\n${exp.map(i=>`${i.name} (${i._days}d left)`).join('\n')}\nFormat: 🍽️ Name\nUses: items\nTip: note`}]})});
-      const d=await r.json();
-      setAiRecipes(d.content?.[0]?.text??d.error?.message??'Could not generate.');
-    }catch{setAiRecipes('Error. Try again.');}
+      const{data:d,error}=await supabase!.functions.invoke('ai-proxy',{body:{model:'claude-sonnet-4-6',max_tokens:800,messages:[{role:'user',content:`Suggest 3-4 simple weeknight recipes for a family in Canton GA using these expiring items:\n${exp.map(i=>`${i.name} (${i._days}d left)`).join('\n')}\nFormat: 🍽️ Name\nUses: items\nTip: note`}]}});
+      if(error) throw error;
+      setAiRecipes(d?.content?.[0]?.text ?? d?.error?.message ?? 'Could not generate — unexpected response.');
+    }catch(err){
+      setAiRecipes(`Error: ${err instanceof Error ? err.message : 'Unknown error — try again.'}`);
+    }
     setAiLoading(false);
   }
 
