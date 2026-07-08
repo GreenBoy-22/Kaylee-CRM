@@ -2841,7 +2841,7 @@ function Briefing({ compact = false, role }: { compact?: boolean; role?: Role })
 
 function Inventory({ inventory: _inventory, createItem: _createItem, updateQuantity: _updateQuantity, editable }: { inventory: InventoryItem[]; createItem: (item: Omit<InventoryItem, 'id'>) => void; updateQuantity: (id: string, quantity: number) => void; editable: boolean }) {
   // Full-featured inventory — ignores legacy props, reads/writes Supabase directly
-  type InvItem = { id:string; name:string; brand:string|null; location:string|null; category:string|null; quantity:number; unit:string; expires:string|null; import_date:string|null; value:number|null; avg_cost_canton:number|null; barcode:string|null; notes:string|null; is_perishable:boolean; scan_count:number; created_at:string; updated_at:string|null; };
+  type InvItem = { id:string; name:string; brand:string|null; location:string|null; category:string|null; quantity:number; unit:string; expires:string|null; import_date:string|null; value:number|null; avg_cost_canton:number|null; barcode:string|null; notes:string|null; is_perishable:boolean; scan_count:number; created_at:string; updated_at:string|null; alt_barcodes:string[]; barcode_multipliers:Record<string,number>; };
   type InvTx = { id:string; item_id:string; transaction_type:string; quantity_change:number; barcode:string|null; notes:string|null; created_at:string; };
 
   const INV_CATS = ['Pantry','Refrigerator','Freezer','Cleaning','Personal Care','Pet Supplies','Medicine','Garden','Paper Products','Beverages','Snacks','Baking','Canned Goods','Condiments','Other'];
@@ -2884,12 +2884,19 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   const [filterCat, setFilterCat] = useState('all');
   const [filterLoc, setFilterLoc] = useState('all');
   const [showOutOfStockOnly, setShowOutOfStockOnly] = useState(false);
+  const [expiringRange, setExpiringRange] = useState<'soon'|'1mo'|'2mo'|'longer'>('soon');
   const [editItem, setEditItem] = useState<InvItem|null>(null);
   // Remembers barcode → category corrections you've made before, so the
   // next time that same barcode gets scanned it's categorized right away
   // instead of defaulting back to whatever the lookup guessed.
   const [categoryOverrides, setCategoryOverrides] = useState<Record<string,string>>({});
   const [fName,setFName]=useState('');const [fBrand,setFBrand]=useState('');const [fCat,setFCat]=useState('Pantry');const [fLoc,setFLoc]=useState('Kitchen');const [fQty,setFQty]=useState(1);const [fUnit,setFUnit]=useState('each');const [fExp,setFExp]=useState('');const [fImp,setFImp]=useState(invKey(new Date()));const [fCost,setFCost]=useState('');const [fBarcode,setFBarcode]=useState('');const [fNotes,setFNotes]=useState('');const [fPerish,setFPerish]=useState(false);const [saving,setSaving]=useState(false);
+  // Linked barcodes — lets a 12-pack carton barcode and a single-can
+  // barcode both roll up to the same inventory item, with the pack
+  // barcode adding more than 1 unit per scan.
+  const [fAltBarcodes, setFAltBarcodes] = useState<{barcode:string;multiplier:number}[]>([]);
+  const [newLinkBarcode, setNewLinkBarcode] = useState('');
+  const [newLinkMultiplier, setNewLinkMultiplier] = useState(1);
   const [scanMode,setScanMode]=useState<'in'|'out'>('in');const [scanInput,setScanInput]=useState('');const [scanLog,setScanLog]=useState<{barcode:string;name:string;qty:number;action:string;time:string}[]>([]);const [scanStatus,setScanStatus]=useState('');
   const [aiRecipes,setAiRecipes]=useState('');const [aiLoading,setAiLoading]=useState(false);
 
@@ -2951,13 +2958,13 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     setCategoryOverrides(prev => ({ ...prev, [barcode.trim()]: category }));
   }
 
-  function resetInvForm(){setFName('');setFBrand('');setFCat('Pantry');setFLoc('Kitchen');setFQty(1);setFUnit('each');setFExp('');setFImp(invKey(new Date()));setFCost('');setFBarcode('');setFNotes('');setFPerish(false);setEditItem(null);}
+  function resetInvForm(){setFName('');setFBrand('');setFCat('Pantry');setFLoc('Kitchen');setFQty(1);setFUnit('each');setFExp('');setFImp(invKey(new Date()));setFCost('');setFBarcode('');setFNotes('');setFPerish(false);setFAltBarcodes([]);setNewLinkBarcode('');setNewLinkMultiplier(1);setEditItem(null);}
 
   async function saveInvItem(){
     if(!supabase||!fName.trim())return;setSaving(true);
     const{data:sd}=await supabase.auth.getSession();const uid=sd.session?.user?.id;if(!uid){setSaving(false);return;}
     const wasEditing = !!editItem;
-    const p={name:fName.trim(),brand:fBrand.trim()||null,category:fCat,location:fLoc,quantity:fQty,unit:fUnit,expires:fExp||null,import_date:fImp||null,avg_cost_canton:fCost?parseFloat(fCost):null,barcode:fBarcode.trim()||null,notes:fNotes.trim()||null,is_perishable:fPerish,user_id:uid,updated_at:new Date().toISOString()};
+    const p={name:fName.trim(),brand:fBrand.trim()||null,category:fCat,location:fLoc,quantity:fQty,unit:fUnit,expires:fExp||null,import_date:fImp||null,avg_cost_canton:fCost?parseFloat(fCost):null,barcode:fBarcode.trim()||null,notes:fNotes.trim()||null,is_perishable:fPerish,alt_barcodes:fAltBarcodes.map(b=>b.barcode),barcode_multipliers:Object.fromEntries(fAltBarcodes.map(b=>[b.barcode,b.multiplier])),user_id:uid,updated_at:new Date().toISOString()};
     if(editItem){await supabase.from('inventory_items').update(p).eq('id',editItem.id);if(editItem.quantity!==fQty)await supabase.from('inventory_transactions').insert({item_id:editItem.id,user_id:uid,transaction_type:'manual_adjust',quantity_change:fQty-editItem.quantity,notes:'Manual edit'});}
     else{const{data:ni}=await supabase.from('inventory_items').insert([p]).select().single();if(ni)await supabase.from('inventory_transactions').insert({item_id:ni.id,user_id:uid,transaction_type:'manual_adjust',quantity_change:fQty,notes:'Item added'});}
     const hadBarcode = fBarcode.trim().length > 0;
@@ -3082,6 +3089,34 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
           <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Purchase date<input type="date" value={fImp} onChange={e=>setFImp(e.target.value)}/></label>
           <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--muted)'}}>Expiration date<input type="date" value={fExp} onChange={e=>setFExp(e.target.value)}/></label>
         </div>
+
+        {/* Linked barcodes — e.g. a 12-pack carton's barcode and the single-can barcode both roll up to this same item */}
+        <div style={{marginBottom:12,padding:'10px 12px',background:'var(--surface-1)',borderRadius:8,border:'1px solid var(--border)'}}>
+          <div style={{fontSize:12,fontWeight:700,color:'var(--muted)',marginBottom:6}}>Linked Barcodes</div>
+          <div style={{fontSize:11,color:'var(--muted)',marginBottom:8}}>Scan a different barcode (like a 12-pack carton) that should count toward this same item — set how many units it's worth.</div>
+          {fAltBarcodes.length>0 && (
+            <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:8}}>
+              {fAltBarcodes.map((b,i)=>(
+                <div key={b.barcode} style={{display:'flex',alignItems:'center',gap:8,fontSize:12}}>
+                  <span style={{fontFamily:'monospace',flex:1}}>{b.barcode}</span>
+                  <span style={{color:'var(--muted)'}}>= {b.multiplier} unit{b.multiplier!==1?'s':''}</span>
+                  <button onClick={()=>setFAltBarcodes(prev=>prev.filter((_,idx)=>idx!==i))} style={{background:'none',border:'none',cursor:'pointer',color:'var(--red)',fontSize:14}}>✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+            <input value={newLinkBarcode} onChange={e=>setNewLinkBarcode(e.target.value)} placeholder="Barcode" style={{flex:'1 1 140px',fontSize:12,padding:'6px 8px'}}/>
+            <input type="number" min={1} value={newLinkMultiplier} onChange={e=>setNewLinkMultiplier(parseInt(e.target.value)||1)} style={{width:60,fontSize:12,padding:'6px 8px'}} title="How many units this barcode is worth"/>
+            <button type="button" onClick={()=>{
+              const bc=newLinkBarcode.trim();
+              if(!bc||fAltBarcodes.some(b=>b.barcode===bc)||bc===fBarcode.trim())return;
+              setFAltBarcodes(prev=>[...prev,{barcode:bc,multiplier:newLinkMultiplier}]);
+              setNewLinkBarcode('');setNewLinkMultiplier(1);
+            }} style={{fontSize:12,fontWeight:700,padding:'6px 12px',borderRadius:6,border:'1px solid var(--purple)',background:'var(--purple)',color:'#fff',cursor:'pointer'}}>+ Link</button>
+          </div>
+        </div>
+
         <div style={{marginBottom:12}}>
           <div style={{fontSize:12,color:'var(--muted)',marginBottom:6}}>Room</div>
           <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
@@ -3145,7 +3180,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     setScanInput('');
     const{data:sd}=await supabase.auth.getSession();const uid=sd.session?.user?.id;if(!uid)return;
 
-    const existing = items.find(i=>i.barcode===code);
+    const existing = items.find(i=>i.barcode===code || (i.alt_barcodes??[]).includes(code));
     let suggested: ScanQueueRow['suggested_data'] = {};
 
     if(existing){
@@ -3258,7 +3293,11 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     // barcode in one batch just sum together).
     const netChange: Record<string, number> = {};
     for(const r of matched){
-      const delta = r.action==='in' ? 1 : -1;
+      const matchedItem = items.find(i=>i.id===r.matched_item_id);
+      // A linked barcode (e.g. a 12-pack carton) can be worth more than
+      // one unit of the item it's tied to.
+      const multiplier = matchedItem?.barcode_multipliers?.[r.barcode] ?? 1;
+      const delta = (r.action==='in' ? 1 : -1) * multiplier;
       netChange[r.matched_item_id as string] = (netChange[r.matched_item_id as string] ?? 0) + delta;
     }
     let updatedCount = 0;
@@ -3430,10 +3469,15 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   }, [tab]);
 
   async function genRecipes(){
-    const exp=filteredExpiring.filter(i=>(i._days??99)<=7);if(!exp.length)return;
+    const exp=filteredExpiring.filter(i=>(i._days??99)<=14);if(!exp.length)return;
     if(!confirm('Generate AI recipe ideas using your Anthropic API credits?\n\nThis costs ~$0.01 from your API balance. Press OK to continue.'))return;
     setAiLoading(true);setAiRecipes('');
-    try{const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,messages:[{role:'user',content:`Suggest 3-4 simple weeknight recipes for a family in Canton GA using these expiring items:\n${exp.map(i=>`${i.name} (${i._days}d left)`).join('\n')}\nFormat: 🍽️ Name\nUses: items\nTip: note`}]})});const d=await r.json();setAiRecipes(d.content?.[0]?.text??'Could not generate.');}catch{setAiRecipes('Error. Try again.');}
+    try{
+      const{data:sd}=await supabase!.auth.getSession();const token=sd.session?.access_token;
+      const r=await fetch('https://uccehajbwxzqdzvexzuc.supabase.co/functions/v1/ai-proxy',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,messages:[{role:'user',content:`Suggest 3-4 simple weeknight recipes for a family in Canton GA using these expiring items:\n${exp.map(i=>`${i.name} (${i._days}d left)`).join('\n')}\nFormat: 🍽️ Name\nUses: items\nTip: note`}]})});
+      const d=await r.json();
+      setAiRecipes(d.content?.[0]?.text??d.error?.message??'Could not generate.');
+    }catch{setAiRecipes('Error. Try again.');}
     setAiLoading(false);
   }
 
@@ -3455,8 +3499,8 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:14}}>
       {[
         {label:'Total Items', value:items.length, color:'var(--purple)', active: tab==='items'&&!showOutOfStockOnly, onClick:()=>{setTab('items');setShowOutOfStockOnly(false);}},
-        {label:'Expired', value:expiredCount, color:'var(--red)', active: tab==='expiring', onClick:()=>setTab('expiring')},
-        {label:'Expiring Soon', value:filteredExpiring.filter(i=>(i._days??99)>=0&&(i._days??99)<=7).length, color:'var(--amber)', active: tab==='expiring', onClick:()=>setTab('expiring')},
+        {label:'Expired', value:expiredCount, color:'var(--red)', active: tab==='expiring', onClick:()=>{setTab('expiring');setExpiringRange('soon');}},
+        {label:'Expiring Soon', value:filteredExpiring.filter(i=>(i._days??99)>=0&&(i._days??99)<=14).length, color:'var(--amber)', active: tab==='expiring', onClick:()=>{setTab('expiring');setExpiringRange('soon');}},
         {label:'Out of Stock', value:items.filter(i=>i.quantity<=0&&needsStockTracking(i)).length, color:'#0891b2', active: tab==='items'&&showOutOfStockOnly, onClick:()=>{setTab('items');setShowOutOfStockOnly(true);}},
         {label:'Scanner', value:queueRows.length, color:'#16a34a', active: tab==='scan', onClick:()=>setTab('scan')},
         {label:'History', value:txs.length, color:'#7c3aed', active: tab==='history', onClick:()=>setTab('history')},
@@ -3538,7 +3582,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
               )}
               <button className="qty-button" onClick={()=>{
                 if(isEditingThis){resetInvForm();return;}
-                setEditItem(item);setFName(item.name);setFBrand(item.brand??'');setFCat(item.category??'Pantry');setFLoc(item.location??'Kitchen');setFQty(item.quantity);setFUnit(item.unit??'each');setFExp(item.expires??'');setFImp(item.import_date??invKey(new Date()));setFCost(item.avg_cost_canton?.toString()??'');setFBarcode(item.barcode??'');setFNotes(item.notes??'');setFPerish(item.is_perishable??false);
+                setEditItem(item);setFName(item.name);setFBrand(item.brand??'');setFCat(item.category??'Pantry');setFLoc(item.location??'Kitchen');setFQty(item.quantity);setFUnit(item.unit??'each');setFExp(item.expires??'');setFImp(item.import_date??invKey(new Date()));setFCost(item.avg_cost_canton?.toString()??'');setFBarcode(item.barcode??'');setFNotes(item.notes??'');setFPerish(item.is_perishable??false);setFAltBarcodes((item.alt_barcodes??[]).map(bc=>({barcode:bc,multiplier:item.barcode_multipliers?.[bc]??1})));
               }}>✏️</button>
               <button className="qty-button" style={{color:'var(--red)'}} onClick={()=>delInvItem(item.id)}>🗑</button>
             </div>
@@ -3554,17 +3598,42 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
 
     {tab==='expiring'&&<div>
       {expiredCount>0&&<div style={{background:'#fee2e2',border:'1px solid var(--red)',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:13,fontWeight:600,color:'var(--red)'}}>⚠️ {expiredCount} item(s) expired — check and discard.</div>}
-      {filteredExpiring.filter(i=>(i._days??99)<=7).length>0&&<section className="panel" style={{borderTop:'3px solid var(--amber)',marginBottom:14}}>
+
+      {/* Date-range toggle — defaults to the "before your next grocery trip" window */}
+      <div style={{display:'flex',gap:6,marginBottom:14,flexWrap:'wrap'}}>
+        {([['soon','Grocery Trip (≤14d)'],['1mo','1 Month'],['2mo','2 Months'],['longer','Longer Out']] as const).map(([key,label])=>(
+          <button key={key} onClick={()=>setExpiringRange(key)} style={{
+            padding:'7px 14px',borderRadius:999,fontSize:12,fontWeight:expiringRange===key?700:500,cursor:'pointer',
+            border:`1.5px solid ${expiringRange===key?'var(--amber)':'var(--border)'}`,
+            background:expiringRange===key?'#fef9c3':'transparent',
+            color:expiringRange===key?'#854d0e':'var(--muted)',
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {filteredExpiring.filter(i=>(i._days??99)<=14).length>0&&<section className="panel" style={{borderTop:'3px solid var(--amber)',marginBottom:14}}>
         <div className="panel-head"><h2>🍽️ Use These Up — AI Recipe Ideas</h2></div>
         <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:12}}>
-          {filteredExpiring.filter(i=>(i._days??99)<=7).map(i=><span key={i.id} style={{fontSize:12,background:(i._days??99)<0?'#fee2e2':(i._days??99)<=3?'#ffedd5':'#fef9c3',padding:'4px 10px',borderRadius:999,fontWeight:600}}>{i.name} ({(i._days??0)<0?'EXPIRED':`${i._days}d`})</span>)}
+          {filteredExpiring.filter(i=>(i._days??99)<=14).map(i=><span key={i.id} style={{fontSize:12,background:(i._days??99)<0?'#fee2e2':(i._days??99)<=3?'#ffedd5':'#fef9c3',padding:'4px 10px',borderRadius:999,fontWeight:600}}>{i.name} ({(i._days??0)<0?'EXPIRED':`${i._days}d`})</span>)}
         </div>
         <button className="btn primary" onClick={genRecipes} disabled={aiLoading}>{aiLoading?'Generating...':'✨ Get Recipe Ideas'}</button>
         {aiRecipes&&<div style={{marginTop:14,background:'var(--surface-1)',borderRadius:8,padding:'12px 14px',fontSize:13,lineHeight:1.75,whiteSpace:'pre-wrap'}}>{aiRecipes}</div>}
       </section>}
       <div style={{display:'flex',flexDirection:'column',gap:6}}>
-        {filteredExpiring.map(item=>{const d=item._days??0;const c=d<0?'var(--red)':d<=3?'#f97316':d<=7?'var(--amber)':'var(--green)';return<div key={item.id} style={{display:'flex',gap:12,alignItems:'center',padding:'10px 14px',background:'var(--surface-0)',border:`1px solid ${c}`,borderLeft:`4px solid ${c}`,borderRadius:8}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:14}}>{item.name}</div><div style={{fontSize:12,color:'var(--muted)',marginTop:2}}>{item.quantity} {item.unit} · {item.location??'No location'}</div></div><div style={{textAlign:'right',flexShrink:0}}><div style={{fontSize:14,fontWeight:800,color:c}}>{d<0?`${Math.abs(d)}d EXPIRED`:d===0?'TODAY':`${d}d left`}</div>{item.expires&&<div style={{fontSize:11,color:'var(--muted)'}}>{invFmt(item.expires)}</div>}</div></div>;})}
-        {filteredExpiring.length===0&&<section className="panel" style={{textAlign:'center',padding:40}}><p style={{color:'var(--muted)'}}>No perishable items tracked.</p></section>}
+        {filteredExpiring.filter(item=>{
+          const d=item._days??0;
+          if(expiringRange==='soon')return d<=14;
+          if(expiringRange==='1mo')return d>14&&d<=30;
+          if(expiringRange==='2mo')return d>30&&d<=60;
+          return d>60;
+        }).map(item=>{const d=item._days??0;const c=d<0?'var(--red)':d<=3?'#f97316':d<=7?'var(--amber)':'var(--green)';return<div key={item.id} style={{display:'flex',gap:12,alignItems:'center',padding:'10px 14px',background:'var(--surface-0)',border:`1px solid ${c}`,borderLeft:`4px solid ${c}`,borderRadius:8}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:14}}>{item.name}</div><div style={{fontSize:12,color:'var(--muted)',marginTop:2}}>{item.quantity} {item.unit} · {item.location??'No location'}</div></div><div style={{textAlign:'right',flexShrink:0}}><div style={{fontSize:14,fontWeight:800,color:c}}>{d<0?`${Math.abs(d)}d EXPIRED`:d===0?'TODAY':`${d}d left`}</div>{item.expires&&<div style={{fontSize:11,color:'var(--muted)'}}>{invFmt(item.expires)}</div>}</div></div>;})}
+        {filteredExpiring.filter(item=>{
+          const d=item._days??0;
+          if(expiringRange==='soon')return d<=14;
+          if(expiringRange==='1mo')return d>14&&d<=30;
+          if(expiringRange==='2mo')return d>30&&d<=60;
+          return d>60;
+        }).length===0&&<section className="panel" style={{textAlign:'center',padding:40}}><p style={{color:'var(--muted)'}}>No items in this range.</p></section>}
       </div>
     </div>}
 
@@ -3686,11 +3755,29 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     {tab==='history'&&<section className="panel">
       <div className="panel-head"><h2>Transaction History</h2><span className="readonly-pill">{txs.length}</span></div>
       {txs.length===0&&<p style={{fontSize:13,color:'var(--muted)'}}>No transactions yet.</p>}
-      {txs.map(tx=>{const item=items.find(i=>i.id===tx.item_id);const isIn=tx.quantity_change>0;return<div key={tx.id} style={{display:'flex',gap:10,alignItems:'flex-start',padding:'8px 0',borderBottom:'1px solid var(--border)'}}>
-        <span style={{fontSize:16,fontWeight:800,color:isIn?'#16a34a':'#ef4444',flexShrink:0}}>{isIn?'↑':'↓'}</span>
-        <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600}}>{item?.name??'Unknown'}</div><div style={{fontSize:12,color:'var(--muted)'}}>{tx.transaction_type.replace('_',' ')} · {isIn?'+':''}{tx.quantity_change} · {new Date(tx.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</div>{tx.notes&&<div style={{fontSize:11,color:'var(--muted)'}}>{tx.notes}</div>}</div>
-        {tx.barcode&&<span style={{fontSize:10,color:'var(--muted)',flexShrink:0}}>{tx.barcode}</span>}
-      </div>;})}
+      {txs.map(tx=>{
+        const item=items.find(i=>i.id===tx.item_id);
+        const isIn=tx.quantity_change>0;
+        const isEditingThis = item && editItem?.id===item.id;
+        return<div key={tx.id}>
+          <div style={{display:'flex',gap:10,alignItems:'flex-start',padding:'8px 0',borderBottom:isEditingThis?'none':'1px solid var(--border)'}}>
+            <span style={{fontSize:16,fontWeight:800,color:isIn?'#16a34a':'#ef4444',flexShrink:0}}>{isIn?'↑':'↓'}</span>
+            <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600}}>{item?.name??'Unknown (no longer in inventory)'}</div><div style={{fontSize:12,color:'var(--muted)'}}>{tx.transaction_type.replace('_',' ')} · {isIn?'+':''}{tx.quantity_change} · {new Date(tx.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</div>{tx.notes&&<div style={{fontSize:11,color:'var(--muted)'}}>{tx.notes}</div>}</div>
+            {tx.barcode&&<span style={{fontSize:10,color:'var(--muted)',flexShrink:0}}>{tx.barcode}</span>}
+            {item && (
+              <button className="qty-button" onClick={()=>{
+                if(isEditingThis){resetInvForm();return;}
+                setEditItem(item);setFName(item.name);setFBrand(item.brand??'');setFCat(item.category??'Pantry');setFLoc(item.location??'Kitchen');setFQty(item.quantity);setFUnit(item.unit??'each');setFExp(item.expires??'');setFImp(item.import_date??invKey(new Date()));setFCost(item.avg_cost_canton?.toString()??'');setFBarcode(item.barcode??'');setFNotes(item.notes??'');setFPerish(item.is_perishable??false);setFAltBarcodes((item.alt_barcodes??[]).map(bc=>({barcode:bc,multiplier:item.barcode_multipliers?.[bc]??1})));
+              }} style={{flexShrink:0}}>✏️</button>
+            )}
+          </div>
+          {isEditingThis && item && (
+            <section className="panel" style={{borderLeft:'4px solid var(--green)',marginBottom:10}}>
+              {renderInvForm(()=>resetInvForm())}
+            </section>
+          )}
+        </div>;
+      })}
     </section>}
 
     {/* ── Scanner Inbox modal (portaled to document.body so it always covers the full viewport, regardless of any parent layout transforms) ── */}
