@@ -87,6 +87,12 @@ const STATUS_ICONS: Record<ReadStatus, React.ElementType> = {
   dnf: X,
 };
 
+// Defensive helper — never let an unexpected status value produce
+// `undefined` styling anywhere in the file.
+function safeStatusColor(status: ReadStatus): string {
+  return STATUS_COLORS[status] ?? STATUS_COLORS.unread;
+}
+
 // ── Google Books API ───────────────────────────────────────────────────────
 
 async function searchGoogleBooks(query: string): Promise<GoogleBooksResult[]> {
@@ -224,14 +230,18 @@ function StarRating({ value, onChange }: { value: number | null; onChange?: (v: 
 }
 
 function StatusPill({ status }: { status: ReadStatus }) {
-  const Icon = STATUS_ICONS[status];
+  // Defend against any status value that isn't one of the five we expect
+  // (e.g. a stray import with a slightly different label) — falling back
+  // to 'unread' styling here beats crashing the entire app.
+  const safeStatus: ReadStatus = STATUS_ICONS[status] ? status : 'unread';
+  const Icon = STATUS_ICONS[safeStatus];
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 4,
       fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 999,
-      background: `${STATUS_COLORS[status]}22`, color: STATUS_COLORS[status],
+      background: `${STATUS_COLORS[safeStatus]}22`, color: STATUS_COLORS[safeStatus],
     }}>
-      <Icon size={10} />{STATUS_LABELS[status]}
+      <Icon size={10} />{STATUS_LABELS[safeStatus]}
     </span>
   );
 }
@@ -1115,9 +1125,9 @@ function BookCard({ book, onUpdate, onDelete }: { book: Book; onUpdate: (id: str
     >
       {getCoverUrl(book)
         ? <img src={getCoverUrl(book)!} alt={book.title} style={{ width: '100%', aspectRatio: '2/3', objectFit: 'cover', display: 'block' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-        : <div style={{ width: '100%', aspectRatio: '2/3', background: `${STATUS_COLORS[book.status]}18`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 6px' }}>
-            <BookOpen size={22} style={{ color: STATUS_COLORS[book.status], flexShrink: 0 }} />
-            <span style={{ fontSize: 9, color: STATUS_COLORS[book.status], textAlign: 'center', lineHeight: 1.3, fontWeight: 600, wordBreak: 'break-word' }}>{book.title.slice(0,40)}</span>
+        : <div style={{ width: '100%', aspectRatio: '2/3', background: `${safeStatusColor(book.status)}18`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 6px' }}>
+            <BookOpen size={22} style={{ color: safeStatusColor(book.status), flexShrink: 0 }} />
+            <span style={{ fontSize: 9, color: safeStatusColor(book.status), textAlign: 'center', lineHeight: 1.3, fontWeight: 600, wordBreak: 'break-word' }}>{book.title.slice(0,40)}</span>
           </div>
       }
       <div style={{ padding: '8px 8px 6px' }}>
@@ -1159,8 +1169,8 @@ function BookListRow({ book, expanded, onToggle, onUpdate, onDelete }: {
       >
         {getCoverUrl(book)
           ? <img src={getCoverUrl(book)!} alt={book.title} style={{ width: 32, height: 46, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-          : <div style={{ width: 32, height: 46, background: `${STATUS_COLORS[book.status]}22`, borderRadius: 3, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <BookOpen size={14} style={{ color: STATUS_COLORS[book.status] }} />
+          : <div style={{ width: 32, height: 46, background: `${safeStatusColor(book.status)}22`, borderRadius: 3, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <BookOpen size={14} style={{ color: safeStatusColor(book.status) }} />
             </div>
         }
         <div style={{ flex: 1, minWidth: 0 }}>
