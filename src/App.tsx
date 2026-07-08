@@ -219,21 +219,21 @@ const homeNav: readonly NavEntry[] = [
   ['today', 'Today’s Tasks', ClipboardCheck],
   ['briefing', 'Daily Briefing', Sparkles],
   ['calendar', 'Calendar', CalendarDays],
+  ['appointments', 'Appointments', Stethoscope],
   ['budget', 'Budget', WalletCards],
   ['chores', 'Chores & Tasks', ListTodo],
   ['contacts', 'Contacts', Users],
   ['games', 'Games', Gamepad2],
-  ['travel', 'Travel', Plane],
-  ['appointments', 'Appointments', Stethoscope],
   ['suggestions', 'Home Suggestions', Home],
   ['inventory', 'Inventory', Inbox],
   ['jules', 'Jules', Heart],
   ['books', 'Library', BookOpen],
-  ['media', 'Movies & TV', Film],
   ['migraine', 'Migraine Tracker', Brain],
   ['mood', 'Mood Log', Activity],
+  ['media', 'Movies & TV', Film],
   ['packages', 'Packages', Inbox],
   ['plants', 'Plant Catalog', Flower2],
+  ['travel', 'Travel', Plane],
   ['vehicles', 'Vehicles', Car],
   ['weather', 'Weather', Cloud]
 ];
@@ -2885,6 +2885,10 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   const [filterLoc, setFilterLoc] = useState('all');
   const [showOutOfStockOnly, setShowOutOfStockOnly] = useState(false);
   const [expiringRange, setExpiringRange] = useState<'soon'|'1mo'|'2mo'|'longer'>('soon');
+  const [recipeMode, setRecipeMode] = useState<'expiring'|'kitchen'|'mix'|'custom'>('expiring');
+  const [recipeCustomIds, setRecipeCustomIds] = useState<Set<string>>(new Set());
+  const [showRecipePicker, setShowRecipePicker] = useState(false);
+  const [recipePickerSearch, setRecipePickerSearch] = useState('');
   const [editItem, setEditItem] = useState<InvItem|null>(null);
   // Remembers barcode → category corrections you've made before, so the
   // next time that same barcode gets scanned it's categorized right away
@@ -3464,11 +3468,28 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   }, [tab]);
 
   async function genRecipes(){
-    const exp=filteredExpiring.filter(i=>(i._days??99)<=14);if(!exp.length)return;
+    let ingredientItems: InvItem[] = [];
+    if (recipeMode === 'expiring') {
+      ingredientItems = filteredExpiring.filter(i=>(i._days??99)<=14);
+    } else if (recipeMode === 'kitchen') {
+      ingredientItems = items.filter(i=>i.location==='Kitchen' && i.quantity>0);
+    } else if (recipeMode === 'mix') {
+      const expiring = filteredExpiring.filter(i=>(i._days??99)<=14);
+      const kitchen = items.filter(i=>i.location==='Kitchen' && i.quantity>0);
+      const seen = new Set<string>();
+      ingredientItems = [...expiring, ...kitchen].filter(i=>{ if(seen.has(i.id)) return false; seen.add(i.id); return true; });
+    } else {
+      ingredientItems = items.filter(i=>recipeCustomIds.has(i.id));
+    }
+    if(!ingredientItems.length){ setAiRecipes(recipeMode==='custom' ? 'Pick at least one item first.' : 'Nothing available for this option.'); return; }
     if(!confirm('Generate AI recipe ideas using your Anthropic API credits?\n\nThis costs ~$0.01 from your API balance. Press OK to continue.'))return;
     setAiLoading(true);setAiRecipes('');
     try{
-      const{data:d,error}=await supabase!.functions.invoke('ai-proxy',{body:{model:'claude-sonnet-4-6',max_tokens:800,messages:[{role:'user',content:`Suggest 3-4 simple weeknight recipes for a family in Canton GA using these expiring items:\n${exp.map(i=>`${i.name} (${i._days}d left)`).join('\n')}\nFormat: 🍽️ Name\nUses: items\nTip: note`}]}});
+      const list = ingredientItems.map(i=>{
+        const days = (filteredExpiring.find(e=>e.id===i.id) as any)?._days;
+        return days!=null ? `${i.name} (${days}d left)` : i.name;
+      }).join('\n');
+      const{data:d,error}=await supabase!.functions.invoke('ai-proxy',{body:{model:'claude-sonnet-4-6',max_tokens:800,messages:[{role:'user',content:`Suggest 3-4 simple weeknight recipes for a family in Canton GA using these items:\n${list}\nFormat: 🍽️ Name\nUses: items\nTip: note`}]}});
       if(error) throw error;
       setAiRecipes(d?.content?.[0]?.text ?? d?.error?.message ?? 'Could not generate — unexpected response.');
     }catch(err){
@@ -3607,14 +3628,42 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
         ))}
       </div>
 
-      {filteredExpiring.filter(i=>(i._days??99)<=14).length>0&&<section className="panel" style={{borderTop:'3px solid var(--amber)',marginBottom:14}}>
-        <div className="panel-head"><h2>🍽️ Use These Up — AI Recipe Ideas</h2></div>
+      <section className="panel" style={{borderTop:'3px solid var(--amber)',marginBottom:14}}>
+        <div className="panel-head"><h2>🍽️ AI Recipe Ideas</h2></div>
         <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:12}}>
-          {filteredExpiring.filter(i=>(i._days??99)<=14).map(i=><span key={i.id} style={{fontSize:12,background:(i._days??99)<0?'#fee2e2':(i._days??99)<=3?'#ffedd5':'#fef9c3',padding:'4px 10px',borderRadius:999,fontWeight:600}}>{i.name} ({(i._days??0)<0?'EXPIRED':`${i._days}d`})</span>)}
+          {([['expiring','Use Expiring Items'],['kitchen','Use Kitchen Items'],['mix','Mix of Both'],['custom','Choose Items']] as const).map(([key,label])=>(
+            <button key={key} onClick={()=>setRecipeMode(key)} style={{
+              padding:'7px 14px',borderRadius:999,fontSize:12,fontWeight:recipeMode===key?700:500,cursor:'pointer',
+              border:`1.5px solid ${recipeMode===key?'var(--amber)':'var(--border)'}`,
+              background:recipeMode===key?'#fef9c3':'transparent',
+              color:recipeMode===key?'#854d0e':'var(--muted)',
+            }}>{label}</button>
+          ))}
         </div>
+
+        {recipeMode==='custom' && (
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:12,color:'var(--muted)',marginBottom:6}}>
+              {recipeCustomIds.size>0 ? `${recipeCustomIds.size} item${recipeCustomIds.size!==1?'s':''} selected` : 'Pick one or more items to build a recipe around'}
+            </div>
+            <div style={{maxHeight:220,overflowY:'auto',border:'1px solid var(--border)',borderRadius:8,padding:8}}>
+              {items.filter(i=>i.quantity>0).map(i=>(
+                <label key={i.id} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 2px',fontSize:13,cursor:'pointer'}}>
+                  <input type="checkbox" checked={recipeCustomIds.has(i.id)} onChange={e=>setRecipeCustomIds(prev=>{
+                    const next=new Set(prev);
+                    if(e.target.checked) next.add(i.id); else next.delete(i.id);
+                    return next;
+                  })}/>
+                  {i.name}{i.location&&<span style={{color:'var(--muted)',fontSize:11}}> · {i.location}</span>}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
         <button className="btn primary" onClick={genRecipes} disabled={aiLoading}>{aiLoading?'Generating...':'✨ Get Recipe Ideas'}</button>
         {aiRecipes&&<div style={{marginTop:14,background:'var(--surface-1)',borderRadius:8,padding:'12px 14px',fontSize:13,lineHeight:1.75,whiteSpace:'pre-wrap'}}>{aiRecipes}</div>}
-      </section>}
+      </section>
       <div style={{display:'flex',flexDirection:'column',gap:6}}>
         {filteredExpiring.filter(item=>{
           const d=item._days??0;
