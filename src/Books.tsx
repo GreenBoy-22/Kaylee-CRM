@@ -211,6 +211,18 @@ function goodreadsShelfToStatus(shelf: string): ReadStatus {
   return 'unread';
 }
 
+const VALID_STATUSES: ReadStatus[] = ['unread', 'reading', 'read', 'wishlist', 'dnf'];
+
+// Any CSV column that ends up feeding the `status` field needs to go
+// through here — a raw shelf name like "to-read" is not a valid status
+// value on its own and would otherwise silently corrupt the row (this is
+// exactly what caused the Library tab crash before).
+function normalizeStatus(raw: string): ReadStatus {
+  const trimmed = raw.trim();
+  if ((VALID_STATUSES as string[]).includes(trimmed)) return trimmed as ReadStatus;
+  return goodreadsShelfToStatus(trimmed);
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function StarRating({ value, onChange }: { value: number | null; onChange?: (v: number) => void }) {
@@ -597,6 +609,10 @@ export default function Books() {
       const pubYrRaw = parseInt(get(pubYrIdx));
       const grRatingRaw = parseInt(get(grRatingIdx));
       const ownedRaw = get(ownIdx);
+      const normalizedStatus = normalizeStatus(get(stIdx) || 'unread');
+      // Respect an explicit true/false in the CSV; otherwise a wishlist
+      // item is by definition not owned yet.
+      const owned = ownedRaw ? (ownedRaw !== 'false' && ownedRaw !== 'False') : normalizedStatus !== 'wishlist';
       await supabase.from('books').insert({
         user_id: session.user.id,
         title,
@@ -606,8 +622,8 @@ export default function Books() {
         page_count: isNaN(pgRaw) ? null : pgRaw,
         published_year: isNaN(pubYrRaw) ? null : pubYrRaw,
         rating: isNaN(ratingRaw) || ratingRaw === 0 ? null : ratingRaw,
-        status: (get(stIdx) as ReadStatus) || 'unread',
-        owned: ownedRaw !== 'false' && ownedRaw !== 'False',
+        status: normalizedStatus,
+        owned,
         description: get(synIdx) || null,
         goodreads_id: get(grIdIdx) || null,
         goodreads_shelf: get(grShelfIdx) || null,
@@ -680,6 +696,7 @@ export default function Books() {
       if (exists) { skipped++; continue; }
       const ratingRaw = parseInt(get(rIdx));
       const pgRaw = parseInt(get(pgIdx));
+      const normalizedStatus2 = normalizeStatus(get(stIdx) || 'unread');
       await supabase.from('books').insert({
         user_id: session.user.id,
         title,
@@ -688,8 +705,8 @@ export default function Books() {
         isbn: get(isbnIdx) || null,
         page_count: isNaN(pgRaw) ? null : pgRaw,
         rating: isNaN(ratingRaw) || ratingRaw === 0 ? null : ratingRaw,
-        status: (get(stIdx) as ReadStatus) || 'unread',
-        owned: true,
+        status: normalizedStatus2,
+        owned: normalizedStatus2 !== 'wishlist',
         description: get(synIdx) || null,
       });
       added++;
