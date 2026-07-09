@@ -467,6 +467,44 @@ export default function WorkPerformance() {
         const withBlockers = students.filter(s => s.known_blockers && s.known_blockers.trim());
         const overdueCallPrep = students.filter(s => s.next_call_at && new Date(s.next_call_at).getTime() < now);
 
+        // ── Performance rating — weighted toward communication/outreach ──
+        // Your manager's own framing: results depend a lot on the student,
+        // but weekly calls and outreach are what's actually in your control
+        // and what the job is measured on. So this weights communication
+        // effort at 65% and KPI outcomes at 35%, not the other way around.
+        const totalActive = Math.max(1, students.length);
+        const contactCoveragePct = ((totalActive - noContact14d.length) / totalActive) * 100;
+        const avgMissedCalls = students.reduce((s, st) => s + (st.missed_call_count ?? 0), 0) / totalActive;
+        const addressedNotes = notes.filter(n2 => n2.status === 'addressed').length;
+        const noteResponsivenessPct = notes.length > 0 ? (addressedNotes / notes.length) * 100 : 100;
+        const hasRecentCallData = latest?.calls_over_45s !== null && latest?.calls_over_45s !== undefined;
+
+        const commScore = Math.round(
+          (contactCoveragePct * 0.40) +
+          (Math.max(0, 100 - avgMissedCalls * 50) * 0.20) +
+          (noteResponsivenessPct * 0.20) +
+          ((hasRecentCallData ? 100 : 60) * 0.20)
+        );
+
+        const otpComponent = latest?.otp_pct != null && latest?.otp_target_pct != null
+          ? Math.max(0, Math.min(100, 50 + (latest.otp_pct - latest.otp_target_pct) * 2))
+          : 60;
+        const pacingComponent = latest?.pacing_2m_pct != null && latest?.pacing_4m_pct != null
+          ? Math.max(0, Math.min(100, ((latest.pacing_2m_pct + latest.pacing_4m_pct) / 2 / 55) * 70))
+          : 60;
+        const dropComponent = latest?.drop_rate_pct != null
+          ? Math.max(0, Math.min(100, 100 - (latest.drop_rate_pct - 4) * 15))
+          : 60;
+        const retComponent = latest?.t1_t2_ret_pct != null && latest?.t2_t3_ret_pct != null && latest?.t3_plus_ret_pct != null
+          ? (latest.t1_t2_ret_pct + latest.t2_t3_ret_pct + latest.t3_plus_ret_pct) / 3
+          : 60;
+
+        const kpiScore = Math.round((otpComponent * 0.35) + (pacingComponent * 0.25) + (dropComponent * 0.20) + (retComponent * 0.20));
+
+        const overallScore = Math.round(commScore * 0.65 + kpiScore * 0.35);
+        const rating = overallScore >= 78 ? 'Exceeds' : overallScore >= 55 ? 'Achieves' : 'Needs Improvement';
+        const ratingColor = rating === 'Exceeds' ? '#7c3aed' : rating === 'Achieves' ? '#16a34a' : '#dc2626';
+
         const weakSpots: { label: string; detail: string; severity: 'urgent' | 'warning' | 'info' }[] = [];
         if (latest) {
           if (latest.otp_target_pct !== null && latest.otp_target_pct !== undefined && latest.otp_pct !== null) {
@@ -489,6 +527,38 @@ export default function WorkPerformance() {
 
         return (
           <div>
+            <section className="panel" style={{ borderTop: `4px solid ${ratingColor}`, marginBottom: 14 }}>
+              <div className="panel-head"><h2>📊 My Read on Your Performance</h2></div>
+              <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12, fontStyle: 'italic' }}>
+                This is my own assessment based on your logged data — not an official WGU rating. Since your boss has told you results depend heavily on the student while communication/outreach is what's actually in your control, this weights that effort at 65% and raw KPI outcomes at 35%.
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 13, color: 'var(--muted)' }}>Overall</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: ratingColor }}>{rating}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>{overallScore}/100</div>
+                </div>
+                <div style={{ flex: 1, minWidth: 220 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                    <span style={{ fontWeight: 700 }}>Communication &amp; Outreach (65% weight)</span><span>{commScore}/100</span>
+                  </div>
+                  <div style={{ height: 8, borderRadius: 999, background: 'var(--surface-1)', overflow: 'hidden', marginBottom: 6 }}>
+                    <div style={{ height: '100%', width: `${commScore}%`, background: '#0891b2' }} />
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                    {Math.round(contactCoveragePct)}% of caseload contacted within 14 days · {avgMissedCalls.toFixed(2)} avg missed calls/student · {notes.length > 0 ? `${addressedNotes}/${notes.length} coaching notes addressed` : 'no coaching notes logged'} · {hasRecentCallData ? `${latest?.calls_over_45s} calls logged this month` : 'no recent call volume logged'}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, margin: '10px 0 4px' }}>
+                    <span style={{ fontWeight: 700 }}>KPI Outcomes (35% weight)</span><span>{kpiScore}/100</span>
+                  </div>
+                  <div style={{ height: 8, borderRadius: 999, background: 'var(--surface-1)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${kpiScore}%`, background: '#7c3aed' }} />
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>OTP vs target, pacing, drop rate, and retention from your latest logged month{!latest ? ' (no month logged yet — using neutral defaults)' : ''}.</div>
+                </div>
+              </div>
+            </section>
+
             <section className="panel" style={{ borderTop: '3px solid var(--red)', marginBottom: 14 }}>
               <div className="panel-head"><h2>⚠️ Weak Areas</h2></div>
               {weakSpots.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>Nothing flagged as a clear weak spot right now — log this month's KPIs for a sharper read.</p>}
