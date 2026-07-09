@@ -4512,7 +4512,7 @@ function SettingsPage({ permissions, updatePermission }: { permissions: ModulePe
 
   // ── Push notifications ────────────────────────────────────────────────
   const VAPID_PUBLIC_KEY = 'BKM3RqM4dM49I5dsg4M_FOkDhokEiMMr2lej70U0JCm0JtfEd3N5zl1WAyP72W1eEKqQrevYMzgesdkyHgBCvy4';
-  const [pushStatus, setPushStatus] = useState<'checking' | 'unsupported' | 'subscribed' | 'unsubscribed' | 'blocked'>('checking');
+  const [pushStatus, setPushStatus] = useState<'checking' | 'unsupported' | 'subscribed' | 'unsubscribed' | 'blocked' | 'error'>('checking');
   const [pushBusy, setPushBusy] = useState(false);
 
   function urlBase64ToUint8Array(base64String: string) {
@@ -4524,19 +4524,25 @@ function SettingsPage({ permissions, updatePermission }: { permissions: ModulePe
     return outputArray;
   }
 
-  useEffect(() => {
-    (async () => {
-      if (!('serviceWorker' in navigator) || !('PushManager' in window)) { setPushStatus('unsupported'); return; }
-      if (Notification.permission === 'denied') { setPushStatus('blocked'); return; }
-      try {
-        const reg = await navigator.serviceWorker.ready;
-        const sub = await reg.pushManager.getSubscription();
-        setPushStatus(sub ? 'subscribed' : 'unsubscribed');
-      } catch {
-        setPushStatus('unsupported');
-      }
-    })();
+  const checkPushStatus = useCallback(async () => {
+    setPushStatus('checking');
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) { setPushStatus('unsupported'); return; }
+    if (Notification.permission === 'denied') { setPushStatus('blocked'); return; }
+    try {
+      // navigator.serviceWorker.ready can hang indefinitely if the service
+      // worker never reaches "activated" (e.g. a stuck update, or the SW
+      // registration itself failed silently) — race it against a timeout
+      // so the UI never just sits blank with no explanation.
+      const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 6000));
+      const reg = await Promise.race([navigator.serviceWorker.ready, timeout]);
+      const sub = await reg.pushManager.getSubscription();
+      setPushStatus(sub ? 'subscribed' : 'unsubscribed');
+    } catch {
+      setPushStatus('error');
+    }
   }, []);
+
+  useEffect(() => { checkPushStatus(); }, [checkPushStatus]);
 
   async function enablePush() {
     if (!supabase) return;
@@ -4593,6 +4599,13 @@ function SettingsPage({ permissions, updatePermission }: { permissions: ModulePe
       <p className="settings-intro">
         Get a daily reminder for your Briefing and — if you haven't logged one yet that day — your mood check-in. Sent once a day, around 8am.
       </p>
+      {pushStatus === 'checking' && <p className="settings-intro">Checking notification status…</p>}
+      {pushStatus === 'error' && (
+        <>
+          <p className="settings-intro">Couldn't check notification status — this can happen right after a fresh install while the service worker is still updating.</p>
+          <button className="btn ghost" onClick={checkPushStatus}>Try Again</button>
+        </>
+      )}
       {pushStatus === 'unsupported' && <p className="settings-intro">This browser/device doesn't support push notifications.</p>}
       {pushStatus === 'blocked' && <p className="settings-intro">Notifications are blocked for this app. You'll need to re-enable them in your phone/browser's notification settings, then reload this page.</p>}
       {pushStatus === 'subscribed' && (
