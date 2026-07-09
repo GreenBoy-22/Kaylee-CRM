@@ -24,6 +24,49 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// ── Push notifications: display the notification when one arrives ─────────
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = { title: "Kaylee's Hub", body: event.data ? event.data.text() : '' };
+  }
+
+  const title = payload.title || "Kaylee's Hub";
+  const options = {
+    body: payload.body || '',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    tag: payload.tag || 'kaylees-hub',
+    data: { url: payload.url || '/' },
+    // Re-alert even if a notification with the same tag already showed
+    // today (e.g. briefing ping vs. mood reminder shouldn't collapse
+    // into one silent notification).
+    renotify: true,
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// ── Notification click: focus an existing tab or open a new one ───────────
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.url) || '/';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          client.navigate(targetUrl);
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+    })
+  );
+});
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
