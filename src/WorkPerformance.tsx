@@ -25,6 +25,20 @@ interface KpiMonth {
   pacing_4m_pct: number | null;
   vsat_pct: number | null;
   notes: string | null;
+  otp_target_pct?: number | null;
+  rolling_6m_otp_pct?: number | null;
+  t1_t2_ret_pct?: number | null;
+  t2_t3_ret_pct?: number | null;
+  t3_plus_ret_pct?: number | null;
+  on_time_starts_pct?: number | null;
+  course_non_starts_pct?: number | null;
+  limited_progress_pct?: number | null;
+  w_vsat_pct?: number | null;
+  avg_load?: number | null;
+  calls_over_45s?: number | null;
+  avg_call_time_min?: number | null;
+  team_avg_calls_over_45s?: number | null;
+  team_avg_call_time_min?: number | null;
 }
 
 interface Review {
@@ -64,6 +78,18 @@ interface Goal {
   fiscal_year: string | null;
   due_date: string | null;
   status: 'on_track' | 'at_risk' | 'achieved' | 'missed';
+}
+
+interface StudentRow {
+  id: string;
+  display_name: string;
+  risk: string;
+  momentum: string | null;
+  last_contact_date: string | null;
+  next_call_at: string | null;
+  missed_call_count: number | null;
+  known_blockers: string | null;
+  next_conversation_focus: string | null;
 }
 
 const BLANK_KPI = { month_date: '', enrollment_total: '', drops: '', graduates: '', otp_pct: '', grad_rate_4yr_pct: '', drop_rate_pct: '', pacing_2m_pct: '', pacing_4m_pct: '', vsat_pct: '', notes: '' };
@@ -127,8 +153,9 @@ function TrendChart({ data, fields }: { data: KpiMonth[]; fields: { key: keyof K
 // ── Main component ──────────────────────────────────────────────────────
 
 export default function WorkPerformance() {
-  const [tab, setTab] = useState<'kpi' | 'reviews' | 'coaching' | 'goals'>('kpi');
+  const [tab, setTab] = useState<'kpi' | 'reviews' | 'coaching' | 'goals' | 'insights'>('insights');
   const [loading, setLoading] = useState(true);
+  const [students, setStudents] = useState<StudentRow[]>([]);
 
   const [kpis, setKpis] = useState<KpiMonth[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -159,16 +186,18 @@ export default function WorkPerformance() {
     const { data: sd } = await supabase.auth.getSession();
     const uid = sd.session?.user?.id;
     if (!uid) { setLoading(false); return; }
-    const [k, r, c, g] = await Promise.all([
+    const [k, r, c, g, s] = await Promise.all([
       supabase.from('work_kpi_monthly').select('*').eq('user_id', uid).order('month_date', { ascending: true }),
       supabase.from('work_reviews').select('*').eq('user_id', uid).order('review_date', { ascending: false }),
       supabase.from('work_coaching_notes').select('*').eq('user_id', uid).order('note_date', { ascending: false }),
       supabase.from('work_goals').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
+      supabase.from('students').select('id, display_name, risk, momentum, last_contact_date, next_call_at, missed_call_count, known_blockers, next_conversation_focus').eq('archived', false),
     ]);
     setKpis((k.data as KpiMonth[]) ?? []);
     setReviews((r.data as Review[]) ?? []);
     setNotes((c.data as CoachingNote[]) ?? []);
     setGoals((g.data as Goal[]) ?? []);
+    setStudents((s.data as StudentRow[]) ?? []);
     setLoading(false);
   }, []);
 
@@ -369,6 +398,7 @@ export default function WorkPerformance() {
       </div>
 
       <div className="tabs" style={{ marginBottom: 14 }}>
+        <button className={tab === 'insights' ? 'active' : ''} onClick={() => setTab('insights')}><Sparkles size={13} /> Weak Areas &amp; Suggestions</button>
         <button className={tab === 'kpi' ? 'active' : ''} onClick={() => setTab('kpi')}><TrendingUp size={13} /> KPI Dashboard</button>
         <button className={tab === 'reviews' ? 'active' : ''} onClick={() => setTab('reviews')}><FileText size={13} /> Reviews ({reviews.length})</button>
         <button className={tab === 'coaching' ? 'active' : ''} onClick={() => setTab('coaching')}><MessageSquare size={13} /> Coaching Notes ({notes.length})</button>
@@ -376,6 +406,119 @@ export default function WorkPerformance() {
       </div>
 
       {loading && <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p>}
+
+      {/* ── INSIGHTS: weak areas + student-based suggestions ── */}
+      {!loading && tab === 'insights' && (() => {
+        const latest = kpis[kpis.length - 1];
+        const highRisk = students.filter(s => (s.risk ?? '').toLowerCase().includes('high'));
+        const lowMomentum = students.filter(s => ['low', 'med low'].includes((s.momentum ?? '').toLowerCase().trim()));
+        const now = Date.now();
+        const noContact14d = students.filter(s => !s.last_contact_date || (now - new Date(s.last_contact_date).getTime()) / 86400000 > 14);
+        const criticalList = students.filter(s =>
+          (s.risk ?? '').toLowerCase().includes('high') &&
+          (!s.last_contact_date || (now - new Date(s.last_contact_date).getTime()) / 86400000 > 14)
+        );
+        const withBlockers = students.filter(s => s.known_blockers && s.known_blockers.trim());
+        const overdueCallPrep = students.filter(s => s.next_call_at && new Date(s.next_call_at).getTime() < now);
+
+        const weakSpots: { label: string; detail: string; severity: 'urgent' | 'warning' | 'info' }[] = [];
+        if (latest) {
+          if (latest.otp_target_pct !== null && latest.otp_target_pct !== undefined && latest.otp_pct !== null) {
+            const diff = latest.otp_pct - latest.otp_target_pct;
+            if (diff < 0) weakSpots.push({ label: 'OTP below target', detail: `${latest.otp_pct}% vs ${latest.otp_target_pct}% target (${diff.toFixed(1)} pts) this month.`, severity: diff < -10 ? 'urgent' : 'warning' });
+          }
+          if (latest.t3_plus_ret_pct !== null && latest.t3_plus_ret_pct !== undefined && latest.t3_plus_ret_pct < 70) {
+            weakSpots.push({ label: 'T3+ Retention is your softest cohort', detail: `${latest.t3_plus_ret_pct}% this month — students furthest along are dropping at a higher rate than earlier terms.`, severity: 'warning' });
+          }
+          if (latest.pacing_2m_pct !== null && latest.pacing_2m_pct < 55) {
+            weakSpots.push({ label: '2-Month Pacing trailing', detail: `${latest.pacing_2m_pct}% — ties directly to the ${lowMomentum.length} students currently at Low/Med-Low momentum.`, severity: 'info' });
+          }
+        }
+        if (highRisk.length > 0) {
+          weakSpots.push({ label: 'High caseload concentration in High Risk', detail: `${highRisk.length} of ${students.length} active students (${Math.round(highRisk.length / Math.max(1, students.length) * 100)}%) are flagged High/High Risk.`, severity: highRisk.length / Math.max(1, students.length) > 0.5 ? 'urgent' : 'warning' });
+        }
+        if (criticalList.length > 0) {
+          weakSpots.push({ label: 'High-risk students with no recent contact', detail: `${criticalList.length} high-risk students haven't been contacted in 14+ days — these are the most likely to drop or miss OTP.`, severity: 'urgent' });
+        }
+
+        return (
+          <div>
+            <section className="panel" style={{ borderTop: '3px solid var(--red)', marginBottom: 14 }}>
+              <div className="panel-head"><h2>⚠️ Weak Areas</h2></div>
+              {weakSpots.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>Nothing flagged as a clear weak spot right now — log this month's KPIs for a sharper read.</p>}
+              {weakSpots.map((w, i) => (
+                <div key={i} style={{ display: 'flex', gap: 10, padding: '8px 0', borderBottom: i < weakSpots.length - 1 ? '1px solid var(--border)' : undefined }}>
+                  <span style={{ fontSize: 16, flexShrink: 0 }}>{w.severity === 'urgent' ? '🔴' : w.severity === 'warning' ? '🟡' : '🔵'}</span>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>{w.label}</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>{w.detail}</div>
+                  </div>
+                </div>
+              ))}
+            </section>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 14 }}>
+              {[
+                ['High Risk Students', highRisk.length, '#dc2626'],
+                ['Low Momentum', lowMomentum.length, '#f59e0b'],
+                ['No Contact 14d+', noContact14d.length, '#0891b2'],
+                ['Overdue Call Prep', overdueCallPrep.length, '#7c3aed'],
+              ].map(([label, val, color]) => (
+                <section key={String(label)} className="panel" style={{ textAlign: 'center', padding: '10px 8px' }}>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{label}</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: String(color) }}>{val}</div>
+                </section>
+              ))}
+            </div>
+
+            <section className="panel" style={{ borderTop: '3px solid var(--green)', marginBottom: 14 }}>
+              <div className="panel-head"><h2>💡 Suggested Next Actions</h2></div>
+              <ol style={{ paddingLeft: 18, fontSize: 13, lineHeight: 1.9 }}>
+                {criticalList.length > 0 && (
+                  <li><strong>Call these {Math.min(10, criticalList.length)} first</strong> — high-risk and overdue for contact: {criticalList.slice(0, 10).map(s => s.display_name).join(', ')}{criticalList.length > 10 ? ` (+${criticalList.length - 10} more)` : ''}.</li>
+                )}
+                {lowMomentum.length > 5 && (
+                  <li>Your Low/Med-Low momentum group ({lowMomentum.length} students) is the most direct lever on Pacing — a short pacing check-in with these students tends to move 2M/4M numbers faster than general outreach.</li>
+                )}
+                {withBlockers.length > 0 && (
+                  <li>{withBlockers.length} student{withBlockers.length !== 1 ? 's have' : ' has'} a noted blocker on file — worth a quick pass to see if any are resolved or need escalation: {withBlockers.slice(0, 5).map(s => s.display_name).join(', ')}{withBlockers.length > 5 ? '…' : ''}.</li>
+                )}
+                {overdueCallPrep.length > 0 && (
+                  <li>{overdueCallPrep.length} student{overdueCallPrep.length !== 1 ? 's have' : ' has'} a call scheduled that's now overdue — reschedule or complete these to avoid gaps like the ones flagged in your Dec 2024 coaching note.</li>
+                )}
+                {weakSpots.length === 0 && criticalList.length === 0 && <li>No urgent items right now — solid spot to focus on proactive outreach to your Low momentum group to stay ahead.</li>}
+              </ol>
+            </section>
+
+            {highRisk.length > 0 && (
+              <section className="panel" style={{ overflowX: 'auto' }}>
+                <div className="panel-head"><h2>High Risk Students</h2><span className="readonly-pill">{highRisk.length}</span></div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                      {['Name', 'Momentum', 'Last Contact', 'Missed Calls', 'Blocker'].map(h => <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted)' }}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {highRisk.map(s => {
+                      const daysSince = s.last_contact_date ? Math.round((now - new Date(s.last_contact_date).getTime()) / 86400000) : null;
+                      return (
+                        <tr key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: '6px 8px', fontWeight: 700 }}>{s.display_name}</td>
+                          <td style={{ padding: '6px 8px' }}>{s.momentum || '—'}</td>
+                          <td style={{ padding: '6px 8px', color: daysSince !== null && daysSince > 14 ? 'var(--red)' : undefined, fontWeight: daysSince !== null && daysSince > 14 ? 700 : undefined }}>{daysSince !== null ? `${daysSince}d ago` : 'Never'}</td>
+                          <td style={{ padding: '6px 8px' }}>{s.missed_call_count ?? 0}</td>
+                          <td style={{ padding: '6px 8px', fontSize: 11, color: 'var(--muted)' }}>{s.known_blockers ? s.known_blockers.slice(0, 40) : '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </section>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── KPI DASHBOARD ── */}
       {!loading && tab === 'kpi' && (
