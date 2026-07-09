@@ -101,6 +101,52 @@ const STATUS_COLORS: Record<string, string> = {
   on_track: '#16a34a', at_risk: '#f59e0b', achieved: '#7c3aed', missed: '#dc2626',
   open: '#f59e0b', addressed: '#16a34a', ongoing: '#0891b2',
 };
+
+// Known program/college-level benchmarks (from your mentor dashboard and
+// the FY26 BSCSIA program wins summary). These are what WGU is actually
+// asking you to hit, separate from your own personal goals.
+const PROGRAM_TARGETS = [
+  { label: 'Term OTP', target: '49.20%', source: 'Monthly mentor dashboard target' },
+  { label: 'W-VSAT (Student Satisfaction)', target: '52%', source: 'Monthly mentor dashboard target' },
+  { label: '4-Year Grad Rate', target: '28%', source: 'FY26 program goal (program hit 30%+)' },
+  { label: 'Program OTP Goal (annual)', target: '45%', source: 'FY26 program goal (program hit 49%)' },
+];
+
+// Definitions straight from your mentor dashboard's own glossary, paired
+// with concrete "how to move this number" tips grounded in your manager's
+// actual coaching (structured pacing conversations, Momentum Indicator
+// reviews, avoiding call gaps, prioritizing low-momentum/0-CU/no-contact
+// students) rather than generic advice.
+const METRIC_INFO: Record<string, { color: string; definition: string; tip: string }> = {
+  'OTP %': {
+    color: '#7c3aed',
+    definition: 'Term On-Time Progress: % of students ending a term who met the pace needed to stay on track for on-time graduation.',
+    tip: 'Run Momentum Indicator reviews mid-term (not just at term-end) so a slipping student gets a pacing conversation before it shows up as a miss. Prioritize your Low/Med-Low momentum students first — see Weak Areas tab.',
+  },
+  'Pacing 2M %': {
+    color: '#0891b2',
+    definition: '2-Month Pacing: % of students who completed at least 1 course within the first 2 months of their term.',
+    tip: 'This is won or lost in week 1-2. A quick "did you register and start?" outreach right after term-start catches non-starters before they become a 2M miss.',
+  },
+  'Pacing 4M %': {
+    color: '#16a34a',
+    definition: '4-Month Pacing: % of students who completed their expected competency units (CUs) by month 4 of the term.',
+    tip: 'A structured mid-term check-in around week 6-8 (not waiting until month 4) gives you time to correct course. Your own Team Giraldi Handbook/SOP is built for exactly this kind of consistency — lean on it.',
+  },
+  'Drop Rate %': {
+    color: '#dc2626',
+    definition: '% of active students who dropped that month.',
+    tip: 'Your dashboard\'s own suggested priority list applies directly: inactive students, low momentum, no registration, 0 CUs at 3 months, and low OTP are your highest drop-risk group — call these first.',
+  },
+};
+
+const OTHER_METRIC_INFO: { label: string; definition: string; tip: string }[] = [
+  { label: 'VSAT (M-VSAT / W-VSAT)', definition: '% of students reporting "very satisfied" with mentoring support (M-VSAT) or their overall WGU experience (W-VSAT). Needs 10+ survey responses per period or it shows blank.', tip: 'Per your own manager feedback: students are most satisfied when mentors are genuine, responsive, and adaptive to how they learn — fast response times and non-scripted calls move this more than call volume alone.' },
+  { label: 'T1→T2 / T2→T3 / T3+ Retention', definition: '% of students who continued into their next term, segmented by how many terms they\'ve already completed.', tip: 'Early terms (T1→T2) respond well to onboarding-style connection calls. Later terms (T3+) usually need blocker-specific problem-solving — check each student\'s known_blockers notes before the call, not during it.' },
+  { label: 'On-Time Starts / Course Non-Starts', definition: 'On-Time Starts = % of courses activated on/before their scheduled start date. Course Non-Starts = % of registered courses never started that term.', tip: 'A reminder outreach 3-5 days before a course\'s scheduled start date (not after it\'s already late) is the highest-leverage moment for this one.' },
+  { label: '4-Year Grad Rate', definition: '% of students who graduate within 4 years of starting their program.', tip: 'This is a lagging, longer-horizon metric — the biggest lever is actually keeping T1→T2 retention high, since most attrition that eventually hurts 4-year grad rate happens in a student\'s first year.' },
+];
+
 const STATUS_LABELS: Record<string, string> = {
   on_track: 'On Track', at_risk: 'At Risk', achieved: 'Achieved', missed: 'Missed',
   open: 'Open', addressed: 'Addressed', ongoing: 'Ongoing',
@@ -560,6 +606,25 @@ export default function WorkPerformance() {
             </section>
           )}
 
+          <section className="panel" style={{ borderTop: '3px solid var(--purple)', marginBottom: 14 }}>
+            <div className="panel-head"><h2>🎯 Targets to Strive For</h2></div>
+            <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>What the program is actually asking you to hit — not your personal goals, the college-level benchmarks.</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+              {PROGRAM_TARGETS.map(t => (
+                <div key={t.label} style={{ padding: '10px 12px', background: 'var(--surface-1)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>{t.label}</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--purple)', marginTop: 2 }}>{t.target}</div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{t.source}</div>
+                </div>
+              ))}
+            </div>
+            {latestKpi && latestKpi.otp_pct !== null && latestKpi.otp_target_pct !== null && latestKpi.otp_target_pct !== undefined && (
+              <div style={{ marginTop: 12, fontSize: 13, fontWeight: 600, color: latestKpi.otp_pct >= latestKpi.otp_target_pct ? '#16a34a' : '#dc2626' }}>
+                Your latest Term OTP ({fmtMonth(latestKpi.month_date)}): {latestKpi.otp_pct}% — {latestKpi.otp_pct >= latestKpi.otp_target_pct ? `above target by ${(latestKpi.otp_pct - latestKpi.otp_target_pct).toFixed(1)} pts ✅` : `below target by ${(latestKpi.otp_target_pct - latestKpi.otp_pct).toFixed(1)} pts`}
+              </div>
+            )}
+          </section>
+
           {latestKpi && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 14 }}>
               {[
@@ -586,9 +651,28 @@ export default function WorkPerformance() {
                   { key: 'pacing_4m_pct', label: 'Pacing 4M %', color: '#16a34a' },
                   { key: 'drop_rate_pct', label: 'Drop Rate %', color: '#dc2626' },
                 ]} />
-                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8, fontSize: 11 }}>
-                  {[['OTP %', '#7c3aed'], ['Pacing 2M %', '#0891b2'], ['Pacing 4M %', '#16a34a'], ['Drop Rate %', '#dc2626']].map(([l, c]) => (
-                    <span key={l} style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: 999, background: c, display: 'inline-block' }} />{l}</span>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10, marginTop: 14 }}>
+                  {Object.entries(METRIC_INFO).map(([label, info]) => (
+                    <div key={label} style={{ padding: '10px 12px', background: 'var(--surface-1)', borderRadius: 8, border: `1px solid ${info.color}33` }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: 999, background: info.color, display: 'inline-block', flexShrink: 0 }} />{label}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>{info.definition}</div>
+                      <div style={{ fontSize: 12, display: 'flex', gap: 6 }}><span style={{ flexShrink: 0 }}>💡</span><span>{info.tip}</span></div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="panel" style={{ marginBottom: 14 }}>
+                <div className="panel-head"><h2>What The Other Numbers Mean</h2></div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {OTHER_METRIC_INFO.map(info => (
+                    <div key={info.label} style={{ paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 3 }}>{info.label}</div>
+                      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{info.definition}</div>
+                      <div style={{ fontSize: 12, display: 'flex', gap: 6 }}><span style={{ flexShrink: 0 }}>💡</span><span>{info.tip}</span></div>
+                    </div>
                   ))}
                 </div>
               </section>
