@@ -1,0 +1,688 @@
+// src/WorkPerformance.tsx
+//
+// Tracks work performance for the Work side of the Hub:
+//  - Monthly KPI numbers (Enrollment, Drops, Graduates, OTP%, etc.) with trend charts
+//  - Formal review archive (Midyear Check-Ins, Annual Comp Reviews) — full text + key facts
+//  - Ad-hoc coaching/feedback notes with action items
+//  - Goals with progress tracking against a target
+
+import { useCallback, useEffect, useState } from 'react';
+import { Plus, X, TrendingUp, FileText, MessageSquare, Target, Sparkles, ChevronDown, ChevronUp, Trash2, CheckCircle2, Circle } from 'lucide-react';
+import { supabase } from './lib/supabase';
+
+// ── Types ────────────────────────────────────────────────────────────────
+
+interface KpiMonth {
+  id: string;
+  month_date: string;
+  enrollment_total: number | null;
+  drops: number | null;
+  graduates: number | null;
+  otp_pct: number | null;
+  grad_rate_4yr_pct: number | null;
+  drop_rate_pct: number | null;
+  pacing_2m_pct: number | null;
+  pacing_4m_pct: number | null;
+  vsat_pct: number | null;
+  notes: string | null;
+}
+
+interface Review {
+  id: string;
+  review_type: 'midyear_checkin' | 'annual_comp_review' | 'annual_review' | 'other';
+  title: string;
+  review_date: string;
+  period_start: string | null;
+  period_end: string | null;
+  performance_rating: string | null;
+  base_pay_before: number | null;
+  base_pay_after: number | null;
+  pay_increase_pct: number | null;
+  manager_name: string | null;
+  full_text: string | null;
+}
+
+interface CoachingNote {
+  id: string;
+  note_date: string;
+  subject: string;
+  from_person: string | null;
+  summary: string | null;
+  full_text: string | null;
+  action_items: { text: string; done: boolean }[];
+  status: 'open' | 'addressed' | 'ongoing';
+}
+
+interface Goal {
+  id: string;
+  title: string;
+  description: string | null;
+  metric_name: string | null;
+  target_value: number | null;
+  current_value: number | null;
+  unit: string | null;
+  fiscal_year: string | null;
+  due_date: string | null;
+  status: 'on_track' | 'at_risk' | 'achieved' | 'missed';
+}
+
+const BLANK_KPI = { month_date: '', enrollment_total: '', drops: '', graduates: '', otp_pct: '', grad_rate_4yr_pct: '', drop_rate_pct: '', pacing_2m_pct: '', pacing_4m_pct: '', vsat_pct: '', notes: '' };
+const BLANK_REVIEW = { review_type: 'midyear_checkin' as Review['review_type'], title: '', review_date: '', period_start: '', period_end: '', performance_rating: '', base_pay_before: '', base_pay_after: '', pay_increase_pct: '', manager_name: '', full_text: '' };
+const BLANK_NOTE = { note_date: '', subject: '', from_person: '', summary: '', full_text: '', status: 'open' as CoachingNote['status'] };
+const BLANK_GOAL = { title: '', description: '', metric_name: '', target_value: '', current_value: '', unit: '%', fiscal_year: '', due_date: '', status: 'on_track' as Goal['status'] };
+
+const STATUS_COLORS: Record<string, string> = {
+  on_track: '#16a34a', at_risk: '#f59e0b', achieved: '#7c3aed', missed: '#dc2626',
+  open: '#f59e0b', addressed: '#16a34a', ongoing: '#0891b2',
+};
+const STATUS_LABELS: Record<string, string> = {
+  on_track: 'On Track', at_risk: 'At Risk', achieved: 'Achieved', missed: 'Missed',
+  open: 'Open', addressed: 'Addressed', ongoing: 'Ongoing',
+};
+
+function fmtMonth(dateStr: string): string {
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+}
+function fmtDate(dateStr: string): string {
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+function n(v: string): number | null { return v.trim() === '' ? null : parseFloat(v); }
+
+// ── Lightweight inline SVG line chart (no chart library dependency) ───────
+
+function TrendChart({ data, fields }: { data: KpiMonth[]; fields: { key: keyof KpiMonth; label: string; color: string }[] }) {
+  const width = 700, height = 220, padL = 40, padR = 10, padT = 10, padB = 28;
+  const plotW = width - padL - padR, plotH = height - padT - padB;
+  const sorted = [...data].sort((a, b) => a.month_date.localeCompare(b.month_date));
+  if (sorted.length === 0) return null;
+
+  const allVals = fields.flatMap(f => sorted.map(d => d[f.key] as number | null).filter((v): v is number => v !== null));
+  const maxVal = Math.max(10, ...allVals) * 1.1;
+
+  function xFor(i: number) { return padL + (sorted.length <= 1 ? 0 : (i / (sorted.length - 1)) * plotW); }
+  function yFor(v: number) { return padT + plotH - (v / maxVal) * plotH; }
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto' }}>
+      {[0, 0.25, 0.5, 0.75, 1].map(f => (
+        <line key={f} x1={padL} x2={width - padR} y1={padT + plotH * (1 - f)} y2={padT + plotH * (1 - f)} stroke="var(--border)" strokeWidth={1} />
+      ))}
+      {sorted.map((d, i) => (
+        <text key={d.id} x={xFor(i)} y={height - 8} fontSize={10} textAnchor="middle" fill="var(--muted)">{fmtMonth(d.month_date)}</text>
+      ))}
+      {fields.map(f => {
+        const pts = sorted.map((d, i) => ({ x: xFor(i), y: d[f.key] !== null ? yFor(d[f.key] as number) : null }));
+        const path = pts.filter(p => p.y !== null).map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+        return (
+          <g key={String(f.key)}>
+            <path d={path} fill="none" stroke={f.color} strokeWidth={2} />
+            {pts.map((p, i) => p.y !== null && <circle key={i} cx={p.x} cy={p.y} r={3} fill={f.color} />)}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ── Main component ──────────────────────────────────────────────────────
+
+export default function WorkPerformance() {
+  const [tab, setTab] = useState<'kpi' | 'reviews' | 'coaching' | 'goals'>('kpi');
+  const [loading, setLoading] = useState(true);
+
+  const [kpis, setKpis] = useState<KpiMonth[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [notes, setNotes] = useState<CoachingNote[]>([]);
+  const [goals, setGoals] = useState<Goal[]>([]);
+
+  const [showKpiForm, setShowKpiForm] = useState(false);
+  const [kpiForm, setKpiForm] = useState({ ...BLANK_KPI });
+  const [showKpiPaste, setShowKpiPaste] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [pasteBusy, setPasteBusy] = useState(false);
+  const [pasteMsg, setPasteMsg] = useState('');
+
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [reviewForm, setReviewForm] = useState({ ...BLANK_REVIEW });
+  const [expandedReview, setExpandedReview] = useState<string | null>(null);
+
+  const [showNoteForm, setShowNoteForm] = useState(false);
+  const [noteForm, setNoteForm] = useState({ ...BLANK_NOTE });
+  const [expandedNote, setExpandedNote] = useState<string | null>(null);
+
+  const [showGoalForm, setShowGoalForm] = useState(false);
+  const [goalForm, setGoalForm] = useState({ ...BLANK_GOAL });
+
+  const load = useCallback(async () => {
+    if (!supabase) return;
+    setLoading(true);
+    const { data: sd } = await supabase.auth.getSession();
+    const uid = sd.session?.user?.id;
+    if (!uid) { setLoading(false); return; }
+    const [k, r, c, g] = await Promise.all([
+      supabase.from('work_kpi_monthly').select('*').eq('user_id', uid).order('month_date', { ascending: true }),
+      supabase.from('work_reviews').select('*').eq('user_id', uid).order('review_date', { ascending: false }),
+      supabase.from('work_coaching_notes').select('*').eq('user_id', uid).order('note_date', { ascending: false }),
+      supabase.from('work_goals').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
+    ]);
+    setKpis((k.data as KpiMonth[]) ?? []);
+    setReviews((r.data as Review[]) ?? []);
+    setNotes((c.data as CoachingNote[]) ?? []);
+    setGoals((g.data as Goal[]) ?? []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // ── KPI ──────────────────────────────────────────────────────────────
+  async function saveKpi() {
+    if (!supabase || !kpiForm.month_date) return;
+    const { data: sd } = await supabase.auth.getSession();
+    const uid = sd.session?.user?.id;
+    if (!uid) return;
+    await supabase.from('work_kpi_monthly').upsert({
+      user_id: uid,
+      month_date: kpiForm.month_date + '-01',
+      enrollment_total: n(kpiForm.enrollment_total),
+      drops: n(kpiForm.drops),
+      graduates: n(kpiForm.graduates),
+      otp_pct: n(kpiForm.otp_pct),
+      grad_rate_4yr_pct: n(kpiForm.grad_rate_4yr_pct),
+      drop_rate_pct: n(kpiForm.drop_rate_pct),
+      pacing_2m_pct: n(kpiForm.pacing_2m_pct),
+      pacing_4m_pct: n(kpiForm.pacing_4m_pct),
+      vsat_pct: n(kpiForm.vsat_pct),
+      notes: kpiForm.notes || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,month_date' });
+    setKpiForm({ ...BLANK_KPI });
+    setShowKpiForm(false);
+    await load();
+  }
+
+  async function deleteKpi(id: string) {
+    if (!supabase || !confirm('Delete this month?')) return;
+    await supabase.from('work_kpi_monthly').delete().eq('id', id);
+    await load();
+  }
+
+  async function extractKpiFromPaste() {
+    if (!supabase || !pasteText.trim()) return;
+    setPasteBusy(true);
+    setPasteMsg('');
+    try {
+      const { data, error } = await supabase.functions.invoke('ai-proxy', {
+        body: {
+          model: 'claude-sonnet-4-6',
+          max_tokens: 2000,
+          messages: [{
+            role: 'user',
+            content: `Extract monthly KPI data from this pasted table/text and return ONLY a JSON array, no markdown, no explanation. Each entry: {"month_date":"YYYY-MM","enrollment_total":number|null,"drops":number|null,"graduates":number|null,"otp_pct":number|null,"grad_rate_4yr_pct":number|null,"drop_rate_pct":number|null,"pacing_2m_pct":number|null,"pacing_4m_pct":number|null,"vsat_pct":number|null}. Skip any "Total" column — only individual months. Infer the year from context (fiscal years like "FY26" typically run Jul-Jun; e.g. Jul-25 through Jun-26). If a cell is blank, use null.\n\nText:\n${pasteText.slice(0, 6000)}`,
+          }],
+        },
+      });
+      if (error) throw error;
+      const text = data?.content?.[0]?.text ?? '';
+      const match = text.match(/\[[\s\S]*\]/);
+      if (!match) { setPasteMsg('Could not find any KPI rows in that text.'); setPasteBusy(false); return; }
+      const rows = JSON.parse(match[0]) as any[];
+      const { data: sd } = await supabase.auth.getSession();
+      const uid = sd.session?.user?.id;
+      if (!uid) { setPasteBusy(false); return; }
+      let saved = 0;
+      for (const row of rows) {
+        if (!row.month_date) continue;
+        const monthDate = row.month_date.length === 7 ? row.month_date + '-01' : row.month_date;
+        const { error: upErr } = await supabase.from('work_kpi_monthly').upsert({
+          user_id: uid, month_date: monthDate,
+          enrollment_total: row.enrollment_total ?? null, drops: row.drops ?? null, graduates: row.graduates ?? null,
+          otp_pct: row.otp_pct ?? null, grad_rate_4yr_pct: row.grad_rate_4yr_pct ?? null, drop_rate_pct: row.drop_rate_pct ?? null,
+          pacing_2m_pct: row.pacing_2m_pct ?? null, pacing_4m_pct: row.pacing_4m_pct ?? null, vsat_pct: row.vsat_pct ?? null,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id,month_date' });
+        if (!upErr) saved++;
+      }
+      setPasteMsg(`✅ Imported ${saved} month(s).`);
+      setPasteText('');
+      await load();
+    } catch (err) {
+      setPasteMsg(`Error: ${err instanceof Error ? err.message : 'Could not extract data.'}`);
+    }
+    setPasteBusy(false);
+  }
+
+  // ── Reviews ──────────────────────────────────────────────────────────
+  async function saveReview() {
+    if (!supabase || !reviewForm.title.trim() || !reviewForm.review_date) return;
+    const { data: sd } = await supabase.auth.getSession();
+    const uid = sd.session?.user?.id;
+    if (!uid) return;
+    await supabase.from('work_reviews').insert({
+      user_id: uid,
+      review_type: reviewForm.review_type,
+      title: reviewForm.title.trim(),
+      review_date: reviewForm.review_date,
+      period_start: reviewForm.period_start || null,
+      period_end: reviewForm.period_end || null,
+      performance_rating: reviewForm.performance_rating || null,
+      base_pay_before: n(reviewForm.base_pay_before),
+      base_pay_after: n(reviewForm.base_pay_after),
+      pay_increase_pct: n(reviewForm.pay_increase_pct),
+      manager_name: reviewForm.manager_name || null,
+      full_text: reviewForm.full_text || null,
+    });
+    setReviewForm({ ...BLANK_REVIEW });
+    setShowReviewForm(false);
+    await load();
+  }
+
+  async function deleteReview(id: string) {
+    if (!supabase || !confirm('Delete this review?')) return;
+    await supabase.from('work_reviews').delete().eq('id', id);
+    await load();
+  }
+
+  // ── Coaching notes ───────────────────────────────────────────────────
+  async function saveNote() {
+    if (!supabase || !noteForm.subject.trim() || !noteForm.note_date) return;
+    const { data: sd } = await supabase.auth.getSession();
+    const uid = sd.session?.user?.id;
+    if (!uid) return;
+    await supabase.from('work_coaching_notes').insert({
+      user_id: uid,
+      note_date: noteForm.note_date,
+      subject: noteForm.subject.trim(),
+      from_person: noteForm.from_person || null,
+      summary: noteForm.summary || null,
+      full_text: noteForm.full_text || null,
+      status: noteForm.status,
+      action_items: [],
+    });
+    setNoteForm({ ...BLANK_NOTE });
+    setShowNoteForm(false);
+    await load();
+  }
+
+  async function deleteNote(id: string) {
+    if (!supabase || !confirm('Delete this note?')) return;
+    await supabase.from('work_coaching_notes').delete().eq('id', id);
+    await load();
+  }
+
+  async function toggleActionItem(note: CoachingNote, idx: number) {
+    if (!supabase) return;
+    const updated = note.action_items.map((a, i) => i === idx ? { ...a, done: !a.done } : a);
+    await supabase.from('work_coaching_notes').update({ action_items: updated }).eq('id', note.id);
+    setNotes(prev => prev.map(n2 => n2.id === note.id ? { ...n2, action_items: updated } : n2));
+  }
+
+  async function setNoteStatus(id: string, status: CoachingNote['status']) {
+    if (!supabase) return;
+    await supabase.from('work_coaching_notes').update({ status }).eq('id', id);
+    setNotes(prev => prev.map(n2 => n2.id === id ? { ...n2, status } : n2));
+  }
+
+  // ── Goals ────────────────────────────────────────────────────────────
+  async function saveGoal() {
+    if (!supabase || !goalForm.title.trim()) return;
+    const { data: sd } = await supabase.auth.getSession();
+    const uid = sd.session?.user?.id;
+    if (!uid) return;
+    await supabase.from('work_goals').insert({
+      user_id: uid,
+      title: goalForm.title.trim(),
+      description: goalForm.description || null,
+      metric_name: goalForm.metric_name || null,
+      target_value: n(goalForm.target_value),
+      current_value: n(goalForm.current_value),
+      unit: goalForm.unit || null,
+      fiscal_year: goalForm.fiscal_year || null,
+      due_date: goalForm.due_date || null,
+      status: goalForm.status,
+    });
+    setGoalForm({ ...BLANK_GOAL });
+    setShowGoalForm(false);
+    await load();
+  }
+
+  async function updateGoalProgress(goal: Goal, newValue: number) {
+    if (!supabase) return;
+    await supabase.from('work_goals').update({ current_value: newValue, updated_at: new Date().toISOString() }).eq('id', goal.id);
+    setGoals(prev => prev.map(g => g.id === goal.id ? { ...g, current_value: newValue } : g));
+  }
+
+  async function deleteGoal(id: string) {
+    if (!supabase || !confirm('Delete this goal?')) return;
+    await supabase.from('work_goals').delete().eq('id', id);
+    await load();
+  }
+
+  const latestKpi = kpis[kpis.length - 1];
+
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <h1>Work Performance</h1>
+          <p>Tracking KPIs, reviews, coaching, and goals</p>
+        </div>
+      </div>
+
+      <div className="tabs" style={{ marginBottom: 14 }}>
+        <button className={tab === 'kpi' ? 'active' : ''} onClick={() => setTab('kpi')}><TrendingUp size={13} /> KPI Dashboard</button>
+        <button className={tab === 'reviews' ? 'active' : ''} onClick={() => setTab('reviews')}><FileText size={13} /> Reviews ({reviews.length})</button>
+        <button className={tab === 'coaching' ? 'active' : ''} onClick={() => setTab('coaching')}><MessageSquare size={13} /> Coaching Notes ({notes.length})</button>
+        <button className={tab === 'goals' ? 'active' : ''} onClick={() => setTab('goals')}><Target size={13} /> Goals ({goals.length})</button>
+      </div>
+
+      {loading && <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p>}
+
+      {/* ── KPI DASHBOARD ── */}
+      {!loading && tab === 'kpi' && (
+        <div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+            <button className="btn primary" onClick={() => { setKpiForm({ ...BLANK_KPI }); setShowKpiForm(v => !v); }}><Plus size={14} /> Add Month</button>
+            <button className="btn ghost" onClick={() => setShowKpiPaste(v => !v)} style={{ color: 'var(--purple)', borderColor: 'var(--purple)' }}><Sparkles size={14} /> Paste &amp; Extract</button>
+          </div>
+
+          {showKpiPaste && (
+            <section className="panel" style={{ borderLeft: '3px solid var(--purple)', marginBottom: 14 }}>
+              <div className="panel-head"><h2>Paste a KPI Table</h2><button className="btn ghost" onClick={() => setShowKpiPaste(false)}>Close</button></div>
+              <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>Paste a table of monthly numbers (like your KPI summary screenshot text) and AI will pull out each month automatically.</p>
+              <textarea value={pasteText} onChange={e => setPasteText(e.target.value)} placeholder="Paste your KPI table here…" style={{ minHeight: 120, width: '100%', fontSize: 13 }} />
+              <button className="btn primary" onClick={extractKpiFromPaste} disabled={pasteBusy || !pasteText.trim()} style={{ marginTop: 10 }}>
+                {pasteBusy ? 'Extracting…' : 'Extract & Import'}
+              </button>
+              {pasteMsg && <div style={{ marginTop: 8, fontSize: 13 }}>{pasteMsg}</div>}
+            </section>
+          )}
+
+          {showKpiForm && (
+            <section className="panel" style={{ borderLeft: '3px solid var(--green)', marginBottom: 14 }}>
+              <div className="panel-head"><h2>Add / Update a Month</h2><button className="btn ghost" onClick={() => setShowKpiForm(false)}>Close</button></div>
+              <div className="form-grid">
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Month<input type="month" value={kpiForm.month_date} onChange={e => setKpiForm(p => ({ ...p, month_date: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Enrollment Total<input type="number" value={kpiForm.enrollment_total} onChange={e => setKpiForm(p => ({ ...p, enrollment_total: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Drops<input type="number" value={kpiForm.drops} onChange={e => setKpiForm(p => ({ ...p, drops: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Graduates<input type="number" value={kpiForm.graduates} onChange={e => setKpiForm(p => ({ ...p, graduates: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>OTP %<input type="number" step="0.1" value={kpiForm.otp_pct} onChange={e => setKpiForm(p => ({ ...p, otp_pct: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Grad Rate 4YR %<input type="number" step="0.1" value={kpiForm.grad_rate_4yr_pct} onChange={e => setKpiForm(p => ({ ...p, grad_rate_4yr_pct: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Drop Rate %<input type="number" step="0.1" value={kpiForm.drop_rate_pct} onChange={e => setKpiForm(p => ({ ...p, drop_rate_pct: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Pacing 2M %<input type="number" step="0.1" value={kpiForm.pacing_2m_pct} onChange={e => setKpiForm(p => ({ ...p, pacing_2m_pct: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Pacing 4M %<input type="number" step="0.1" value={kpiForm.pacing_4m_pct} onChange={e => setKpiForm(p => ({ ...p, pacing_4m_pct: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>VSAT %<input type="number" step="0.1" value={kpiForm.vsat_pct} onChange={e => setKpiForm(p => ({ ...p, vsat_pct: e.target.value }))} /></label>
+              </div>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>Notes<textarea value={kpiForm.notes} onChange={e => setKpiForm(p => ({ ...p, notes: e.target.value }))} style={{ minHeight: 50 }} /></label>
+              <button className="btn primary" onClick={saveKpi} disabled={!kpiForm.month_date} style={{ marginTop: 12 }}>Save Month</button>
+            </section>
+          )}
+
+          {latestKpi && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 14 }}>
+              {[
+                ['Enrollment', latestKpi.enrollment_total, ''],
+                ['OTP', latestKpi.otp_pct, '%'],
+                ['Drop Rate', latestKpi.drop_rate_pct, '%'],
+                ['Graduates (total)', kpis.reduce((s, k) => s + (k.graduates ?? 0), 0), ''],
+              ].map(([label, val, suffix]) => (
+                <section key={String(label)} className="panel" style={{ textAlign: 'center', padding: '10px 8px' }}>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{label} <span style={{ opacity: 0.6 }}>({fmtMonth(latestKpi.month_date)})</span></div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--purple)' }}>{val ?? '—'}{val !== null && suffix}</div>
+                </section>
+              ))}
+            </div>
+          )}
+
+          {kpis.length > 0 && (
+            <>
+              <section className="panel" style={{ marginBottom: 14 }}>
+                <div className="panel-head"><h2>Quality Metrics Trend</h2></div>
+                <TrendChart data={kpis} fields={[
+                  { key: 'otp_pct', label: 'OTP %', color: '#7c3aed' },
+                  { key: 'pacing_2m_pct', label: 'Pacing 2M %', color: '#0891b2' },
+                  { key: 'pacing_4m_pct', label: 'Pacing 4M %', color: '#16a34a' },
+                  { key: 'drop_rate_pct', label: 'Drop Rate %', color: '#dc2626' },
+                ]} />
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8, fontSize: 11 }}>
+                  {[['OTP %', '#7c3aed'], ['Pacing 2M %', '#0891b2'], ['Pacing 4M %', '#16a34a'], ['Drop Rate %', '#dc2626']].map(([l, c]) => (
+                    <span key={l} style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: 999, background: c, display: 'inline-block' }} />{l}</span>
+                  ))}
+                </div>
+              </section>
+
+              <section className="panel" style={{ overflowX: 'auto' }}>
+                <div className="panel-head"><h2>Monthly Detail</h2></div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                      {['Month', 'Enroll', 'Drops', 'Grads', 'OTP%', 'Drop%', 'Pace2M%', 'Pace4M%', 'VSAT%', ''].map(h => (
+                        <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted)' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...kpis].reverse().map(k => (
+                      <tr key={k.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '6px 8px', fontWeight: 700 }}>{fmtMonth(k.month_date)}</td>
+                        <td style={{ padding: '6px 8px' }}>{k.enrollment_total ?? '—'}</td>
+                        <td style={{ padding: '6px 8px' }}>{k.drops ?? '—'}</td>
+                        <td style={{ padding: '6px 8px' }}>{k.graduates ?? '—'}</td>
+                        <td style={{ padding: '6px 8px' }}>{k.otp_pct ?? '—'}</td>
+                        <td style={{ padding: '6px 8px' }}>{k.drop_rate_pct ?? '—'}</td>
+                        <td style={{ padding: '6px 8px' }}>{k.pacing_2m_pct ?? '—'}</td>
+                        <td style={{ padding: '6px 8px' }}>{k.pacing_4m_pct ?? '—'}</td>
+                        <td style={{ padding: '6px 8px' }}>{k.vsat_pct ?? '—'}</td>
+                        <td style={{ padding: '6px 8px' }}><button onClick={() => deleteKpi(k.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)' }}><Trash2 size={12} /></button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+            </>
+          )}
+          {kpis.length === 0 && !showKpiForm && !showKpiPaste && (
+            <section className="panel" style={{ textAlign: 'center', padding: 40 }}><p style={{ color: 'var(--muted)' }}>No KPI months logged yet. Add one manually or paste a table above.</p></section>
+          )}
+        </div>
+      )}
+
+      {/* ── REVIEWS ── */}
+      {!loading && tab === 'reviews' && (
+        <div>
+          <button className="btn primary" onClick={() => { setReviewForm({ ...BLANK_REVIEW }); setShowReviewForm(v => !v); }} style={{ marginBottom: 14 }}><Plus size={14} /> Add Review</button>
+
+          {showReviewForm && (
+            <section className="panel" style={{ borderLeft: '3px solid var(--green)', marginBottom: 14 }}>
+              <div className="panel-head"><h2>Add Review</h2><button className="btn ghost" onClick={() => setShowReviewForm(false)}>Close</button></div>
+              <div className="form-grid">
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Type<select value={reviewForm.review_type} onChange={e => setReviewForm(p => ({ ...p, review_type: e.target.value as Review['review_type'] }))}>
+                  <option value="midyear_checkin">Midyear Check-In</option>
+                  <option value="annual_comp_review">Annual Comp Review</option>
+                  <option value="annual_review">Annual Review</option>
+                  <option value="other">Other</option>
+                </select></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Title *<input value={reviewForm.title} onChange={e => setReviewForm(p => ({ ...p, title: e.target.value }))} placeholder="e.g. FY2026 Midyear Check-In" /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Review Date *<input type="date" value={reviewForm.review_date} onChange={e => setReviewForm(p => ({ ...p, review_date: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Manager<input value={reviewForm.manager_name} onChange={e => setReviewForm(p => ({ ...p, manager_name: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Period Start<input type="date" value={reviewForm.period_start} onChange={e => setReviewForm(p => ({ ...p, period_start: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Period End<input type="date" value={reviewForm.period_end} onChange={e => setReviewForm(p => ({ ...p, period_end: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Performance Rating<input value={reviewForm.performance_rating} onChange={e => setReviewForm(p => ({ ...p, performance_rating: e.target.value }))} placeholder="e.g. Achieves/Solid Strength" /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Base Pay Before<input type="number" value={reviewForm.base_pay_before} onChange={e => setReviewForm(p => ({ ...p, base_pay_before: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Base Pay After<input type="number" value={reviewForm.base_pay_after} onChange={e => setReviewForm(p => ({ ...p, base_pay_after: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Pay Increase %<input type="number" step="0.01" value={reviewForm.pay_increase_pct} onChange={e => setReviewForm(p => ({ ...p, pay_increase_pct: e.target.value }))} /></label>
+              </div>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>Full Text / Notes<textarea value={reviewForm.full_text} onChange={e => setReviewForm(p => ({ ...p, full_text: e.target.value }))} style={{ minHeight: 100 }} /></label>
+              <button className="btn primary" onClick={saveReview} disabled={!reviewForm.title.trim() || !reviewForm.review_date} style={{ marginTop: 12 }}>Save Review</button>
+            </section>
+          )}
+
+          {reviews.map(r => {
+            const isOpen = expandedReview === r.id;
+            return (
+              <section key={r.id} className="panel" style={{ marginBottom: 10, borderLeft: `3px solid ${r.review_type === 'annual_comp_review' ? '#16a34a' : '#7c3aed'}` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', cursor: 'pointer' }} onClick={() => setExpandedReview(isOpen ? null : r.id)}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{r.title}</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                      {fmtDate(r.review_date)}{r.manager_name ? ` · ${r.manager_name}` : ''}
+                      {r.performance_rating ? ` · ${r.performance_rating}` : ''}
+                    </div>
+                    {r.base_pay_after !== null && (
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#16a34a', marginTop: 4 }}>
+                        ${r.base_pay_before?.toLocaleString()} → ${r.base_pay_after?.toLocaleString()} {r.pay_increase_pct !== null && `(+${r.pay_increase_pct}%)`}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <button onClick={e => { e.stopPropagation(); deleteReview(r.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)' }}><Trash2 size={14} /></button>
+                    {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  </div>
+                </div>
+                {isOpen && r.full_text && (
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)', fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{r.full_text}</div>
+                )}
+              </section>
+            );
+          })}
+          {reviews.length === 0 && !showReviewForm && (
+            <section className="panel" style={{ textAlign: 'center', padding: 40 }}><p style={{ color: 'var(--muted)' }}>No reviews logged yet.</p></section>
+          )}
+        </div>
+      )}
+
+      {/* ── COACHING NOTES ── */}
+      {!loading && tab === 'coaching' && (
+        <div>
+          <button className="btn primary" onClick={() => { setNoteForm({ ...BLANK_NOTE }); setShowNoteForm(v => !v); }} style={{ marginBottom: 14 }}><Plus size={14} /> Add Coaching Note</button>
+
+          {showNoteForm && (
+            <section className="panel" style={{ borderLeft: '3px solid var(--amber)', marginBottom: 14 }}>
+              <div className="panel-head"><h2>Add Coaching Note</h2><button className="btn ghost" onClick={() => setShowNoteForm(false)}>Close</button></div>
+              <div className="form-grid">
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Subject *<input value={noteForm.subject} onChange={e => setNoteForm(p => ({ ...p, subject: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Date *<input type="date" value={noteForm.note_date} onChange={e => setNoteForm(p => ({ ...p, note_date: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>From<input value={noteForm.from_person} onChange={e => setNoteForm(p => ({ ...p, from_person: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Status<select value={noteForm.status} onChange={e => setNoteForm(p => ({ ...p, status: e.target.value as CoachingNote['status'] }))}>
+                  <option value="open">Open</option><option value="ongoing">Ongoing</option><option value="addressed">Addressed</option>
+                </select></label>
+              </div>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>Summary<textarea value={noteForm.summary} onChange={e => setNoteForm(p => ({ ...p, summary: e.target.value }))} style={{ minHeight: 50 }} /></label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>Full Text<textarea value={noteForm.full_text} onChange={e => setNoteForm(p => ({ ...p, full_text: e.target.value }))} style={{ minHeight: 80 }} /></label>
+              <button className="btn primary" onClick={saveNote} disabled={!noteForm.subject.trim() || !noteForm.note_date} style={{ marginTop: 12 }}>Save Note</button>
+            </section>
+          )}
+
+          {notes.map(note => {
+            const isOpen = expandedNote === note.id;
+            return (
+              <section key={note.id} className="panel" style={{ marginBottom: 10, borderLeft: `3px solid ${STATUS_COLORS[note.status]}` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', cursor: 'pointer' }} onClick={() => setExpandedNote(isOpen ? null : note.id)}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 700, fontSize: 15 }}>{note.subject}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: `${STATUS_COLORS[note.status]}22`, color: STATUS_COLORS[note.status] }}>{STATUS_LABELS[note.status]}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{fmtDate(note.note_date)}{note.from_person ? ` · from ${note.from_person}` : ''}</div>
+                    {note.summary && <div style={{ fontSize: 13, marginTop: 6 }}>{note.summary}</div>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                    <button onClick={e => { e.stopPropagation(); deleteNote(note.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)' }}><Trash2 size={14} /></button>
+                    {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  </div>
+                </div>
+                {isOpen && (
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                    {note.full_text && <div style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap', marginBottom: 12 }}>{note.full_text}</div>}
+                    {note.action_items.length > 0 && (
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 6 }}>Action Items</div>
+                        {note.action_items.map((a, i) => (
+                          <div key={i} onClick={() => toggleActionItem(note, i)} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 0', cursor: 'pointer', fontSize: 13, textDecoration: a.done ? 'line-through' : 'none', color: a.done ? 'var(--muted)' : 'var(--text)' }}>
+                            {a.done ? <CheckCircle2 size={14} color="#16a34a" /> : <Circle size={14} color="var(--muted)" />} {a.text}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {(['open', 'ongoing', 'addressed'] as const).map(s => (
+                        <button key={s} onClick={() => setNoteStatus(note.id, s)} style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, border: `1.5px solid ${note.status === s ? STATUS_COLORS[s] : 'var(--border)'}`, background: note.status === s ? `${STATUS_COLORS[s]}22` : 'transparent', color: note.status === s ? STATUS_COLORS[s] : 'var(--muted)', cursor: 'pointer' }}>{STATUS_LABELS[s]}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+            );
+          })}
+          {notes.length === 0 && !showNoteForm && (
+            <section className="panel" style={{ textAlign: 'center', padding: 40 }}><p style={{ color: 'var(--muted)' }}>No coaching notes logged yet.</p></section>
+          )}
+        </div>
+      )}
+
+      {/* ── GOALS ── */}
+      {!loading && tab === 'goals' && (
+        <div>
+          <button className="btn primary" onClick={() => { setGoalForm({ ...BLANK_GOAL }); setShowGoalForm(v => !v); }} style={{ marginBottom: 14 }}><Plus size={14} /> Add Goal</button>
+
+          {showGoalForm && (
+            <section className="panel" style={{ borderLeft: '3px solid var(--purple)', marginBottom: 14 }}>
+              <div className="panel-head"><h2>Add Goal</h2><button className="btn ghost" onClick={() => setShowGoalForm(false)}>Close</button></div>
+              <div className="form-grid">
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', gridColumn: 'span 2' }}>Title *<input value={goalForm.title} onChange={e => setGoalForm(p => ({ ...p, title: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Metric Name<input value={goalForm.metric_name} onChange={e => setGoalForm(p => ({ ...p, metric_name: e.target.value }))} placeholder="e.g. Graduates" /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Unit<input value={goalForm.unit} onChange={e => setGoalForm(p => ({ ...p, unit: e.target.value }))} placeholder="%, count, $, hours…" /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Current Value<input type="number" value={goalForm.current_value} onChange={e => setGoalForm(p => ({ ...p, current_value: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Target Value<input type="number" value={goalForm.target_value} onChange={e => setGoalForm(p => ({ ...p, target_value: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Fiscal Year<input value={goalForm.fiscal_year} onChange={e => setGoalForm(p => ({ ...p, fiscal_year: e.target.value }))} placeholder="FY26" /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Due Date<input type="date" value={goalForm.due_date} onChange={e => setGoalForm(p => ({ ...p, due_date: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Status<select value={goalForm.status} onChange={e => setGoalForm(p => ({ ...p, status: e.target.value as Goal['status'] }))}>
+                  <option value="on_track">On Track</option><option value="at_risk">At Risk</option><option value="achieved">Achieved</option><option value="missed">Missed</option>
+                </select></label>
+              </div>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>Description<textarea value={goalForm.description} onChange={e => setGoalForm(p => ({ ...p, description: e.target.value }))} style={{ minHeight: 50 }} /></label>
+              <button className="btn primary" onClick={saveGoal} disabled={!goalForm.title.trim()} style={{ marginTop: 12 }}>Save Goal</button>
+            </section>
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            {goals.map(g => {
+              const pct = g.target_value && g.current_value !== null ? Math.min(100, Math.round((g.current_value / g.target_value) * 100)) : null;
+              return (
+                <section key={g.id} className="panel" style={{ borderTop: `3px solid ${STATUS_COLORS[g.status]}` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{g.title}</div>
+                    <button onClick={() => deleteGoal(g.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)' }}><Trash2 size={13} /></button>
+                  </div>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: `${STATUS_COLORS[g.status]}22`, color: STATUS_COLORS[g.status] }}>{STATUS_LABELS[g.status]}</span>
+                  {g.description && <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>{g.description}</p>}
+                  {g.target_value !== null && (
+                    <div style={{ marginTop: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                        <span>{g.current_value ?? 0}{g.unit} of {g.target_value}{g.unit}</span>
+                        <span style={{ fontWeight: 700 }}>{pct}%</span>
+                      </div>
+                      <div style={{ height: 8, borderRadius: 999, background: 'var(--surface-1)', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${pct}%`, background: STATUS_COLORS[g.status], borderRadius: 999 }} />
+                      </div>
+                      <input
+                        type="number"
+                        value={g.current_value ?? ''}
+                        onChange={e => updateGoalProgress(g, parseFloat(e.target.value) || 0)}
+                        style={{ marginTop: 8, width: '100%', fontSize: 12, padding: '4px 8px' }}
+                        placeholder="Update current value"
+                      />
+                    </div>
+                  )}
+                  {g.due_date && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>Due {fmtDate(g.due_date)}</div>}
+                </section>
+              );
+            })}
+          </div>
+          {goals.length === 0 && !showGoalForm && (
+            <section className="panel" style={{ textAlign: 'center', padding: 40 }}><p style={{ color: 'var(--muted)' }}>No goals set yet.</p></section>
+          )}
+        </div>
+      )}
+    </>
+  );
+}

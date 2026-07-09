@@ -5,7 +5,7 @@ import {
   Activity, Cloud, Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Gamepad2, Film, Plane, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope
+  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope, TrendingUp
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
@@ -17,6 +17,7 @@ import { useDailyBriefing, type BriefingLine } from './useDailyBriefing';
 import MigraineTracker from './MigraineTracker';
 import Contacts from './Contacts';
 import Books from './Books';
+import WorkPerformance from './WorkPerformance';
 import FTOTracker from './FTOTracker';
 import CourseNotes from './CourseNotes';
 import MoodTracker from './MoodTracker';
@@ -31,7 +32,7 @@ import Appointments from './Appointments';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'mood' | 'weather' | 'plants' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'settings';
+type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'mood' | 'weather' | 'plants' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -246,6 +247,7 @@ const workNav: readonly NavEntry[] = [
   ['fto', 'FTO Tracker', Clock],
   ['outreach', 'Outreach Drafts', Mail],
   ['students', 'Students', Users],
+  ['work_performance', 'Work Performance', TrendingUp],
 ];
 
 const moduleMeta: { page: Page; module_name: string; label: string; default_access: AccessLevel }[] = [
@@ -262,7 +264,8 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'contacts', module_name: 'contacts', label: 'Contacts', default_access: 'view' },
   { page: 'books', module_name: 'books', label: 'Library', default_access: 'view' },
   { page: 'students', module_name: 'students', label: 'Students', default_access: 'hidden' },
-  { page: 'outreach', module_name: 'outreach', label: 'Outreach Drafts', default_access: 'hidden' }
+  { page: 'outreach', module_name: 'outreach', label: 'Outreach Drafts', default_access: 'hidden' },
+  { page: 'work_performance', module_name: 'work_performance', label: 'Work Performance', default_access: 'hidden' }
 ];
 
 const pageToModule = Object.fromEntries(moduleMeta.map((item) => [item.page, item.module_name])) as Record<string, string>;
@@ -1634,6 +1637,7 @@ Kaylee`;
           {page === 'migraine' && <MigraineTracker />}
           {page === 'contacts' && <Contacts />}
           {page === 'books' && <Books />}
+          {page === 'work_performance' && <WorkPerformance />}
           {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
           {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
           {page === 'fto' && activeRole === 'admin' && <FTOTracker />}
