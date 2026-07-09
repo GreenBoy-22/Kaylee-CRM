@@ -216,13 +216,12 @@ const adamEmails = ['adamlamargreen@gmail.com'];
 
 const homeNav: readonly NavEntry[] = [
   ['dashboard', 'Dashboard', LayoutDashboard],
-  ['today', 'Today’s Tasks', ClipboardCheck],
-  ['briefing', 'Daily Briefing', Sparkles],
-  ['calendar', 'Calendar', CalendarDays],
   ['appointments', 'Appointments', Stethoscope],
   ['budget', 'Budget', WalletCards],
+  ['calendar', 'Calendar', CalendarDays],
   ['chores', 'Chores & Tasks', ListTodo],
   ['contacts', 'Contacts', Users],
+  ['briefing', 'Daily Briefing', Sparkles],
   ['games', 'Games', Gamepad2],
   ['suggestions', 'Home Suggestions', Home],
   ['inventory', 'Inventory', Inbox],
@@ -233,6 +232,7 @@ const homeNav: readonly NavEntry[] = [
   ['media', 'Movies & TV', Film],
   ['packages', 'Packages', Inbox],
   ['plants', 'Plant Catalog', Flower2],
+  ['today', 'Today’s Tasks', ClipboardCheck],
   ['travel', 'Travel', Plane],
   ['vehicles', 'Vehicles', Car],
   ['weather', 'Weather', Cloud]
@@ -240,13 +240,13 @@ const homeNav: readonly NavEntry[] = [
 
 const workNav: readonly NavEntry[] = [
   ['dashboard', 'Dashboard', LayoutDashboard],
-  ['today', 'Today’s Tasks', ClipboardCheck],
-  ['briefing', 'Daily Briefing', Sparkles],
   ['calendar', 'Calendar', CalendarDays],
   ['course_notes', 'Course Notes', BookOpen],
+  ['briefing', 'Daily Briefing', Sparkles],
   ['fto', 'FTO Tracker', Clock],
   ['outreach', 'Outreach Drafts', Mail],
-  ['students', 'Students', Users]
+  ['students', 'Students', Users],
+  ['today', 'Today’s Tasks', ClipboardCheck]
 ];
 
 const moduleMeta: { page: Page; module_name: string; label: string; default_access: AccessLevel }[] = [
