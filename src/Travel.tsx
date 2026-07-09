@@ -247,6 +247,9 @@ export default function Travel({ userId }: { userId: string }) {
   const [showAddEntertainment, setShowAddEntertainment] = useState(false);
   const [newEntItem, setNewEntItem] = useState({ ...BLANK_ITEM, type: 'activity' as ItemType, category: 'entertainment' as const });
   const [entItemSaving, setEntItemSaving] = useState(false);
+  const [newEntDetails, setNewEntDetails] = useState<{ label: string; value: string }[]>([]);
+  const [newDetailLabel, setNewDetailLabel] = useState('');
+  const [newDetailValue, setNewDetailValue] = useState('');
 
   // New trip form
   const [showNewTrip, setShowNewTrip]   = useState(false);
@@ -310,7 +313,7 @@ export default function Travel({ userId }: { userId: string }) {
       .select('*')
       .eq('user_id', userId)
       .eq('category', 'entertainment')
-      .order('start_date', { ascending: true });
+      .order('start_date', { ascending: true, nullsFirst: false });
     setEntertainmentItems((entData as TravelItem[]) ?? []);
 
     setLoading(false);
@@ -439,11 +442,20 @@ export default function Travel({ userId }: { userId: string }) {
   async function saveEntertainmentItem() {
     if (!supabase || !newEntItem.title.trim()) return;
     setEntItemSaving(true);
-    const row = { ...newEntItem, trip_id: null, user_id: userId, title: newEntItem.title.trim(), category: 'entertainment' as const };
+    const details = Object.fromEntries(newEntDetails.map(d => [d.label, d.value]));
+    const row = { ...newEntItem, trip_id: null, user_id: userId, title: newEntItem.title.trim(), category: 'entertainment' as const, details };
     const { data, error } = await supabase.from('travel_items').insert(row).select().single();
     if (!error && data) {
-      setEntertainmentItems(prev => [...prev, data as TravelItem].sort((a, b) => (a.start_date ?? '') < (b.start_date ?? '') ? -1 : 1));
+      setEntertainmentItems(prev => [...prev, data as TravelItem].sort((a, b) => {
+        if (!a.start_date && !b.start_date) return 0;
+        if (!a.start_date) return 1;
+        if (!b.start_date) return -1;
+        return a.start_date.localeCompare(b.start_date);
+      }));
       setNewEntItem({ ...BLANK_ITEM, type: 'activity', category: 'entertainment' });
+      setNewEntDetails([]);
+      setNewDetailLabel('');
+      setNewDetailValue('');
       setShowAddEntertainment(false);
     }
     setEntItemSaving(false);
@@ -785,6 +797,48 @@ export default function Travel({ userId }: { userId: string }) {
                 <textarea value={newEntItem.notes ?? ''} onChange={e => setNewEntItem(p => ({ ...p, notes: e.target.value || null }))} style={{ minHeight: 50, resize: 'vertical' }} />
               </label>
             </div>
+
+            {/* Details — Section, Row, Seat(s), Quantity, Ticket Type, or anything custom */}
+            <div style={{ marginTop: 4, marginBottom: 12, padding: '10px 12px', background: 'var(--surface-1)', borderRadius: 8, border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8 }}>Details</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                {['Section', 'Row', 'Seat(s)', 'Quantity', 'Ticket Type'].map(preset => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setNewDetailLabel(preset)}
+                    style={{ fontSize: 11, padding: '4px 10px', borderRadius: 999, border: `1px solid ${newDetailLabel === preset ? '#DB2777' : 'var(--border)'}`, background: newDetailLabel === preset ? '#DB277722' : 'transparent', color: newDetailLabel === preset ? '#DB2777' : 'var(--muted)', cursor: 'pointer' }}
+                  >{preset}</button>
+                ))}
+              </div>
+              {newEntDetails.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+                  {newEntDetails.map((d, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                      <span style={{ fontWeight: 700, flex: 1 }}>{d.label}</span>
+                      <span style={{ color: 'var(--muted)' }}>{d.value}</span>
+                      <button type="button" onClick={() => setNewEntDetails(prev => prev.filter((_, idx) => idx !== i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 14 }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <input value={newDetailLabel} onChange={e => setNewDetailLabel(e.target.value)} placeholder="Label (e.g. Section)" style={{ flex: '1 1 120px', fontSize: 12, padding: '6px 8px' }} />
+                <input value={newDetailValue} onChange={e => setNewDetailValue(e.target.value)} placeholder="Value (e.g. 114)" style={{ flex: '1 1 120px', fontSize: 12, padding: '6px 8px' }} />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const label = newDetailLabel.trim();
+                    const value = newDetailValue.trim();
+                    if (!label || !value) return;
+                    setNewEntDetails(prev => [...prev.filter(d => d.label !== label), { label, value }]);
+                    setNewDetailLabel(''); setNewDetailValue('');
+                  }}
+                  style={{ fontSize: 12, fontWeight: 700, padding: '6px 12px', borderRadius: 6, border: '1px solid #DB2777', background: '#DB2777', color: '#fff', cursor: 'pointer' }}
+                >+ Add</button>
+              </div>
+            </div>
+
             <button className="btn primary" onClick={saveEntertainmentItem} disabled={!newEntItem.title.trim() || entItemSaving} style={{ marginTop: 12 }}>
               {entItemSaving ? <RefreshCw size={13} className="spin" /> : <Plus size={13} />} Add Ticket
             </button>

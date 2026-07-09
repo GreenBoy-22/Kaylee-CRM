@@ -70,6 +70,7 @@ type InventoryItem = {
   expires: string | null;
   value: number | null;
   barcode?: string | null;
+  is_perishable?: boolean;
 };
 
 type Student = {
@@ -2274,24 +2275,41 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
         </div>
       </div>
 
-      {/* Top row: calendar today + my tasks */}
+      {/* Top row: calendar today + scanner/grocery */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
         <div><GoogleCalendarToday /></div>
-        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('today')}>
+        <section className="panel">
           <div className="panel-head">
-            <h2>📋 {isKaylee ? "My" : "Adam's"} Tasks Today</h2>
-            <span className="readonly-pill">{myChores.length} items</span>
+            <h2>📷 Scanner &amp; Grocery List</h2>
           </div>
-          {myChores.length === 0
-            ? <div className="brief-item" style={{ color: 'var(--muted)' }}>All clear — nothing due today.</div>
-            : myChores.map(c => (
-              <div key={c.id} className="brief-item" style={{ borderLeft: c.due_date && c.due_date < today ? '3px solid var(--red)' : '3px solid var(--green)' }}>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
-                {c.due_date && c.due_date < today && <div style={{ fontSize: 11, color: 'var(--red)' }}>Overdue · {c.due_date}</div>}
-              </div>
-            ))
-          }
-          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>View all →</div>
+          <button className="btn primary" onClick={() => setPage('inventory')} style={{ width: '100%', marginBottom: 10 }}>
+            Open Scanner Inbox
+          </button>
+          {(() => {
+            const REPLENISH_CATS = ['Cleaning', 'Personal Care'];
+            const REPLENISH_LOCS = ['Kitchen', 'Bathroom', 'Laundry Room', 'Garage', 'Backstock Closet'];
+            const outOfStock = inventory.filter(i =>
+              i.quantity <= 0 &&
+              (i.is_perishable || REPLENISH_CATS.includes(i.category ?? '') || REPLENISH_LOCS.includes(i.location ?? ''))
+            );
+            if (outOfStock.length === 0) {
+              return <div className="brief-item" style={{ color: 'var(--muted)' }}>Nothing on the grocery list — you're stocked up.</div>;
+            }
+            return (
+              <>
+                {outOfStock.slice(0, 5).map(i => (
+                  <div key={i.id} className="brief-item" style={{ borderLeft: '3px solid #0891b2' }}>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{i.name}</div>
+                    {i.location && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{i.location}</div>}
+                  </div>
+                ))}
+                {outOfStock.length > 5 && (
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>+{outOfStock.length - 5} more</div>
+                )}
+              </>
+            );
+          })()}
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right', cursor: 'pointer' }} onClick={() => setPage('inventory')}>View all →</div>
         </section>
       </div>
 
