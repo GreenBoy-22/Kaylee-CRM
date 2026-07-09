@@ -4510,7 +4510,104 @@ function SettingsPage({ permissions, updatePermission }: { permissions: ModulePe
     if (url) window.location.href = url;
   }
 
-  return <><Header title="Settings" sub="Control Adam's Home-side access as the app grows." /><section className="panel"><h2>Google Connection</h2><p className="settings-intro">Reconnect Google to pick up new permissions (like Contacts). You'll see Google's consent screen and be returned here automatically.</p><button className="btn primary" onClick={reconnectGoogle}>Reconnect Google Account</button></section><section className="panel"><h2>Adam section access</h2><p className="settings-intro">Adam never sees Work mode or Students. For Home sections, choose Hidden, View Only, or Edit. This avoids confusing combinations like edit without view.</p><div className="permission-list">{moduleMeta.filter((item) => item.page !== 'students').map((item) => {
+  // ── Push notifications ────────────────────────────────────────────────
+  const VAPID_PUBLIC_KEY = 'BKM3RqM4dM49I5dsg4M_FOkDhokEiMMr2lej70U0JCm0JtfEd3N5zl1WAyP72W1eEKqQrevYMzgesdkyHgBCvy4';
+  const [pushStatus, setPushStatus] = useState<'checking' | 'unsupported' | 'subscribed' | 'unsubscribed' | 'blocked'>('checking');
+  const [pushBusy, setPushBusy] = useState(false);
+
+  function urlBase64ToUint8Array(base64String: string) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+    return outputArray;
+  }
+
+  useEffect(() => {
+    (async () => {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) { setPushStatus('unsupported'); return; }
+      if (Notification.permission === 'denied') { setPushStatus('blocked'); return; }
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        setPushStatus(sub ? 'subscribed' : 'unsubscribed');
+      } catch {
+        setPushStatus('unsupported');
+      }
+    })();
+  }, []);
+
+  async function enablePush() {
+    if (!supabase) return;
+    setPushBusy(true);
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') { setPushStatus('blocked'); setPushBusy(false); return; }
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData.session?.user?.id;
+      if (!userId) { setPushBusy(false); return; }
+      const json = sub.toJSON();
+      await supabase.from('push_subscriptions').upsert(
+        {
+          user_id: userId,
+          endpoint: json.endpoint,
+          p256dh: json.keys?.p256dh,
+          auth: json.keys?.auth,
+          device_label: navigator.userAgent.slice(0, 100),
+        },
+        { onConflict: 'user_id,endpoint' }
+      );
+      setPushStatus('subscribed');
+    } catch (err) {
+      console.error('Push subscribe failed:', err);
+    }
+    setPushBusy(false);
+  }
+
+  async function disablePush() {
+    if (!supabase) return;
+    setPushBusy(true);
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
+        await sub.unsubscribe();
+      }
+      setPushStatus('unsubscribed');
+    } catch (err) {
+      console.error('Push unsubscribe failed:', err);
+    }
+    setPushBusy(false);
+  }
+
+  const pushSection = (
+    <section className="panel">
+      <h2>Push Notifications</h2>
+      <p className="settings-intro">
+        Get a daily reminder for your Briefing and — if you haven't logged one yet that day — your mood check-in. Sent once a day, around 8am.
+      </p>
+      {pushStatus === 'unsupported' && <p className="settings-intro">This browser/device doesn't support push notifications.</p>}
+      {pushStatus === 'blocked' && <p className="settings-intro">Notifications are blocked for this app. You'll need to re-enable them in your phone/browser's notification settings, then reload this page.</p>}
+      {pushStatus === 'subscribed' && (
+        <>
+          <p className="settings-intro">✅ Notifications are on for this device.</p>
+          <button className="btn ghost" onClick={disablePush} disabled={pushBusy}>{pushBusy ? 'Working…' : 'Turn Off for This Device'}</button>
+        </>
+      )}
+      {pushStatus === 'unsubscribed' && (
+        <button className="btn primary" onClick={enablePush} disabled={pushBusy}>{pushBusy ? 'Working…' : 'Enable Notifications'}</button>
+      )}
+    </section>
+  );
+
+  return <><Header title="Settings" sub="Control Adam's Home-side access as the app grows." /><section className="panel"><h2>Google Connection</h2><p className="settings-intro">Reconnect Google to pick up new permissions (like Contacts). You'll see Google's consent screen and be returned here automatically.</p><button className="btn primary" onClick={reconnectGoogle}>Reconnect Google Account</button></section>{pushSection}<section className="panel"><h2>Adam section access</h2><p className="settings-intro">Adam never sees Work mode or Students. For Home sections, choose Hidden, View Only, or Edit. This avoids confusing combinations like edit without view.</p><div className="permission-list">{moduleMeta.filter((item) => item.page !== 'students').map((item) => {
     const current = accessFor(item.module_name);
     return <div className="permission-row" key={item.module_name}><div><strong>{item.label}</strong><p>{current === 'hidden' ? 'Hidden from Adam' : current === 'view' ? 'Visible · View-only' : 'Visible · Editable'}</p></div><label className="switch-row"><Eye size={15} /> Adam Access <select value={current} onChange={(e) => updatePermission(item.module_name, e.target.value as AccessLevel)}><option value="hidden">Hidden</option><option value="view">View Only</option><option value="edit">Edit</option></select></label></div>;
   })}</div></section><section className="panel"><h2>Access rules</h2><div className="brief-item"><strong>Kaylee:</strong> admin, full Home + Work access.</div><div className="brief-item"><strong>Adam:</strong> Home only. Hidden means no sidebar item. View Only means no add/save/edit buttons. Edit means full access.</div><div className="brief-item"><strong>Students:</strong> always admin-only and FERPA-safe.</div></section></>;
