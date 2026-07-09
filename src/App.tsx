@@ -3095,6 +3095,11 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
         </div>
 
         {/* Linked barcodes — e.g. a 12-pack carton's barcode and the single-can barcode both roll up to this same item */}
+        <style>{`
+          .kh-link-barcode-row { display: flex !important; gap: 6px !important; align-items: center !important; flex-wrap: wrap !important; position: relative !important; z-index: 1 !important; }
+          .kh-link-barcode-row input { pointer-events: auto !important; position: relative !important; z-index: 1 !important; }
+          .kh-link-barcode-btn { pointer-events: auto !important; position: relative !important; z-index: 2 !important; cursor: pointer !important; }
+        `}</style>
         <div style={{marginBottom:12,padding:'10px 12px',background:'var(--surface-1)',borderRadius:8,border:'1px solid var(--border)'}}>
           <div style={{fontSize:12,fontWeight:700,color:'var(--muted)',marginBottom:6}}>Linked Barcodes</div>
           <div style={{fontSize:11,color:'var(--muted)',marginBottom:8}}>Scan a different barcode (like a 12-pack carton) that should count toward this same item — set how many units it's worth.</div>
@@ -3104,21 +3109,25 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
                 <div key={b.barcode} style={{display:'flex',alignItems:'center',gap:8,fontSize:12}}>
                   <span style={{fontFamily:'monospace',flex:1}}>{b.barcode}</span>
                   <span style={{color:'var(--muted)'}}>= {b.multiplier} unit{b.multiplier!==1?'s':''}</span>
-                  <button onClick={()=>setFAltBarcodes(prev=>prev.filter((_,idx)=>idx!==i))} style={{background:'none',border:'none',cursor:'pointer',color:'var(--red)',fontSize:14}}>✕</button>
+                  <button type="button" onClick={()=>setFAltBarcodes(prev=>prev.filter((_,idx)=>idx!==i))} style={{background:'none',border:'none',cursor:'pointer',color:'var(--red)',fontSize:14}}>✕</button>
                 </div>
               ))}
             </div>
           )}
-          <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+          <div className="kh-link-barcode-row">
             <input value={newLinkBarcode} onChange={e=>setNewLinkBarcode(e.target.value)} placeholder="Barcode" style={{flex:'1 1 140px',fontSize:12,padding:'6px 8px'}}/>
             <input type="number" min={1} value={newLinkMultiplier} onChange={e=>setNewLinkMultiplier(parseInt(e.target.value)||1)} style={{width:60,fontSize:12,padding:'6px 8px'}} title="How many units this barcode is worth"/>
-            <button type="button" onClick={()=>{
+            <button type="button" className="kh-link-barcode-btn" onClick={(e)=>{
+              e.preventDefault(); e.stopPropagation();
               const bc=newLinkBarcode.trim();
-              if(!bc||fAltBarcodes.some(b=>b.barcode===bc)||bc===fBarcode.trim())return;
+              if(!bc){ alert("Enter a barcode first."); return; }
+              if(bc===fBarcode.trim()){ alert("That's already this item's main barcode."); return; }
+              if(fAltBarcodes.some(b=>b.barcode===bc)){ alert("That barcode is already linked."); return; }
               setFAltBarcodes(prev=>[...prev,{barcode:bc,multiplier:newLinkMultiplier}]);
               setNewLinkBarcode('');setNewLinkMultiplier(1);
-            }} style={{fontSize:12,fontWeight:700,padding:'6px 12px',borderRadius:6,border:'1px solid var(--purple)',background:'var(--purple)',color:'#fff',cursor:'pointer'}}>+ Link</button>
+            }} style={{fontSize:12,fontWeight:700,padding:'6px 12px',borderRadius:6,border:'1px solid var(--purple)',background:'var(--purple)',color:'#fff'}}>+ Link</button>
           </div>
+          {!editItem && <div style={{fontSize:11,color:'var(--amber)',marginTop:6}}>⚠️ Save this item first, then reopen it to edit, to link additional barcodes — linking works best on an already-saved item.</div>}
         </div>
 
         <div style={{marginBottom:12}}>
