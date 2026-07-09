@@ -36,8 +36,9 @@ type HistoryEntry = {
 
 type TravelItem = {
   id: string;
-  trip_id: string;
+  trip_id: string | null;
   user_id: string;
+  category: 'travel' | 'entertainment';
   type: ItemType;
   title: string;
   provider: string | null;
@@ -86,6 +87,7 @@ const ITEM_CONFIG: Record<ItemType, { label: string; icon: React.ElementType; co
 };
 
 const BLANK_ITEM: Omit<TravelItem, 'id' | 'trip_id' | 'user_id' | 'created_at' | 'history'> = {
+  category: 'travel',
   type: 'flight', title: '', provider: null, confirmation_number: null, flight_number: null,
   start_date: null, start_time: null, end_date: null, end_time: null,
   location: null, origin_code: null, origin_city: null, destination_code: null, destination_city: null,
@@ -237,6 +239,15 @@ export default function Travel({ userId }: { userId: string }) {
   const [scanMsg, setScanMsg]           = useState('');
   const [statusFilter, setStatusFilter] = useState<TripStatus | 'all'>('all');
 
+  // Travel vs Entertainment toggle — entertainment tickets (concerts,
+  // museums, etc.) aren't tied to a trip and show as a flat list using
+  // the same card style as activity tickets within a trip.
+  const [viewMode, setViewMode] = useState<'travel' | 'entertainment'>('travel');
+  const [entertainmentItems, setEntertainmentItems] = useState<TravelItem[]>([]);
+  const [showAddEntertainment, setShowAddEntertainment] = useState(false);
+  const [newEntItem, setNewEntItem] = useState({ ...BLANK_ITEM, type: 'activity' as ItemType, category: 'entertainment' as const });
+  const [entItemSaving, setEntItemSaving] = useState(false);
+
   // New trip form
   const [showNewTrip, setShowNewTrip]   = useState(false);
   const [tName, setTName]               = useState('');
@@ -280,17 +291,28 @@ export default function Travel({ userId }: { userId: string }) {
           .from('travel_items')
           .select('*')
           .in('trip_id', tripIds)
+          .eq('category', 'travel')
           .order('start_date', { ascending: true });
         if (itemData) {
           const grouped: Record<string, TravelItem[]> = {};
           for (const item of itemData as TravelItem[]) {
-            if (!grouped[item.trip_id]) grouped[item.trip_id] = [];
-            grouped[item.trip_id].push(item);
+            if (!grouped[item.trip_id as string]) grouped[item.trip_id as string] = [];
+            grouped[item.trip_id as string].push(item);
           }
           setItems(grouped);
         }
       }
     }
+
+    // Entertainment tickets — standalone, not grouped under any trip.
+    const { data: entData } = await supabase
+      .from('travel_items')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('category', 'entertainment')
+      .order('start_date', { ascending: true });
+    setEntertainmentItems((entData as TravelItem[]) ?? []);
+
     setLoading(false);
   }, [userId]);
 
@@ -413,6 +435,26 @@ export default function Travel({ userId }: { userId: string }) {
     await supabase.from('travel_items').delete().eq('id', itemId);
   }
 
+  // ── Entertainment tickets (standalone, no trip) ─────────────────────────
+  async function saveEntertainmentItem() {
+    if (!supabase || !newEntItem.title.trim()) return;
+    setEntItemSaving(true);
+    const row = { ...newEntItem, trip_id: null, user_id: userId, title: newEntItem.title.trim(), category: 'entertainment' as const };
+    const { data, error } = await supabase.from('travel_items').insert(row).select().single();
+    if (!error && data) {
+      setEntertainmentItems(prev => [...prev, data as TravelItem].sort((a, b) => (a.start_date ?? '') < (b.start_date ?? '') ? -1 : 1));
+      setNewEntItem({ ...BLANK_ITEM, type: 'activity', category: 'entertainment' });
+      setShowAddEntertainment(false);
+    }
+    setEntItemSaving(false);
+  }
+
+  async function deleteEntertainmentItem(itemId: string) {
+    if (!supabase || !confirm('Remove this ticket?')) return;
+    setEntertainmentItems(prev => prev.filter(i => i.id !== itemId));
+    await supabase.from('travel_items').delete().eq('id', itemId);
+  }
+
   // ── Filtered trips ────────────────────────────────────────────────────
   const filtered = trips
     .filter(t => statusFilter === 'all' || t.status === statusFilter)
@@ -429,21 +471,48 @@ export default function Travel({ userId }: { userId: string }) {
       {/* Header */}
       <div className="page-header">
         <div>
-          <h1>Travel</h1>
-          <p>{trips.length} trips · {Object.values(items).flat().length} reservations</p>
+          <h1>{viewMode === 'travel' ? 'Travel' : 'Entertainment'}</h1>
+          <p>{viewMode === 'travel'
+            ? `${trips.length} trips · ${Object.values(items).flat().length} reservations`
+            : `${entertainmentItems.length} ticket${entertainmentItems.length !== 1 ? 's' : ''}`}</p>
         </div>
         <div className="actions">
-          <button className="btn ghost" onClick={scanGmail} disabled={scanning} style={{ color: '#059669', borderColor: '#059669' }}>
-            {scanning ? <RefreshCw size={15} className="spin" /> : <Mail size={15} />}
-            {scanning ? 'Scanning…' : 'Scan Gmail'}
-          </button>
-          <button className="btn ghost" onClick={() => { setShowPasteEmail(v => !v); setPasteMsg(''); }} style={{ color: '#2563EB', borderColor: '#2563EB' }}>
-            <FileText size={15} /> Paste Email
-          </button>
-          <button className="btn primary" onClick={() => setShowNewTrip(v => !v)}>
-            <Plus size={15} /> New Trip
-          </button>
+          {viewMode === 'travel' ? (
+            <>
+              <button className="btn ghost" onClick={scanGmail} disabled={scanning} style={{ color: '#059669', borderColor: '#059669' }}>
+                {scanning ? <RefreshCw size={15} className="spin" /> : <Mail size={15} />}
+                {scanning ? 'Scanning…' : 'Scan Gmail'}
+              </button>
+              <button className="btn ghost" onClick={() => { setShowPasteEmail(v => !v); setPasteMsg(''); }} style={{ color: '#2563EB', borderColor: '#2563EB' }}>
+                <FileText size={15} /> Paste Email
+              </button>
+              <button className="btn primary" onClick={() => setShowNewTrip(v => !v)}>
+                <Plus size={15} /> New Trip
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn ghost" onClick={() => { setShowPasteEmail(v => !v); setPasteMsg(''); }} style={{ color: '#2563EB', borderColor: '#2563EB' }}>
+                <FileText size={15} /> Paste Email
+              </button>
+              <button className="btn primary" onClick={() => setShowAddEntertainment(v => !v)}>
+                <Plus size={15} /> Add Ticket
+              </button>
+            </>
+          )}
         </div>
+      </div>
+
+      {/* Travel / Entertainment toggle */}
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button
+          className={viewMode === 'travel' ? 'btn primary tiny' : 'btn ghost tiny'}
+          onClick={() => setViewMode('travel')}
+        >✈️ Travel</button>
+        <button
+          className={viewMode === 'entertainment' ? 'btn primary tiny' : 'btn ghost tiny'}
+          onClick={() => setViewMode('entertainment')}
+        >🎟️ Entertainment{entertainmentItems.length > 0 ? ` (${entertainmentItems.length})` : ''}</button>
       </div>
 
       {/* Scan message */}
@@ -486,7 +555,7 @@ export default function Travel({ userId }: { userId: string }) {
       )}
 
       {/* New Trip Form */}
-      {showNewTrip && (
+      {viewMode === 'travel' && showNewTrip && (
         <section className="panel" style={{ borderLeft: '3px solid #7C3AED' }}>
           <div className="panel-head">
             <h2>Plan a New Trip</h2>
@@ -526,6 +595,7 @@ export default function Travel({ userId }: { userId: string }) {
         </section>
       )}
 
+      {viewMode === 'travel' && <>
       {/* Status filters */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <button className={statusFilter === 'all' ? 'btn primary tiny' : 'btn ghost tiny'} onClick={() => setStatusFilter('all')}>
@@ -671,6 +741,76 @@ export default function Travel({ userId }: { userId: string }) {
           </section>
         );
       })}
+      </>}
+
+      {/* Entertainment view — standalone tickets, same card treatment as activity tickets in a trip */}
+      {viewMode === 'entertainment' && <>
+        {showAddEntertainment && (
+          <section className="panel" style={{ borderLeft: '3px solid #DB2777' }}>
+            <div className="panel-head">
+              <h2>Add a Ticket</h2>
+              <button className="btn ghost" onClick={() => setShowAddEntertainment(false)}>Close</button>
+            </div>
+            <div className="form-grid" style={{ gap: 12 }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', gridColumn: 'span 2' }}>
+                Event / Show Name *
+                <input value={newEntItem.title} onChange={e => setNewEntItem(p => ({ ...p, title: e.target.value }))} placeholder="Hamilton, MOMA Members Show, Braves vs Mets…" />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
+                Venue / Provider
+                <input value={newEntItem.provider ?? ''} onChange={e => setNewEntItem(p => ({ ...p, provider: e.target.value || null }))} placeholder="Fox Theatre, Ticketmaster…" />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
+                Confirmation #
+                <input value={newEntItem.confirmation_number ?? ''} onChange={e => setNewEntItem(p => ({ ...p, confirmation_number: e.target.value || null }))} />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
+                Date
+                <input type="date" value={newEntItem.start_date ?? ''} onChange={e => setNewEntItem(p => ({ ...p, start_date: e.target.value || null }))} />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
+                Time
+                <input type="time" value={newEntItem.start_time ?? ''} onChange={e => setNewEntItem(p => ({ ...p, start_time: e.target.value || null }))} />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', gridColumn: 'span 2' }}>
+                Address
+                <input value={newEntItem.address ?? ''} onChange={e => setNewEntItem(p => ({ ...p, address: e.target.value || null }))} />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
+                Price
+                <input value={newEntItem.price ?? ''} onChange={e => setNewEntItem(p => ({ ...p, price: e.target.value || null }))} placeholder="$45.00" />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', gridColumn: 'span 2' }}>
+                Notes
+                <textarea value={newEntItem.notes ?? ''} onChange={e => setNewEntItem(p => ({ ...p, notes: e.target.value || null }))} style={{ minHeight: 50, resize: 'vertical' }} />
+              </label>
+            </div>
+            <button className="btn primary" onClick={saveEntertainmentItem} disabled={!newEntItem.title.trim() || entItemSaving} style={{ marginTop: 12 }}>
+              {entItemSaving ? <RefreshCw size={13} className="spin" /> : <Plus size={13} />} Add Ticket
+            </button>
+          </section>
+        )}
+
+        {loading && (
+          <section className="panel">
+            <div style={{ display: 'flex', gap: 8, color: 'var(--muted)' }}><RefreshCw size={14} className="spin" /> Loading tickets…</div>
+          </section>
+        )}
+
+        {!loading && entertainmentItems.length === 0 && (
+          <section className="panel" style={{ textAlign: 'center', padding: '40px 20px' }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>🎟️</div>
+            <h3 style={{ margin: '0 0 8px', color: 'var(--muted)' }}>No tickets yet!</h3>
+            <p style={{ color: 'var(--muted)', fontSize: 13, margin: '0 0 16px' }}>
+              Add a concert, museum visit, game, or show — paste a confirmation email or add one manually.
+            </p>
+          </section>
+        )}
+
+        {!loading && entertainmentItems.map(item => (
+          <EventTicketCard key={item.id} item={item} onDelete={() => deleteEntertainmentItem(item.id)} />
+        ))}
+      </>}
 
       {/* Add Item Modal */}
       {addingItemTo && (
