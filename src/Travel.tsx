@@ -1513,8 +1513,8 @@ function EventTicketCard({ item, onDelete, onEdit }: { item: TravelItem; onDelet
               <span style={{ textAlign: 'right' }}>{value}</span>
             </div>
           ))}
-          {item.notes && detailEntries.length === 0 && (
-            <div style={{ fontSize: 13, color: 'var(--muted)', fontStyle: 'italic' }}>{item.notes}</div>
+          {item.notes && (
+            <div style={{ fontSize: 13, color: 'var(--muted)', fontStyle: 'italic', paddingTop: detailEntries.length > 0 ? 6 : 0, borderTop: detailEntries.length > 0 ? '1px dashed var(--border, rgba(0,0,0,0.1))' : 'none' }}>{item.notes}</div>
           )}
         </div>
       )}
