@@ -250,6 +250,7 @@ export default function Travel({ userId }: { userId: string }) {
   const [newEntDetails, setNewEntDetails] = useState<{ label: string; value: string }[]>([]);
   const [newDetailLabel, setNewDetailLabel] = useState('');
   const [newDetailValue, setNewDetailValue] = useState('');
+  const [editingEntId, setEditingEntId] = useState<string | null>(null);
 
   // New trip form
   const [showNewTrip, setShowNewTrip]   = useState(false);
@@ -443,6 +444,31 @@ export default function Travel({ userId }: { userId: string }) {
     if (!supabase || !newEntItem.title.trim()) return;
     setEntItemSaving(true);
     const details = Object.fromEntries(newEntDetails.map(d => [d.label, d.value]));
+
+    if (editingEntId) {
+      const { data, error } = await supabase
+        .from('travel_items')
+        .update({ ...newEntItem, title: newEntItem.title.trim(), details })
+        .eq('id', editingEntId)
+        .select()
+        .single();
+      if (!error && data) {
+        setEntertainmentItems(prev => [...prev.filter(i => i.id !== editingEntId), data as TravelItem].sort((a, b) => {
+          if (!a.start_date && !b.start_date) return 0;
+          if (!a.start_date) return 1;
+          if (!b.start_date) return -1;
+          return a.start_date.localeCompare(b.start_date);
+        }));
+        setNewEntItem({ ...BLANK_ITEM, type: 'activity', category: 'entertainment' });
+        setNewEntDetails([]);
+        setNewDetailLabel(''); setNewDetailValue('');
+        setEditingEntId(null);
+        setShowAddEntertainment(false);
+      }
+      setEntItemSaving(false);
+      return;
+    }
+
     const row = { ...newEntItem, trip_id: null, user_id: userId, title: newEntItem.title.trim(), category: 'entertainment' as const, details };
     const { data, error } = await supabase.from('travel_items').insert(row).select().single();
     if (!error && data) {
@@ -459,6 +485,22 @@ export default function Travel({ userId }: { userId: string }) {
       setShowAddEntertainment(false);
     }
     setEntItemSaving(false);
+  }
+
+  function startEditEntertainment(item: TravelItem) {
+    setEditingEntId(item.id);
+    setNewEntItem({
+      category: 'entertainment', type: item.type, title: item.title, provider: item.provider,
+      confirmation_number: item.confirmation_number, flight_number: item.flight_number,
+      start_date: item.start_date, start_time: item.start_time, end_date: item.end_date, end_time: item.end_time,
+      location: item.location, origin_code: item.origin_code, origin_city: item.origin_city,
+      destination_code: item.destination_code, destination_city: item.destination_city,
+      address: item.address, phone: item.phone, website: item.website, price: item.price,
+      notes: item.notes, passenger_name: item.passenger_name, leg_order: item.leg_order,
+      details: item.details, email_subject: item.email_subject,
+    });
+    setNewEntDetails(Object.entries(item.details ?? {}).map(([label, value]) => ({ label, value: String(value) })));
+    setShowAddEntertainment(true);
   }
 
   async function deleteEntertainmentItem(itemId: string) {
@@ -760,8 +802,8 @@ export default function Travel({ userId }: { userId: string }) {
         {showAddEntertainment && (
           <section className="panel" style={{ borderLeft: '3px solid #DB2777' }}>
             <div className="panel-head">
-              <h2>Add a Ticket</h2>
-              <button className="btn ghost" onClick={() => setShowAddEntertainment(false)}>Close</button>
+              <h2>{editingEntId ? 'Edit Ticket' : 'Add a Ticket'}</h2>
+              <button className="btn ghost" onClick={() => { setShowAddEntertainment(false); setEditingEntId(null); setNewEntItem({ ...BLANK_ITEM, type: 'activity', category: 'entertainment' }); setNewEntDetails([]); }}>Close</button>
             </div>
             <div className="form-grid" style={{ gap: 12 }}>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', gridColumn: 'span 2' }}>
@@ -840,7 +882,7 @@ export default function Travel({ userId }: { userId: string }) {
             </div>
 
             <button className="btn primary" onClick={saveEntertainmentItem} disabled={!newEntItem.title.trim() || entItemSaving} style={{ marginTop: 12 }}>
-              {entItemSaving ? <RefreshCw size={13} className="spin" /> : <Plus size={13} />} Add Ticket
+              {entItemSaving ? <RefreshCw size={13} className="spin" /> : <Plus size={13} />} {editingEntId ? 'Save Changes' : 'Add Ticket'}
             </button>
           </section>
         )}
@@ -862,7 +904,7 @@ export default function Travel({ userId }: { userId: string }) {
         )}
 
         {!loading && entertainmentItems.map(item => (
-          <EventTicketCard key={item.id} item={item} onDelete={() => deleteEntertainmentItem(item.id)} />
+          <EventTicketCard key={item.id} item={item} onDelete={() => deleteEntertainmentItem(item.id)} onEdit={() => startEditEntertainment(item)} />
         ))}
       </>}
 
@@ -1372,7 +1414,7 @@ function HotelItineraryCard({ item, onDelete }: { item: TravelItem; onDelete: ()
 // and other "things to do" bookings — event name up top, venue/date front
 // and center, a perforated divider, then seat/section-style details.
 
-function EventTicketCard({ item, onDelete }: { item: TravelItem; onDelete: () => void }) {
+function EventTicketCard({ item, onDelete, onEdit }: { item: TravelItem; onDelete: () => void; onEdit?: () => void }) {
   const [showHistory, setShowHistory] = useState(false);
   const [logoFailed, setLogoFailed] = useState(false);
   const cfg = ITEM_CONFIG.activity;
@@ -1404,9 +1446,16 @@ function EventTicketCard({ item, onDelete }: { item: TravelItem; onDelete: () =>
           <div style={{ color: '#fff', fontWeight: 800, fontSize: 16, lineHeight: 1.2 }}>{item.title}</div>
           {item.provider && <div style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: 2 }}>{item.provider}</div>}
         </div>
-        <button onClick={onDelete} title="Remove ticket" style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#fff', padding: 5, flexShrink: 0 }}>
-          <Trash2 size={13} />
-        </button>
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          {onEdit && (
+            <button onClick={onEdit} title="Edit ticket" style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#fff', padding: 5 }}>
+              <Edit2 size={13} />
+            </button>
+          )}
+          <button onClick={onDelete} title="Remove ticket" style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#fff', padding: 5 }}>
+            <Trash2 size={13} />
+          </button>
+        </div>
       </div>
 
       {/* Venue + date/time strip */}

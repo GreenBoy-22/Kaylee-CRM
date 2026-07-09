@@ -31,7 +31,7 @@ import Appointments from './Appointments';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'today' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'mood' | 'weather' | 'plants' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'settings';
+type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'mood' | 'weather' | 'plants' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -233,7 +233,6 @@ const homeNav: readonly NavEntry[] = [
   ['media', 'Movies & TV', Film],
   ['packages', 'Packages', Inbox],
   ['plants', 'Plant Catalog', Flower2],
-  ['today', 'Today’s Tasks', ClipboardCheck],
   ['travel', 'Travel', Plane],
   ['vehicles', 'Vehicles', Car],
   ['weather', 'Weather', Cloud]
@@ -247,12 +246,10 @@ const workNav: readonly NavEntry[] = [
   ['fto', 'FTO Tracker', Clock],
   ['outreach', 'Outreach Drafts', Mail],
   ['students', 'Students', Users],
-  ['today', 'Today’s Tasks', ClipboardCheck]
 ];
 
 const moduleMeta: { page: Page; module_name: string; label: string; default_access: AccessLevel }[] = [
   { page: 'dashboard', module_name: 'dashboard', label: 'Dashboard', default_access: 'edit' },
-  { page: 'today', module_name: 'today_tasks', label: 'Today’s Tasks', default_access: 'edit' },
   { page: 'briefing', module_name: 'daily_briefing', label: 'Daily Briefing', default_access: 'view' },
   { page: 'calendar', module_name: 'calendar', label: 'Calendar', default_access: 'edit' },
   { page: 'inventory', module_name: 'inventory', label: 'Inventory', default_access: 'edit' },
@@ -1291,7 +1288,7 @@ Kaylee`;
   }
 
   async function completeTask(id: string) {
-    if (!canEdit('today')) return setMessage('Tasks are view-only for Adam right now.');
+    if (!canEdit('chores')) return setMessage('Tasks are view-only for Adam right now.');
     setTasks((current) => current.map((task) => task.id === id ? { ...task, status: 'completed' } : task));
     if (!supabase) return;
     const { error } = await supabase.from('tasks').update({ status: 'completed' }).eq('id', id);
@@ -1624,7 +1621,6 @@ Kaylee`;
         <main className="content">
           {!activeCanEdit && activeRole === 'limited' && page !== 'dashboard' && <ViewOnlyBanner />}
           {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} choreTasks={choreTasks} householdUsers={householdUsers} role={activeRole} setPage={setPage} />}
-          {page === 'today' && <Today tasks={tasks.filter((task) => activeRole === 'admin' || task.mode === 'home')} choreTasks={choreTasks} householdUsers={householdUsers} completeTask={completeTask} completeChore={completeChore} editable={canEdit('today') && canEdit('chores')} />}
           {page === 'briefing' && <Briefing role={activeRole} />}
           {page === 'calendar' && (mode === 'home' || activeRole === 'limited'
             ? <GoogleCalendar />
