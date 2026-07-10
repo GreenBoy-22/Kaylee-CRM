@@ -6,7 +6,7 @@
 //  - Ad-hoc coaching/feedback notes with action items
 //  - Goals with progress tracking against a target
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { Plus, X, TrendingUp, FileText, MessageSquare, Target, Sparkles, ChevronDown, ChevronUp, Trash2, CheckCircle2, Circle } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
@@ -92,7 +92,7 @@ interface StudentRow {
   next_conversation_focus: string | null;
 }
 
-const BLANK_KPI = { month_date: '', enrollment_total: '', drops: '', graduates: '', otp_pct: '', grad_rate_4yr_pct: '', drop_rate_pct: '', pacing_2m_pct: '', pacing_4m_pct: '', vsat_pct: '', notes: '' };
+const BLANK_KPI = { month_date: '', enrollment_total: '', drops: '', graduates: '', otp_pct: '', grad_rate_4yr_pct: '', drop_rate_pct: '', pacing_2m_pct: '', pacing_4m_pct: '', vsat_pct: '', notes: '', t1_t2_ret_pct: '', t2_t3_ret_pct: '', t3_plus_ret_pct: '' };
 const BLANK_REVIEW = { review_type: 'midyear_checkin' as Review['review_type'], title: '', review_date: '', period_start: '', period_end: '', performance_rating: '', base_pay_before: '', base_pay_after: '', pay_increase_pct: '', manager_name: '', full_text: '' };
 const BLANK_NOTE = { note_date: '', subject: '', from_person: '', summary: '', full_text: '', status: 'open' as CoachingNote['status'] };
 const BLANK_GOAL = { title: '', description: '', metric_name: '', target_value: '', current_value: '', unit: '%', fiscal_year: '', due_date: '', status: 'on_track' as Goal['status'] };
@@ -163,9 +163,10 @@ function n(v: string): number | null { return v.trim() === '' ? null : parseFloa
 // ── Lightweight inline SVG line chart (no chart library dependency) ───────
 
 function TrendChart({ data, fields }: { data: KpiMonth[]; fields: { key: keyof KpiMonth; label: string; color: string }[] }) {
-  const width = 700, height = 220, padL = 40, padR = 10, padT = 10, padB = 28;
+  const width = 700, height = 240, padL = 40, padR = 10, padT = 10, padB = 28;
   const plotW = width - padL - padR, plotH = height - padT - padB;
   const sorted = [...data].sort((a, b) => a.month_date.localeCompare(b.month_date));
+  const [hover, setHover] = useState<{ x: number; y: number; monthLabel: string; entries: { label: string; color: string; value: number }[] } | null>(null);
   if (sorted.length === 0) return null;
 
   const allVals = fields.flatMap(f => sorted.map(d => d[f.key] as number | null).filter((v): v is number => v !== null));
@@ -174,25 +175,70 @@ function TrendChart({ data, fields }: { data: KpiMonth[]; fields: { key: keyof K
   function xFor(i: number) { return padL + (sorted.length <= 1 ? 0 : (i / (sorted.length - 1)) * plotW); }
   function yFor(v: number) { return padT + plotH - (v / maxVal) * plotH; }
 
+  function showHoverFor(i: number) {
+    const d = sorted[i];
+    const entries = fields
+      .map(f => ({ label: f.label, color: f.color, value: d[f.key] as number | null }))
+      .filter((e): e is { label: string; color: string; value: number } => e.value !== null);
+    if (entries.length === 0) return;
+    setHover({ x: xFor(i), y: padT, monthLabel: fmtMonth(d.month_date), entries });
+  }
+
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto' }}>
-      {[0, 0.25, 0.5, 0.75, 1].map(f => (
-        <line key={f} x1={padL} x2={width - padR} y1={padT + plotH * (1 - f)} y2={padT + plotH * (1 - f)} stroke="var(--border)" strokeWidth={1} />
-      ))}
-      {sorted.map((d, i) => (
-        <text key={d.id} x={xFor(i)} y={height - 8} fontSize={10} textAnchor="middle" fill="var(--muted)">{fmtMonth(d.month_date)}</text>
-      ))}
-      {fields.map(f => {
-        const pts = sorted.map((d, i) => ({ x: xFor(i), y: d[f.key] !== null ? yFor(d[f.key] as number) : null }));
-        const path = pts.filter(p => p.y !== null).map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-        return (
-          <g key={String(f.key)}>
-            <path d={path} fill="none" stroke={f.color} strokeWidth={2} />
-            {pts.map((p, i) => p.y !== null && <circle key={i} cx={p.x} cy={p.y} r={3} fill={f.color} />)}
-          </g>
-        );
-      })}
-    </svg>
+    <div style={{ position: 'relative' }}>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto' }} onMouseLeave={() => setHover(null)}>
+        {[0, 0.25, 0.5, 0.75, 1].map(f => (
+          <line key={f} x1={padL} x2={width - padR} y1={padT + plotH * (1 - f)} y2={padT + plotH * (1 - f)} stroke="var(--border)" strokeWidth={1} />
+        ))}
+        {sorted.map((d, i) => (
+          <text key={d.id} x={xFor(i)} y={height - 8} fontSize={10} textAnchor="middle" fill="var(--muted)">{fmtMonth(d.month_date)}</text>
+        ))}
+        {fields.map(f => {
+          const pts = sorted.map((d, i) => ({ x: xFor(i), y: d[f.key] !== null ? yFor(d[f.key] as number) : null }));
+          const path = pts.filter(p => p.y !== null).map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+          return (
+            <g key={String(f.key)}>
+              <path d={path} fill="none" stroke={f.color} strokeWidth={2} />
+              {pts.map((p, i) => p.y !== null && <circle key={i} cx={p.x} cy={p.y} r={3} fill={f.color} />)}
+            </g>
+          );
+        })}
+        {/* Invisible wide hit-areas per month, so hovering anywhere near a
+            month's column shows that month's values — easier to hit than
+            the small dots themselves, and works with touch/scroll too. */}
+        {sorted.map((d, i) => (
+          <rect
+            key={`hit-${d.id}`}
+            x={xFor(i) - (plotW / Math.max(1, sorted.length - 1)) / 2}
+            y={padT}
+            width={plotW / Math.max(1, sorted.length - 1)}
+            height={plotH}
+            fill="transparent"
+            onMouseEnter={() => showHoverFor(i)}
+            onTouchStart={() => showHoverFor(i)}
+            style={{ cursor: 'pointer' }}
+          />
+        ))}
+        {hover && <line x1={hover.x} x2={hover.x} y1={padT} y2={padT + plotH} stroke="var(--muted)" strokeWidth={1} strokeDasharray="3,3" />}
+      </svg>
+      {hover && (
+        <div style={{
+          position: 'absolute',
+          left: `${Math.min(78, Math.max(2, (hover.x / width) * 100))}%`,
+          top: 4,
+          background: 'var(--surface-0)', border: '1px solid var(--border)', borderRadius: 8,
+          padding: '8px 10px', fontSize: 11, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', pointerEvents: 'none', zIndex: 5, minWidth: 120,
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>{hover.monthLabel}</div>
+          {hover.entries.map(e => (
+            <div key={e.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: e.color, display: 'inline-block' }} />
+              <span>{e.label}: <strong>{e.value}%</strong></span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -209,6 +255,7 @@ export default function WorkPerformance() {
   const [goals, setGoals] = useState<Goal[]>([]);
 
   const [showKpiForm, setShowKpiForm] = useState(false);
+  const [expandedRecap, setExpandedRecap] = useState<string | null>(null);
   const [kpiForm, setKpiForm] = useState({ ...BLANK_KPI });
   const [showKpiPaste, setShowKpiPaste] = useState(false);
   const [pasteText, setPasteText] = useState('');
@@ -267,6 +314,9 @@ export default function WorkPerformance() {
       pacing_2m_pct: n(kpiForm.pacing_2m_pct),
       pacing_4m_pct: n(kpiForm.pacing_4m_pct),
       vsat_pct: n(kpiForm.vsat_pct),
+      t1_t2_ret_pct: n(kpiForm.t1_t2_ret_pct),
+      t2_t3_ret_pct: n(kpiForm.t2_t3_ret_pct),
+      t3_plus_ret_pct: n(kpiForm.t3_plus_ret_pct),
       notes: kpiForm.notes || null,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id,month_date' });
@@ -292,7 +342,7 @@ export default function WorkPerformance() {
           max_tokens: 2000,
           messages: [{
             role: 'user',
-            content: `Extract monthly KPI data from this pasted table/text and return ONLY a JSON array, no markdown, no explanation. Each entry: {"month_date":"YYYY-MM","enrollment_total":number|null,"drops":number|null,"graduates":number|null,"otp_pct":number|null,"grad_rate_4yr_pct":number|null,"drop_rate_pct":number|null,"pacing_2m_pct":number|null,"pacing_4m_pct":number|null,"vsat_pct":number|null}. Skip any "Total" column — only individual months. Infer the year from context (fiscal years like "FY26" typically run Jul-Jun; e.g. Jul-25 through Jun-26). If a cell is blank, use null.\n\nText:\n${pasteText.slice(0, 6000)}`,
+            content: `Extract monthly KPI data from this pasted table/text and return ONLY a JSON array, no markdown, no explanation. Each entry: {"month_date":"YYYY-MM","enrollment_total":number|null,"drops":number|null,"graduates":number|null,"otp_pct":number|null,"grad_rate_4yr_pct":number|null,"drop_rate_pct":number|null,"pacing_2m_pct":number|null,"pacing_4m_pct":number|null,"vsat_pct":number|null,"t1_t2_ret_pct":number|null,"t2_t3_ret_pct":number|null,"t3_plus_ret_pct":number|null}. "otp_pct" should be the Term OTP value if both Term OTP and 6-month rolling OTP are present. t1_t2_ret_pct/t2_t3_ret_pct/t3_plus_ret_pct are retention rates for students moving from term 1→2, term 2→3, and term 3+ respectively. Skip any "Total" column — only individual months. Infer the year from context (fiscal years like "FY26" typically run Jul-Jun; e.g. Jul-25 through Jun-26). If a cell is blank, use null.\n\nText:\n${pasteText.slice(0, 6000)}`,
           }],
         },
       });
@@ -313,6 +363,7 @@ export default function WorkPerformance() {
           enrollment_total: row.enrollment_total ?? null, drops: row.drops ?? null, graduates: row.graduates ?? null,
           otp_pct: row.otp_pct ?? null, grad_rate_4yr_pct: row.grad_rate_4yr_pct ?? null, drop_rate_pct: row.drop_rate_pct ?? null,
           pacing_2m_pct: row.pacing_2m_pct ?? null, pacing_4m_pct: row.pacing_4m_pct ?? null, vsat_pct: row.vsat_pct ?? null,
+          t1_t2_ret_pct: row.t1_t2_ret_pct ?? null, t2_t3_ret_pct: row.t2_t3_ret_pct ?? null, t3_plus_ret_pct: row.t3_plus_ret_pct ?? null,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id,month_date' });
         if (!upErr) saved++;
@@ -505,6 +556,35 @@ export default function WorkPerformance() {
         const rating = overallScore >= 78 ? 'Exceeds' : overallScore >= 55 ? 'Achieves' : 'Needs Improvement';
         const ratingColor = rating === 'Exceeds' ? '#7c3aed' : rating === 'Achieves' ? '#16a34a' : '#dc2626';
 
+        // Plain-language reasons behind the score, built from the exact
+        // same numbers driving the calculation above — nothing here is
+        // separate from what's shown in the bars.
+        const reasons: string[] = [];
+        if (contactCoveragePct >= 85) reasons.push(`You're contacting ${Math.round(contactCoveragePct)}% of your caseload within a 14-day window — that's strong, consistent outreach and the single biggest reason your Communication score is high.`);
+        else if (contactCoveragePct >= 65) reasons.push(`${Math.round(contactCoveragePct)}% of your caseload has been contacted within 14 days — decent, but ${noContact14d.length} students haven't heard from you in 2+ weeks, which is pulling this score down.`);
+        else reasons.push(`Only ${Math.round(contactCoveragePct)}% of your caseload has been contacted in the last 14 days — ${noContact14d.length} students are overdue for contact, and this is the single biggest drag on your overall rating.`);
+
+        if (avgMissedCalls <= 0.3) reasons.push(`Missed calls are low (${avgMissedCalls.toFixed(2)} per student on average) — you're reaching people, not just attempting to.`);
+        else reasons.push(`Missed calls are running at ${avgMissedCalls.toFixed(2)} per student on average — worth checking if a different contact method or time of day would land better with this group.`);
+
+        if (notes.length > 0) {
+          reasons.push(noteResponsivenessPct === 100
+            ? `Every coaching note you've received has been marked addressed — that responsiveness is exactly what your manager's feedback has asked for.`
+            : `${addressedNotes} of ${notes.length} coaching notes are marked addressed — closing out the rest would strengthen this further.`);
+        }
+        if (!hasRecentCallData) reasons.push(`No call volume has been logged for the current month yet — logging it (manually or via Paste & Extract) would sharpen this score instead of relying on a neutral default.`);
+
+        if (latest?.otp_pct != null && latest?.otp_target_pct != null) {
+          const diff = latest.otp_pct - latest.otp_target_pct;
+          reasons.push(diff >= 0
+            ? `Your OTP (${latest.otp_pct}%) is above the ${latest.otp_target_pct}% target by ${diff.toFixed(1)} pts — a real outcome win, even though your manager weighs this less than outreach.`
+            : `Your OTP (${latest.otp_pct}%) is below the ${latest.otp_target_pct}% target by ${Math.abs(diff).toFixed(1)} pts, which is dragging the KPI side down — though per your manager's own framing, this is the metric most dependent on student behavior rather than your effort.`);
+        } else {
+          reasons.push(`No OTP figure logged for the latest month, so the KPI score is using a neutral middle-of-the-road estimate rather than your real number.`);
+        }
+
+        reasons.push(`Overall, Communication counts for 65% of this score and KPIs only 35% — so ${rating === 'Needs Improvement' ? 'even strong outreach can\'t fully offset a low overall score if outcomes are also struggling' : rating === 'Exceeds' ? 'your consistent outreach is doing a lot of the work here, which lines up with what your manager actually measures you on' : 'your outreach effort is keeping this respectable even where individual KPIs are mixed'}.`);
+
         const weakSpots: { label: string; detail: string; severity: 'urgent' | 'warning' | 'info' }[] = [];
         if (latest) {
           if (latest.otp_target_pct !== null && latest.otp_target_pct !== undefined && latest.otp_pct !== null) {
@@ -556,6 +636,13 @@ export default function WorkPerformance() {
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>OTP vs target, pacing, drop rate, and retention from your latest logged month{!latest ? ' (no month logged yet — using neutral defaults)' : ''}.</div>
                 </div>
+              </div>
+
+              <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Why this rating</div>
+                <ul style={{ paddingLeft: 18, margin: 0, fontSize: 12, lineHeight: 1.8, color: 'var(--text)' }}>
+                  {reasons.map((r, i) => <li key={i}>{r}</li>)}
+                </ul>
               </div>
             </section>
 
@@ -670,6 +757,9 @@ export default function WorkPerformance() {
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Pacing 2M %<input type="number" step="0.1" value={kpiForm.pacing_2m_pct} onChange={e => setKpiForm(p => ({ ...p, pacing_2m_pct: e.target.value }))} /></label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Pacing 4M %<input type="number" step="0.1" value={kpiForm.pacing_4m_pct} onChange={e => setKpiForm(p => ({ ...p, pacing_4m_pct: e.target.value }))} /></label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>VSAT %<input type="number" step="0.1" value={kpiForm.vsat_pct} onChange={e => setKpiForm(p => ({ ...p, vsat_pct: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>T1→T2 Retention %<input type="number" step="0.1" value={kpiForm.t1_t2_ret_pct} onChange={e => setKpiForm(p => ({ ...p, t1_t2_ret_pct: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>T2→T3 Retention %<input type="number" step="0.1" value={kpiForm.t2_t3_ret_pct} onChange={e => setKpiForm(p => ({ ...p, t2_t3_ret_pct: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>T3+ Retention %<input type="number" step="0.1" value={kpiForm.t3_plus_ret_pct} onChange={e => setKpiForm(p => ({ ...p, t3_plus_ret_pct: e.target.value }))} /></label>
               </div>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>Notes<textarea value={kpiForm.notes} onChange={e => setKpiForm(p => ({ ...p, notes: e.target.value }))} style={{ minHeight: 50 }} /></label>
               <button className="btn primary" onClick={saveKpi} disabled={!kpiForm.month_date} style={{ marginTop: 12 }}>Save Month</button>
@@ -711,72 +801,166 @@ export default function WorkPerformance() {
             </div>
           )}
 
-          {kpis.length > 0 && (
-            <>
-              <section className="panel" style={{ marginBottom: 14 }}>
-                <div className="panel-head"><h2>Quality Metrics Trend</h2></div>
-                <TrendChart data={kpis} fields={[
-                  { key: 'otp_pct', label: 'OTP %', color: '#7c3aed' },
-                  { key: 'pacing_2m_pct', label: 'Pacing 2M %', color: '#0891b2' },
-                  { key: 'pacing_4m_pct', label: 'Pacing 4M %', color: '#16a34a' },
-                  { key: 'drop_rate_pct', label: 'Drop Rate %', color: '#dc2626' },
-                ]} />
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10, marginTop: 14 }}>
-                  {Object.entries(METRIC_INFO).map(([label, info]) => (
-                    <div key={label} style={{ padding: '10px 12px', background: 'var(--surface-1)', borderRadius: 8, border: `1px solid ${info.color}33` }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
-                        <span style={{ width: 10, height: 10, borderRadius: 999, background: info.color, display: 'inline-block', flexShrink: 0 }} />{label}
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>{info.definition}</div>
-                      <div style={{ fontSize: 12, display: 'flex', gap: 6 }}><span style={{ flexShrink: 0 }}>💡</span><span>{info.tip}</span></div>
-                    </div>
-                  ))}
-                </div>
-              </section>
+          {kpis.length > 0 && (() => {
+            // Column averages, used to color cells above/below the period
+            // average — green for a good direction, red for a concerning
+            // one, respecting which way each metric is supposed to move.
+            function avgOf(key: keyof KpiMonth): number | null {
+              const vals = kpis.map(k => k[key] as number | null).filter((v): v is number => v !== null && v !== undefined);
+              return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+            }
+            const avgOtp = avgOf('otp_pct'), avgDrop = avgOf('drop_rate_pct'), avg2m = avgOf('pacing_2m_pct'), avg4m = avgOf('pacing_4m_pct'), avgVsat = avgOf('vsat_pct');
+            const avgT1 = avgOf('t1_t2_ret_pct'), avgT2 = avgOf('t2_t3_ret_pct'), avgT3 = avgOf('t3_plus_ret_pct');
+            function cellStyle(val: number | null | undefined, avg: number | null, higherIsBetter: boolean): CSSProperties {
+              if (val === null || val === undefined || avg === null) return {};
+              const diff = val - avg;
+              if (Math.abs(diff) < 1.5) return {};
+              const isGood = higherIsBetter ? diff > 0 : diff < 0;
+              return { background: isGood ? '#dcfce7' : '#fee2e2', color: isGood ? '#15803d' : '#b91c1c', fontWeight: 700 };
+            }
 
-              <section className="panel" style={{ marginBottom: 14 }}>
-                <div className="panel-head"><h2>What The Other Numbers Mean</h2></div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {OTHER_METRIC_INFO.map(info => (
-                    <div key={info.label} style={{ paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 3 }}>{info.label}</div>
-                      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{info.definition}</div>
-                      <div style={{ fontSize: 12, display: 'flex', gap: 6 }}><span style={{ flexShrink: 0 }}>💡</span><span>{info.tip}</span></div>
-                    </div>
-                  ))}
-                </div>
-              </section>
+            return (
+              <>
+                <section className="panel" style={{ marginBottom: 14 }}>
+                  <div className="panel-head"><h2>Quality Metrics Trend</h2></div>
+                  <TrendChart data={kpis} fields={[
+                    { key: 'otp_pct', label: 'OTP %', color: '#7c3aed' },
+                    { key: 'pacing_2m_pct', label: 'Pacing 2M %', color: '#0891b2' },
+                    { key: 'pacing_4m_pct', label: 'Pacing 4M %', color: '#16a34a' },
+                    { key: 'drop_rate_pct', label: 'Drop Rate %', color: '#dc2626' },
+                  ]} />
+                  <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>Hover over the chart to see exact values for each month. Full numbers for every month are in the table below.</p>
+                </section>
 
-              <section className="panel" style={{ overflowX: 'auto' }}>
-                <div className="panel-head"><h2>Monthly Detail</h2></div>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                      {['Month', 'Enroll', 'Drops', 'Grads', 'OTP%', 'Drop%', 'Pace2M%', 'Pace4M%', 'VSAT%', ''].map(h => (
-                        <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted)' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...kpis].reverse().map(k => (
-                      <tr key={k.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: '6px 8px', fontWeight: 700 }}>{fmtMonth(k.month_date)}</td>
-                        <td style={{ padding: '6px 8px' }}>{k.enrollment_total ?? '—'}</td>
-                        <td style={{ padding: '6px 8px' }}>{k.drops ?? '—'}</td>
-                        <td style={{ padding: '6px 8px' }}>{k.graduates ?? '—'}</td>
-                        <td style={{ padding: '6px 8px' }}>{k.otp_pct ?? '—'}</td>
-                        <td style={{ padding: '6px 8px' }}>{k.drop_rate_pct ?? '—'}</td>
-                        <td style={{ padding: '6px 8px' }}>{k.pacing_2m_pct ?? '—'}</td>
-                        <td style={{ padding: '6px 8px' }}>{k.pacing_4m_pct ?? '—'}</td>
-                        <td style={{ padding: '6px 8px' }}>{k.vsat_pct ?? '—'}</td>
-                        <td style={{ padding: '6px 8px' }}><button onClick={() => deleteKpi(k.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)' }}><Trash2 size={12} /></button></td>
+                <section className="panel" style={{ overflowX: 'auto', marginBottom: 14 }}>
+                  <div className="panel-head"><h2>Monthly Detail</h2></div>
+                  <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+                    <span style={{ background: '#dcfce7', color: '#15803d', fontWeight: 700, padding: '1px 6px', borderRadius: 4 }}>Green</span> = better than your period average · <span style={{ background: '#fee2e2', color: '#b91c1c', fontWeight: 700, padding: '1px 6px', borderRadius: 4 }}>Red</span> = worse than your period average
+                  </p>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                        {['Month', 'Enroll', 'Drops', 'Grads', 'OTP%', 'Drop%', 'Pace2M%', 'Pace4M%', 'VSAT%', 'T1→T2%', 'T2→T3%', 'T3+%', ''].map(h => (
+                          <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted)' }}>{h}</th>
+                        ))}
                       </tr>
+                    </thead>
+                    <tbody>
+                      {[...kpis].reverse().map(k => (
+                        <tr key={k.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: '6px 8px', fontWeight: 700 }}>{fmtMonth(k.month_date)}</td>
+                          <td style={{ padding: '6px 8px' }}>{k.enrollment_total ?? '—'}</td>
+                          <td style={{ padding: '6px 8px' }}>{k.drops ?? '—'}</td>
+                          <td style={{ padding: '6px 8px' }}>{k.graduates ?? '—'}</td>
+                          <td style={{ padding: '6px 8px', ...cellStyle(k.otp_pct, avgOtp, true) }}>{k.otp_pct ?? '—'}</td>
+                          <td style={{ padding: '6px 8px', ...cellStyle(k.drop_rate_pct, avgDrop, false) }}>{k.drop_rate_pct ?? '—'}</td>
+                          <td style={{ padding: '6px 8px', ...cellStyle(k.pacing_2m_pct, avg2m, true) }}>{k.pacing_2m_pct ?? '—'}</td>
+                          <td style={{ padding: '6px 8px', ...cellStyle(k.pacing_4m_pct, avg4m, true) }}>{k.pacing_4m_pct ?? '—'}</td>
+                          <td style={{ padding: '6px 8px', ...cellStyle(k.vsat_pct, avgVsat, true) }}>{k.vsat_pct ?? '—'}</td>
+                          <td style={{ padding: '6px 8px', ...cellStyle(k.t1_t2_ret_pct, avgT1, true) }}>{k.t1_t2_ret_pct ?? '—'}</td>
+                          <td style={{ padding: '6px 8px', ...cellStyle(k.t2_t3_ret_pct, avgT2, true) }}>{k.t2_t3_ret_pct ?? '—'}</td>
+                          <td style={{ padding: '6px 8px', ...cellStyle(k.t3_plus_ret_pct, avgT3, true) }}>{k.t3_plus_ret_pct ?? '—'}</td>
+                          <td style={{ padding: '6px 8px' }}><button onClick={() => deleteKpi(k.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)' }}><Trash2 size={12} /></button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
+
+                <section className="panel" style={{ marginBottom: 14 }}>
+                  <div className="panel-head"><h2>📅 Monthly Recaps</h2></div>
+                  <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
+                    For each month: what likely went well, what likely held you back, and an idea to try next month. This is my best-effort read based on the metric itself and general patterns — not reconstructed history, since I don't have your day-to-day student activity from that specific month. Add notes on any month (via the KPI form) and future recaps get sharper.
+                  </p>
+                  {[...kpis].reverse().map(k => {
+                    const isOpen = expandedRecap === k.id;
+                    const wins: string[] = [];
+                    const gaps: string[] = [];
+                    if (k.otp_pct !== null && avgOtp !== null) (k.otp_pct >= avgOtp ? wins : gaps).push(
+                      k.otp_pct >= avgOtp
+                        ? `OTP was ${k.otp_pct}%, above your ${avgOtp.toFixed(1)}% average — ${METRIC_INFO['OTP %'].tip}`
+                        : `OTP was ${k.otp_pct}%, below your ${avgOtp.toFixed(1)}% average — likely a sign momentum/pacing conversations were thinner this month than usual. Next month: ${METRIC_INFO['OTP %'].tip}`
+                    );
+                    if (k.pacing_2m_pct !== null && avg2m !== null) (k.pacing_2m_pct >= avg2m ? wins : gaps).push(
+                      k.pacing_2m_pct >= avg2m
+                        ? `2-Month Pacing was ${k.pacing_2m_pct}%, above average — early-term outreach was likely landing well.`
+                        : `2-Month Pacing was ${k.pacing_2m_pct}%, below average. Next month: ${METRIC_INFO['Pacing 2M %'].tip}`
+                    );
+                    if (k.pacing_4m_pct !== null && avg4m !== null) (k.pacing_4m_pct >= avg4m ? wins : gaps).push(
+                      k.pacing_4m_pct >= avg4m
+                        ? `4-Month Pacing was ${k.pacing_4m_pct}%, above average — mid-term check-ins were likely consistent.`
+                        : `4-Month Pacing was ${k.pacing_4m_pct}%, below average. Next month: ${METRIC_INFO['Pacing 4M %'].tip}`
+                    );
+                    if (k.drop_rate_pct !== null && avgDrop !== null) (k.drop_rate_pct <= avgDrop ? wins : gaps).push(
+                      k.drop_rate_pct <= avgDrop
+                        ? `Drop Rate was ${k.drop_rate_pct}%, better (lower) than your average — high-risk students were likely getting caught early.`
+                        : `Drop Rate was ${k.drop_rate_pct}%, worse than average. Next month: ${METRIC_INFO['Drop Rate %'].tip}`
+                    );
+                    if (k.t3_plus_ret_pct !== null && avgT3 !== null) (k.t3_plus_ret_pct >= avgT3 ? wins : gaps).push(
+                      k.t3_plus_ret_pct >= avgT3
+                        ? `T3+ Retention was ${k.t3_plus_ret_pct}%, above average — later-term students likely had blockers addressed before they became drops.`
+                        : `T3+ Retention was ${k.t3_plus_ret_pct}%, below average. These students usually need blocker-specific problem-solving, not general check-ins — review known_blockers notes before your next round of calls.`
+                    );
+
+                    return (
+                      <div key={k.id} style={{ marginBottom: 8, borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
+                        <div onClick={() => setExpandedRecap(isOpen ? null : k.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', cursor: 'pointer', background: 'var(--surface-1)' }}>
+                          <div style={{ fontWeight: 700, fontSize: 13 }}>{fmtMonth(k.month_date)} <span style={{ fontWeight: 400, fontSize: 11, color: 'var(--muted)' }}>· {wins.length} above avg, {gaps.length} below avg</span></div>
+                          {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        </div>
+                        {isOpen && (
+                          <div style={{ padding: 12 }}>
+                            {wins.length > 0 && (
+                              <div style={{ marginBottom: 10 }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: '#16a34a', marginBottom: 4 }}>✅ What went well</div>
+                                <ul style={{ paddingLeft: 18, margin: 0, fontSize: 12, lineHeight: 1.7 }}>{wins.map((w, i) => <li key={i}>{w}</li>)}</ul>
+                              </div>
+                            )}
+                            {gaps.length > 0 && (
+                              <div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', marginBottom: 4 }}>⚠️ What held this month back — and what to try next</div>
+                                <ul style={{ paddingLeft: 18, margin: 0, fontSize: 12, lineHeight: 1.7 }}>{gaps.map((g, i) => <li key={i}>{g}</li>)}</ul>
+                              </div>
+                            )}
+                            {wins.length === 0 && gaps.length === 0 && <p style={{ fontSize: 12, color: 'var(--muted)' }}>Not enough data logged for this month to compare against your average yet.</p>}
+                            {k.notes && <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)', fontSize: 12, fontStyle: 'italic' }}>Your note: {k.notes}</div>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </section>
+
+                <section className="panel" style={{ marginBottom: 14 }}>
+                  <div className="panel-head"><h2>What Each Metric Means &amp; How To Improve It</h2></div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
+                    {Object.entries(METRIC_INFO).map(([label, info]) => (
+                      <div key={label} style={{ padding: '10px 12px', background: 'var(--surface-1)', borderRadius: 8, border: `1px solid ${info.color}33` }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+                          <span style={{ width: 10, height: 10, borderRadius: 999, background: info.color, display: 'inline-block', flexShrink: 0 }} />{label}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>{info.definition}</div>
+                        <div style={{ fontSize: 12, display: 'flex', gap: 6 }}><span style={{ flexShrink: 0 }}>💡</span><span>{info.tip}</span></div>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
-              </section>
-            </>
-          )}
+                  </div>
+                </section>
+
+                <section className="panel" style={{ marginBottom: 14 }}>
+                  <div className="panel-head"><h2>What The Other Numbers Mean</h2></div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {OTHER_METRIC_INFO.map(info => (
+                      <div key={info.label} style={{ paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 3 }}>{info.label}</div>
+                        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{info.definition}</div>
+                        <div style={{ fontSize: 12, display: 'flex', gap: 6 }}><span style={{ flexShrink: 0 }}>💡</span><span>{info.tip}</span></div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </>
+            );
+          })()}
           {kpis.length === 0 && !showKpiForm && !showKpiPaste && (
             <section className="panel" style={{ textAlign: 'center', padding: 40 }}><p style={{ color: 'var(--muted)' }}>No KPI months logged yet. Add one manually or paste a table above.</p></section>
           )}
