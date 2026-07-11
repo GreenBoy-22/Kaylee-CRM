@@ -1841,8 +1841,20 @@ function Header({ title, sub, children }: { title: string; sub: string; children
   return <div className="page-header"><div><h1>{title}</h1><p>{sub}</p></div>{children && <div className="actions">{children}</div>}</div>;
 }
 
-function Stats({ items }: { items: [string, string, string?][] }) {
-  return <div className="stats-row">{items.map(([label, value, sub]) => <div className="stat-card" key={label}><div className="stat-label">{label}</div><div className="stat-val">{value}</div>{sub && <div className="stat-sub">{sub}</div>}</div>)}</div>;
+function Stats({ items }: { items: [string, string, string?, (() => void)?, boolean?][] }) {
+  return <div className="stats-row">{items.map(([label, value, sub, onClick, active]) => onClick ? (
+    <button
+      className={`stat-card stat-card-clickable ${active ? 'stat-card-active' : ''}`}
+      key={label}
+      onClick={onClick}
+      type="button"
+      style={{ cursor: 'pointer', textAlign: 'left', border: active ? '2px solid #6d28d9' : '1px solid transparent', background: active ? 'rgba(109,40,217,0.06)' : undefined }}
+    >
+      <div className="stat-label">{label}</div><div className="stat-val">{value}</div>{sub && <div className="stat-sub">{sub}</div>}
+    </button>
+  ) : (
+    <div className="stat-card" key={label}><div className="stat-label">{label}</div><div className="stat-val">{value}</div>{sub && <div className="stat-sub">{sub}</div>}</div>
+  ))}</div>;
 }
 
 function studentStatusSignals(student: Student, touchpoints: Touchpoint[]) {
@@ -4231,19 +4243,25 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
   const archivedStudents = students.filter((student) => student.archived);
   const [showArchived, setShowArchived] = useState(false);
   const [termBreakOnly, setTermBreakOnly] = useState(false);
+  const [statFilter, setStatFilter] = useState<'high_risk' | 'ghost' | null>(null);
   const [search, setSearch] = useState('');
   const baseList = showArchived ? archivedStudents : activeStudents;
   const filteredByBreak = termBreakOnly ? baseList.filter((s) => s.on_term_break) : baseList;
+  const filteredByStat = statFilter === 'high_risk'
+    ? filteredByBreak.filter((s) => s.risk === 'High Risk')
+    : statFilter === 'ghost'
+    ? filteredByBreak.filter((s) => s.status === 'Ghost')
+    : filteredByBreak;
   const visibleStudents = useMemo(() => {
     const q = search.trim().toLowerCase();
     const filtered = q
-      ? filteredByBreak.filter((s) =>
+      ? filteredByStat.filter((s) =>
           s.display_name.toLowerCase().includes(q) ||
           String(s.student_id || '').toLowerCase().includes(q)
         )
-      : filteredByBreak;
+      : filteredByStat;
     return [...filtered].sort((a, b) => a.display_name.localeCompare(b.display_name, undefined, { sensitivity: 'base' }));
-  }, [filteredByBreak, search]);
+  }, [filteredByStat, search]);
   const [selectedId, setSelectedId] = useState(visibleStudents[0]?.id || students[0]?.id || '');
   const selected = students.find((student) => student.id === selectedId) || visibleStudents[0] || students[0];
   const selectedTouchpoints = selected ? touchpoints.filter((touchpoint) => touchpoint.student_id === selected.id) : [];
@@ -4500,7 +4518,12 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
       <button className="btn ghost" onClick={() => setShowArchived(!showArchived)}><Archive size={15} /> {showArchived ? 'Active' : 'Archived'}</button>
       <button className={`btn ${termBreakOnly ? 'warning' : 'ghost'}`} onClick={() => setTermBreakOnly(!termBreakOnly)}>☕ {termBreakOnly ? 'Showing Break Only' : 'Term Break'}</button>
     </Header>
-    <Stats items={[["Active", String(activeStudents.length)], ["Archived", String(archivedStudents.length)], ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived).length)], ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived).length)]]} />
+    <Stats items={[
+      ["Active", String(activeStudents.length), undefined, () => { setShowArchived(false); setStatFilter(null); }, !showArchived && statFilter === null],
+      ["Archived", String(archivedStudents.length), undefined, () => { setShowArchived(true); setStatFilter(null); }, showArchived],
+      ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived).length), undefined, () => { setShowArchived(false); setStatFilter('high_risk'); }, statFilter === 'high_risk'],
+      ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived).length), undefined, () => { setShowArchived(false); setStatFilter('ghost'); }, statFilter === 'ghost']
+    ]} />
     {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input placeholder="Course" value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email (for outreach drafts)" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
     <div className="students-crm-layout">
       {!listCollapsed && <section className="panel student-scroll-list"><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div><div className="student-search-row"><Search size={15} /><input type="text" placeholder="Search by name or ID" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search students" /></div>{visibleStudents.length === 0 && <div className="brief-item">{search ? 'No students match that search.' : 'No students in this view yet.'}</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} style={student.on_term_break ? { opacity: 0.6, background: '#f5f5f8' } : {}} onClick={() => { setSelectedId(student.id); setListCollapsed(true); }}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}{student.on_term_break ? ' · ☕ Break' : ''}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>}

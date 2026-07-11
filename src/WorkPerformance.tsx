@@ -366,16 +366,21 @@ export default function WorkPerformance() {
     const decidedKeys = new Set(termHistory.map(t => `${t.student_id}__${t.term_end_date}`));
     return allStudents.filter(st =>
       !st.graduated && !st.on_term_break && st.term_end_date &&
-      st.term_end_date.slice(0, 7) === monthKeyNow &&
+      st.term_end_date.slice(0, 7) < monthKeyNow &&  // term's end month has fully passed — surfaces on the 1st of the following month, and stays until resolved even if a month gets missed
       !decidedKeys.has(`${st.id}__${st.term_end_date}`)
     );
   }, [allStudents, termHistory, monthKeyNow]);
 
+  // Auto-popups shouldn't fire the instant you open the page each month —
+  // term ends need the month to have actually finished (handled by the
+  // candidate filter above), and term starts get a week's buffer before nagging.
+  const todayDayOfMonth = new Date().getDate();
+
   useEffect(() => {
     if (loading || !monthlyPrompt) return;
-    if (!monthlyPrompt.starts_acknowledged && termStartCandidates.length > 0) { setShowStartsModal(true); return; }
+    if (!monthlyPrompt.starts_acknowledged && termStartCandidates.length > 0 && todayDayOfMonth >= 7) { setShowStartsModal(true); return; }
     if (!monthlyPrompt.ends_acknowledged && termEndCandidates.length > 0) { setShowEndsModal(true); }
-  }, [loading, monthlyPrompt, termStartCandidates.length, termEndCandidates.length]);
+  }, [loading, monthlyPrompt, termStartCandidates.length, termEndCandidates.length, todayDayOfMonth]);
 
   async function ackPrompt(which: 'starts' | 'ends') {
     if (!supabase) return;
