@@ -112,6 +112,22 @@ type Student = {
   is_weekly_appointment?: boolean;
   weekly_appointment_day_of_week?: number | null;
   weekly_appointment_time?: string | null;
+  term_number?: number;
+  term_start_date?: string | null;
+  graduated?: boolean;
+  graduation_date?: string | null;
+};
+
+type StudentTermRecord = {
+  id: string;
+  student_id: string;
+  term_number: number;
+  term_start_date: string | null;
+  term_end_date: string;
+  met_otp: boolean | null;
+  outcome: 'continued' | 'dropped' | 'graduated' | 'deferred' | null;
+  notes: string | null;
+  decided_at: string;
 };
 
 type StudentAppointment = {
@@ -4250,6 +4266,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
   });
   const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
   const [editApptForm, setEditApptForm] = useState({ appointment_date: '', appointment_time: '', missed: false, missed_email_sent: false, voicemail_left: false, is_weekly: false, notes: '' });
+  const [termForm, setTermForm] = useState({ term_number: '1', term_start_date: '', term_end_date: '' });
 
   useEffect(() => {
     if (selected) {
@@ -4259,10 +4276,44 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
         weekly_appointment_time: selected.weekly_appointment_time || ''
       });
       setApptForm((f) => ({ ...f, is_weekly: !!selected.is_weekly_appointment }));
+      setTermForm({
+        term_number: String(selected.term_number ?? 1),
+        term_start_date: selected.term_start_date || '',
+        term_end_date: selected.term_end_date || ''
+      });
     }
   }, [selected?.id]);
 
   const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  function saveTermInfo() {
+    if (!selected) return;
+    updateStudent(selected.id, {
+      term_number: Number(termForm.term_number || 1),
+      term_start_date: termForm.term_start_date || null,
+      term_end_date: termForm.term_end_date || null
+    } as Partial<Student>);
+  }
+
+  async function markGraduated() {
+    if (!selected) return;
+    if (!confirm(`Mark ${selected.display_name} as graduated? This will close out their current term.`)) return;
+    const today = new Date().toISOString().slice(0, 10);
+    updateStudent(selected.id, { graduated: true, graduation_date: today, status: 'Graduated' } as Partial<Student>);
+    if (supabase) {
+      const { error } = await supabase.from('student_term_history').insert({
+        student_id: selected.id,
+        term_number: selected.term_number ?? 1,
+        term_start_date: selected.term_start_date || null,
+        term_end_date: today,
+        met_otp: null,
+        outcome: 'graduated',
+        notes: 'Marked graduated from student profile.'
+      });
+      if (error) setMessage(`Graduation logged locally, but term history save failed: ${error.message}`);
+      else setMessage(`${selected.display_name} marked as graduated. 🎓`);
+    }
+  }
 
   function saveWeeklySettings() {
     if (!selected) return;
@@ -4612,6 +4663,23 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
           </div>
           <aside className="student-work-side">
             <section className="panel"><h2>Add Touchpoint</h2><div className="form-grid"><select value={touchForm.touchpoint_type} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_type: e.target.value })}>{touchpointTypes.map((type) => <option key={type}>{type}</option>)}</select><input type="date" value={touchForm.touchpoint_date} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_date: e.target.value })} /><input placeholder="Course" value={touchForm.course || selected.course || ''} onChange={(e) => setTouchForm({ ...touchForm, course: e.target.value })} /><input placeholder="Momentum" value={touchForm.momentum} onChange={(e) => setTouchForm({ ...touchForm, momentum: e.target.value })} /></div><label className="date-field"><span>Next call with this student (optional)</span><input type="datetime-local" value={touchForm.next_call_at} onChange={(e) => setTouchForm({ ...touchForm, next_call_at: e.target.value })} /></label><textarea placeholder={touchForm.touchpoint_type === 'Email thread' ? 'Paste the full email thread here (all back-and-forth messages in one entry)...' : 'What happened? What did the student say? What is the next step?'} style={touchForm.touchpoint_type === 'Email thread' ? { minHeight: 200 } : undefined} value={touchForm.note} onChange={(e) => setTouchForm({ ...touchForm, note: e.target.value })} />{ferpaWarnings(touchForm.note).length > 0 && <FerpaWarning warnings={ferpaWarnings(touchForm.note)} />}<div className="form-actions"><button className="btn primary" onClick={submitTouchpoint}><Save size={15} /> Save Touchpoint + Generate Prep</button></div></section>
+
+            <section className="panel">
+              <h2>Term & Graduation</h2>
+              <div className="form-grid">
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Term #<input type="number" min={1} value={termForm.term_number} onChange={(e) => setTermForm({ ...termForm, term_number: e.target.value })} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Term Start<input type="date" value={termForm.term_start_date} onChange={(e) => setTermForm({ ...termForm, term_start_date: e.target.value })} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Term End<input type="date" value={termForm.term_end_date} onChange={(e) => setTermForm({ ...termForm, term_end_date: e.target.value })} /></label>
+              </div>
+              <div className="form-actions"><button className="btn primary" onClick={saveTermInfo}><Save size={15} /> Save Term Info</button></div>
+              {selected.graduated ? (
+                <p style={{ fontSize: 12, color: '#7c3aed', fontWeight: 600, marginTop: 10 }}>🎓 Graduated {selected.graduation_date ? `on ${selected.graduation_date}` : ''}</p>
+              ) : (
+                <div className="form-actions" style={{ marginTop: 10 }}>
+                  <button className="btn" style={{ background: '#7c3aed', color: '#fff' }} onClick={markGraduated}>🎓 Mark Graduated</button>
+                </div>
+              )}
+            </section>
 
             <section className="panel">
               <h2>Weekly Appointment Settings</h2>

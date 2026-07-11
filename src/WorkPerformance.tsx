@@ -6,7 +6,7 @@
 //  - Ad-hoc coaching/feedback notes with action items
 //  - Goals with progress tracking against a target
 
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Plus, X, TrendingUp, FileText, MessageSquare, Target, Sparkles, ChevronDown, ChevronUp, Trash2, CheckCircle2, Circle } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
@@ -29,6 +29,23 @@ interface AppointmentRow {
   missed: boolean;
   missed_email_sent: boolean;
   voicemail_left: boolean;
+}
+
+interface TermRecord {
+  id: string;
+  student_id: string;
+  term_number: number;
+  term_start_date: string | null;
+  term_end_date: string;
+  met_otp: boolean | null;
+  outcome: 'continued' | 'dropped' | 'graduated' | 'deferred' | null;
+}
+
+interface MonthlyPrompt {
+  user_id: string;
+  month_key: string;
+  starts_acknowledged: boolean;
+  ends_acknowledged: boolean;
 }
 
 interface KpiMonth {
@@ -110,6 +127,10 @@ interface StudentRow {
   known_blockers: string | null;
   next_conversation_focus: string | null;
   on_term_break?: boolean;
+  term_number?: number;
+  term_start_date?: string | null;
+  term_end_date?: string | null;
+  graduated?: boolean;
 }
 
 const BLANK_KPI = { month_date: '', enrollment_total: '', drops: '', graduates: '', otp_pct: '', grad_rate_4yr_pct: '', drop_rate_pct: '', pacing_2m_pct: '', pacing_4m_pct: '', vsat_pct: '', notes: '', t1_t2_ret_pct: '', t2_t3_ret_pct: '', t3_plus_ret_pct: '' };
@@ -268,8 +289,14 @@ export default function WorkPerformance() {
   const [tab, setTab] = useState<'kpi' | 'reviews' | 'coaching' | 'goals' | 'insights'>('insights');
   const [loading, setLoading] = useState(true);
   const [students, setStudents] = useState<StudentRow[]>([]);
+  const [allStudents, setAllStudents] = useState<StudentRow[]>([]); // unfiltered — needed for term-break re-entry candidates
   const [touchpoints, setTouchpoints] = useState<TouchpointRow[]>([]);
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
+  const [termHistory, setTermHistory] = useState<TermRecord[]>([]);
+  const [monthlyPrompt, setMonthlyPrompt] = useState<MonthlyPrompt | null>(null);
+  const [showStartsModal, setShowStartsModal] = useState(false);
+  const [showEndsModal, setShowEndsModal] = useState(false);
+  const [endsDraft, setEndsDraft] = useState<Record<string, { met_otp: boolean | null; outcome: TermRecord['outcome'] }>>({});
 
   const [kpis, setKpis] = useState<KpiMonth[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -301,26 +328,114 @@ export default function WorkPerformance() {
     const { data: sd } = await supabase.auth.getSession();
     const uid = sd.session?.user?.id;
     if (!uid) { setLoading(false); return; }
-    const [k, r, c, g, s, tp, ap] = await Promise.all([
+    const monthKey = new Date().toISOString().slice(0, 7);
+    const [k, r, c, g, s, tp, ap, th, mp] = await Promise.all([
       supabase.from('work_kpi_monthly').select('*').eq('user_id', uid).order('month_date', { ascending: true }),
       supabase.from('work_reviews').select('*').eq('user_id', uid).order('review_date', { ascending: false }),
       supabase.from('work_coaching_notes').select('*').eq('user_id', uid).order('note_date', { ascending: false }),
       supabase.from('work_goals').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
-      supabase.from('students').select('id, display_name, risk, momentum, last_contact_date, next_call_at, missed_call_count, known_blockers, next_conversation_focus, on_term_break').eq('archived', false),
+      supabase.from('students').select('id, display_name, risk, momentum, last_contact_date, next_call_at, missed_call_count, known_blockers, next_conversation_focus, on_term_break, term_number, term_start_date, term_end_date, graduated').eq('archived', false),
       supabase.from('student_touchpoints').select('id, student_id, touchpoint_type, touchpoint_date, note, momentum').order('touchpoint_date', { ascending: true }),
       supabase.from('student_appointments').select('id, student_id, appointment_at, is_weekly, missed, missed_email_sent, voicemail_left').order('appointment_at', { ascending: true }),
+      supabase.from('student_term_history').select('id, student_id, term_number, term_start_date, term_end_date, met_otp, outcome').order('term_end_date', { ascending: true }),
+      supabase.from('work_monthly_prompts').select('*').eq('user_id', uid).eq('month_key', monthKey).maybeSingle(),
     ]);
     setKpis((k.data as KpiMonth[]) ?? []);
     setReviews((r.data as Review[]) ?? []);
     setNotes((c.data as CoachingNote[]) ?? []);
     setGoals((g.data as Goal[]) ?? []);
-    setStudents(((s.data as StudentRow[]) ?? []).filter((st) => !st.on_term_break));
+    const rawStudents = (s.data as StudentRow[]) ?? [];
+    setAllStudents(rawStudents);
+    setStudents(rawStudents.filter((st) => !st.on_term_break));
     setTouchpoints((tp.data as TouchpointRow[]) ?? []);
     setAppointments((ap.data as AppointmentRow[]) ?? []);
+    setTermHistory((th.data as TermRecord[]) ?? []);
+    setMonthlyPrompt((mp.data as MonthlyPrompt | null) ?? { user_id: uid, month_key: monthKey, starts_acknowledged: false, ends_acknowledged: false });
     setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // ── Term tracking: monthly popups ──────────────────────────────────────
+  const termStartCandidates = useMemo(() => {
+    return allStudents.filter(st => !st.graduated && (!st.term_start_date || st.on_term_break));
+  }, [allStudents]);
+
+  const monthKeyNow = new Date().toISOString().slice(0, 7);
+  const termEndCandidates = useMemo(() => {
+    const decidedKeys = new Set(termHistory.map(t => `${t.student_id}__${t.term_end_date}`));
+    return allStudents.filter(st =>
+      !st.graduated && !st.on_term_break && st.term_end_date &&
+      st.term_end_date.slice(0, 7) === monthKeyNow &&
+      !decidedKeys.has(`${st.id}__${st.term_end_date}`)
+    );
+  }, [allStudents, termHistory, monthKeyNow]);
+
+  useEffect(() => {
+    if (loading || !monthlyPrompt) return;
+    if (!monthlyPrompt.starts_acknowledged && termStartCandidates.length > 0) { setShowStartsModal(true); return; }
+    if (!monthlyPrompt.ends_acknowledged && termEndCandidates.length > 0) { setShowEndsModal(true); }
+  }, [loading, monthlyPrompt, termStartCandidates.length, termEndCandidates.length]);
+
+  async function ackPrompt(which: 'starts' | 'ends') {
+    if (!supabase) return;
+    const { data: sd } = await supabase.auth.getSession();
+    const uid = sd.session?.user?.id;
+    if (!uid) return;
+    const monthKey = new Date().toISOString().slice(0, 7);
+    const patch = which === 'starts' ? { starts_acknowledged: true } : { ends_acknowledged: true };
+    await supabase.from('work_monthly_prompts').upsert({ user_id: uid, month_key: monthKey, ...patch }, { onConflict: 'user_id,month_key' });
+    setMonthlyPrompt((p) => p ? { ...p, ...patch } : p);
+  }
+
+  async function resolveStart(student: StudentRow, action: 'start' | 'defer') {
+    if (!supabase) return;
+    if (action === 'start') {
+      const today = new Date().toISOString().slice(0, 10);
+      const sixMonthsOut = new Date(); sixMonthsOut.setMonth(sixMonthsOut.getMonth() + 6);
+      await supabase.from('students').update({
+        term_start_date: today, term_end_date: sixMonthsOut.toISOString().slice(0, 10), on_term_break: false
+      }).eq('id', student.id);
+    } else {
+      await supabase.from('students').update({ on_term_break: true }).eq('id', student.id);
+    }
+    setAllStudents((cur) => cur.map(s => s.id === student.id ? { ...s, on_term_break: action === 'defer' } : s));
+    load();
+  }
+
+  function setEndsDraftField(studentId: string, patch: Partial<{ met_otp: boolean | null; outcome: TermRecord['outcome'] }>) {
+    setEndsDraft((cur) => ({ ...cur, [studentId]: { met_otp: null, outcome: null, ...cur[studentId], ...patch } }));
+  }
+
+  async function resolveEnd(student: StudentRow) {
+    if (!supabase) return;
+    const draft = endsDraft[student.id];
+    if (!draft || !draft.outcome) return;
+    const termEndDate = student.term_end_date as string;
+    await supabase.from('student_term_history').insert({
+      student_id: student.id,
+      term_number: student.term_number ?? 1,
+      term_start_date: student.term_start_date || null,
+      term_end_date: termEndDate,
+      met_otp: draft.met_otp,
+      outcome: draft.outcome
+    });
+    if (draft.outcome === 'continued') {
+      const nextStart = termEndDate;
+      const nextEnd = new Date(termEndDate); nextEnd.setMonth(nextEnd.getMonth() + 6);
+      await supabase.from('students').update({
+        term_number: (student.term_number ?? 1) + 1, term_start_date: nextStart, term_end_date: nextEnd.toISOString().slice(0, 10), on_term_break: false
+      }).eq('id', student.id);
+    } else if (draft.outcome === 'graduated') {
+      await supabase.from('students').update({ graduated: true, graduation_date: termEndDate, status: 'Graduated' }).eq('id', student.id);
+    } else if (draft.outcome === 'deferred') {
+      await supabase.from('students').update({ on_term_break: true }).eq('id', student.id);
+    } else if (draft.outcome === 'dropped') {
+      await supabase.from('students').update({ status: 'Dropped' }).eq('id', student.id);
+    }
+    setEndsDraft((cur) => { const next = { ...cur }; delete next[student.id]; return next; });
+    load();
+  }
 
   // ── KPI ──────────────────────────────────────────────────────────────
   async function saveKpi() {
@@ -511,8 +626,103 @@ export default function WorkPerformance() {
 
   const latestKpi = kpis[kpis.length - 1];
 
+  const autoKpi = useMemo(() => {
+    const closedThisMonth = termHistory.filter(t => t.term_end_date.slice(0, 7) === monthKeyNow);
+    const otpDecided = closedThisMonth.filter(t => t.met_otp !== null);
+    const otpPct = otpDecided.length > 0 ? Math.round((otpDecided.filter(t => t.met_otp).length / otpDecided.length) * 100) : null;
+
+    const retentionFor = (termNum: number | 'plus') => {
+      const pool = termHistory.filter(t => termNum === 'plus' ? t.term_number >= 3 : t.term_number === termNum);
+      const decided = pool.filter(t => t.outcome === 'continued' || t.outcome === 'dropped');
+      if (decided.length === 0) return null;
+      return Math.round((decided.filter(t => t.outcome === 'continued').length / decided.length) * 100);
+    };
+
+    const gradCount = termHistory.filter(t => t.outcome === 'graduated').length;
+
+    return {
+      otpPct, closedCount: closedThisMonth.length,
+      t1t2: retentionFor(1), t2t3: retentionFor(2), t3plus: retentionFor('plus'),
+      gradCount
+    };
+  }, [termHistory, monthKeyNow]);
+
   return (
     <>
+      {showStartsModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ background: 'var(--surface-0, #fff)', borderRadius: 12, maxWidth: 560, width: '100%', maxHeight: '80vh', overflowY: 'auto', padding: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <h2 style={{ margin: 0, fontSize: 16 }}>📆 Verify Term Starts — {fmtMonth(monthKeyNow + '-01')}</h2>
+              <button className="btn ghost tiny" onClick={() => setShowStartsModal(false)}><X size={16} /></button>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+              These students don't have a confirmed term in progress yet (new, or currently on term break). For each, confirm whether their term is starting now or being deferred.
+            </p>
+            {termStartCandidates.map(st => (
+              <div key={st.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                <div>
+                  <strong style={{ fontSize: 13 }}>{st.display_name}</strong>
+                  {st.on_term_break && <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 6 }}>currently on term break</span>}
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button className="btn tiny" style={{ background: '#16a34a', color: '#fff' }} onClick={() => resolveStart(st, 'start')}>Starting Now</button>
+                  <button className="btn ghost tiny" onClick={() => resolveStart(st, 'defer')}>☕ Deferring</button>
+                </div>
+              </div>
+            ))}
+            <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="btn primary" onClick={() => { ackPrompt('starts'); setShowStartsModal(false); }}>Done for this month</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEndsModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ background: 'var(--surface-0, #fff)', borderRadius: 12, maxWidth: 640, width: '100%', maxHeight: '80vh', overflowY: 'auto', padding: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <h2 style={{ margin: 0, fontSize: 16 }}>🏁 Verify Term Ends — {fmtMonth(monthKeyNow + '-01')}</h2>
+              <button className="btn ghost tiny" onClick={() => setShowEndsModal(false)}><X size={16} /></button>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+              These students' terms end this month. For each: did they meet OTP, and what happened next? This feeds your real OTP and retention numbers automatically.
+            </p>
+            {termEndCandidates.map(st => {
+              const draft = endsDraft[st.id] || { met_otp: null, outcome: null };
+              return (
+                <div key={st.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+                  <strong style={{ fontSize: 13 }}>{st.display_name}</strong>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 6 }}>Term {st.term_number ?? 1} · ends {st.term_end_date}</span>
+                  <div style={{ display: 'flex', gap: 16, marginTop: 6, flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Met OTP?</div>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button className="btn tiny" style={draft.met_otp === true ? { background: '#16a34a', color: '#fff' } : {}} onClick={() => setEndsDraftField(st.id, { met_otp: true })}>Yes</button>
+                        <button className="btn tiny" style={draft.met_otp === false ? { background: '#dc2626', color: '#fff' } : {}} onClick={() => setEndsDraftField(st.id, { met_otp: false })}>No</button>
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Outcome</div>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        <button className="btn tiny" style={draft.outcome === 'continued' ? { background: '#16a34a', color: '#fff' } : {}} onClick={() => setEndsDraftField(st.id, { outcome: 'continued' })}>Continued</button>
+                        <button className="btn tiny" style={draft.outcome === 'graduated' ? { background: '#7c3aed', color: '#fff' } : {}} onClick={() => setEndsDraftField(st.id, { outcome: 'graduated' })}>🎓 Graduated</button>
+                        <button className="btn tiny" style={draft.outcome === 'dropped' ? { background: '#dc2626', color: '#fff' } : {}} onClick={() => setEndsDraftField(st.id, { outcome: 'dropped' })}>Dropped</button>
+                        <button className="btn tiny" style={draft.outcome === 'deferred' ? { background: '#666', color: '#fff' } : {}} onClick={() => setEndsDraftField(st.id, { outcome: 'deferred' })}>☕ Deferred</button>
+                      </div>
+                    </div>
+                    <button className="btn primary tiny" disabled={!draft.outcome} onClick={() => resolveEnd(st)} style={{ alignSelf: 'flex-end' }}>Save</button>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="btn primary" onClick={() => { ackPrompt('ends'); setShowEndsModal(false); }}>Done for this month</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="page-header">
         <div>
           <h1>Work Performance</h1>
@@ -526,6 +736,11 @@ export default function WorkPerformance() {
         <button className={tab === 'reviews' ? 'active' : ''} onClick={() => setTab('reviews')}><FileText size={13} /> Reviews ({reviews.length})</button>
         <button className={tab === 'coaching' ? 'active' : ''} onClick={() => setTab('coaching')}><MessageSquare size={13} /> Coaching Notes ({notes.length})</button>
         <button className={tab === 'goals' ? 'active' : ''} onClick={() => setTab('goals')}><Target size={13} /> Goals ({goals.length})</button>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <button className="btn ghost tiny" onClick={() => setShowStartsModal(true)}>📆 Verify Term Starts {termStartCandidates.length > 0 ? `(${termStartCandidates.length})` : ''}</button>
+        <button className="btn ghost tiny" onClick={() => setShowEndsModal(true)}>🏁 Verify Term Ends {termEndCandidates.length > 0 ? `(${termEndCandidates.length})` : ''}</button>
       </div>
 
       {loading && <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p>}
@@ -775,6 +990,20 @@ export default function WorkPerformance() {
             <button className="btn primary" onClick={() => { setKpiForm({ ...BLANK_KPI }); setShowKpiForm(v => !v); }}><Plus size={14} /> Add Month</button>
             <button className="btn ghost" onClick={() => setShowKpiPaste(v => !v)} style={{ color: 'var(--purple)', borderColor: 'var(--purple)' }}><Sparkles size={14} /> Paste &amp; Extract</button>
           </div>
+
+          <section className="panel" style={{ borderLeft: '3px solid #16a34a', marginBottom: 14 }}>
+            <div className="panel-head"><h2>📐 Auto-Calculated From Your Term Tracking</h2></div>
+            <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
+              Built from real per-student term outcomes you've logged via the Term Ends popup — not estimates. Deferred (term break) terms are excluded from retention, since those students didn't leave. Use these to double-check or replace what you paste in from WGU's dashboard.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
+              <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>OTP this month</div><div style={{ fontSize: 20, fontWeight: 700 }}>{autoKpi.otpPct !== null ? `${autoKpi.otpPct}%` : '—'}</div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{autoKpi.closedCount} terms closed</div></div>
+              <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>T1→T2 Retention</div><div style={{ fontSize: 20, fontWeight: 700 }}>{autoKpi.t1t2 !== null ? `${autoKpi.t1t2}%` : '—'}</div></div>
+              <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>T2→T3 Retention</div><div style={{ fontSize: 20, fontWeight: 700 }}>{autoKpi.t2t3 !== null ? `${autoKpi.t2t3}%` : '—'}</div></div>
+              <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>T3+ Retention</div><div style={{ fontSize: 20, fontWeight: 700 }}>{autoKpi.t3plus !== null ? `${autoKpi.t3plus}%` : '—'}</div></div>
+              <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Graduates logged</div><div style={{ fontSize: 20, fontWeight: 700 }}>🎓 {autoKpi.gradCount}</div></div>
+            </div>
+          </section>
 
           {showKpiPaste && (
             <section className="panel" style={{ borderLeft: '3px solid var(--purple)', marginBottom: 14 }}>
