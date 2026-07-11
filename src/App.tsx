@@ -1720,7 +1720,7 @@ Kaylee`;
           {page === 'books' && <Books />}
           {page === 'work_performance' && <WorkPerformance />}
           {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
-          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} appointments={appointments} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} updateTouchpoint={updateTouchpoint} deleteTouchpoint={deleteTouchpoint} createAppointment={createAppointment} updateAppointment={updateAppointment} deleteAppointment={deleteAppointment} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
+          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} appointments={appointments} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} updateTouchpoint={updateTouchpoint} deleteTouchpoint={deleteTouchpoint} createAppointment={createAppointment} updateAppointment={updateAppointment} deleteAppointment={deleteAppointment} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} setMessage={setMessage} />}
           {page === 'fto' && activeRole === 'admin' && <FTOTracker />}
           {page === 'course_notes' && activeRole === 'admin' && <CourseNotes />}
           {page === 'mood' && <MoodTracker />}
@@ -4205,7 +4205,7 @@ const touchpointTypes = [
 const riskLevels = ['Low', 'Medium', 'High', 'High Risk'];
 const studentStatuses = ['Active', 'Support', 'Ghost', 'Portal-only', 'Archived'];
 
-function Students({ students, touchpoints, appointments, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, unarchiveStudent, createTouchpoint, updateTouchpoint, deleteTouchpoint, createAppointment, updateAppointment, deleteAppointment, copyText, ferpaWarnings, generateSingleDraft, drafts, setPage }: {
+function Students({ students, touchpoints, appointments, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, unarchiveStudent, createTouchpoint, updateTouchpoint, deleteTouchpoint, createAppointment, updateAppointment, deleteAppointment, copyText, ferpaWarnings, generateSingleDraft, drafts, setPage, setMessage }: {
   students: Student[];
   touchpoints: Touchpoint[];
   appointments: StudentAppointment[];
@@ -4225,6 +4225,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
   generateSingleDraft: (studentId: string, kind: string) => void;
   drafts: EmailDraft[];
   setPage: (page: Page) => void;
+  setMessage: (message: string) => void;
 }) {
   const activeStudents = students.filter((student) => !student.archived);
   const archivedStudents = students.filter((student) => student.archived);
