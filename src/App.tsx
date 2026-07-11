@@ -109,6 +109,20 @@ type Student = {
   missed_call_count: number;
   archived: boolean;
   on_term_break?: boolean;
+  is_weekly_appointment?: boolean;
+  weekly_appointment_day_of_week?: number | null;
+  weekly_appointment_time?: string | null;
+};
+
+type StudentAppointment = {
+  id: string;
+  student_id: string;
+  appointment_at: string;
+  is_weekly: boolean;
+  missed: boolean;
+  missed_email_sent: boolean;
+  voicemail_left: boolean;
+  notes: string | null;
 };
 
 type Touchpoint = {
@@ -523,6 +537,7 @@ function App() {
   const [inventory, setInventory] = useState<InventoryItem[]>(seedInventory);
   const [students, setStudents] = useState<Student[]>(seedStudents);
   const [touchpoints, setTouchpoints] = useState<Touchpoint[]>(seedTouchpoints);
+  const [appointments, setAppointments] = useState<StudentAppointment[]>([]);
   const [tasks, setTasks] = useState<TaskItem[]>(seedTasks);
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
   const [choreTasks, setChoreTasks] = useState<ChoreTask[]>([]);
@@ -599,12 +614,13 @@ function App() {
     setLoading(true);
     try {
       const [
-        invResult, studentResult, touchpointResult, taskResult,
+        invResult, studentResult, touchpointResult, appointmentResult, taskResult,
         permissionResult, draftResult, choreResult, suggestionResult, syncStateResult, userResult
       ] = await Promise.all([
         supabase.from('inventory_items').select('*').order('created_at', { ascending: false }),
         supabase.from('students').select('*').order('created_at', { ascending: false }),
         supabase.from('student_touchpoints').select('*').order('touchpoint_date', { ascending: false }),
+        supabase.from('student_appointments').select('*').order('appointment_at', { ascending: false }),
         supabase.from('tasks').select('*').order('created_at', { ascending: false }),
         supabase.from('module_permissions').select('*').eq('role', 'limited').order('module_name', { ascending: true }),
         supabase.from('email_drafts').select('*').order('created_at', { ascending: false }),
@@ -617,6 +633,7 @@ function App() {
       if (!invResult.error && invResult.data) setInventory(invResult.data as InventoryItem[]);
       if (!studentResult.error && studentResult.data) setStudents(normalizeStudents(studentResult.data as Student[]));
       if (!touchpointResult.error && touchpointResult.data) setTouchpoints(touchpointResult.data as Touchpoint[]);
+      if (!appointmentResult.error && appointmentResult.data) setAppointments(appointmentResult.data as StudentAppointment[]);
       if (!taskResult.error && taskResult.data) setTasks(taskResult.data as TaskItem[]);
       if (!draftResult.error && draftResult.data) setDrafts(draftResult.data as EmailDraft[]);
       if (!choreResult.error && choreResult.data) setChoreTasks(choreResult.data as ChoreTask[]);
@@ -1146,6 +1163,39 @@ Kaylee`;
     if (error) { setTouchpoints(prev); setMessage(`Delete failed: ${error.message}`); }
   }
 
+  async function createAppointment(input: Omit<StudentAppointment, 'id'>) {
+    const local: StudentAppointment = { ...input, id: crypto.randomUUID() };
+    setAppointments((current) => [local, ...current]);
+
+    // If this was logged as the weekly appointment, auto-advance the student's next appointment date one week out.
+    if (input.is_weekly) {
+      const next = new Date(input.appointment_at);
+      next.setDate(next.getDate() + 7);
+      await updateStudent(input.student_id, { next_appointment_date: next.toISOString() });
+    }
+
+    if (!supabase) return setMessage('Appointment saved locally.');
+    const { data, error } = await supabase.from('student_appointments').insert(input).select().single();
+    if (error) return setMessage(`Appointment save failed: ${error.message}`);
+    setAppointments((current) => [data as StudentAppointment, ...current.filter((a) => a.id !== local.id)]);
+    setMessage('Appointment logged.');
+  }
+
+  async function updateAppointment(id: string, patch: Partial<StudentAppointment>) {
+    setAppointments((current) => current.map((a) => a.id === id ? { ...a, ...patch } : a));
+    if (!supabase) return setMessage('Appointment updated locally.');
+    const { error } = await supabase.from('student_appointments').update(patch).eq('id', id);
+    if (error) setMessage(`Appointment update failed: ${error.message}`);
+  }
+
+  async function deleteAppointment(id: string) {
+    const prev = appointments;
+    setAppointments((current) => current.filter((a) => a.id !== id));
+    if (!supabase) return setMessage('Appointment deleted locally.');
+    const { error } = await supabase.from('student_appointments').delete().eq('id', id);
+    if (error) { setAppointments(prev); setMessage(`Delete failed: ${error.message}`); }
+  }
+
   function buildDraftForStudent(student: Student, kind: string, cohortLabel: string): { subject: string; body: string } {
     const name = student.display_name || 'there';
     const course = student.course || 'your current course';
@@ -1654,7 +1704,7 @@ Kaylee`;
           {page === 'books' && <Books />}
           {page === 'work_performance' && <WorkPerformance />}
           {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
-          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} updateTouchpoint={updateTouchpoint} deleteTouchpoint={deleteTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
+          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} appointments={appointments} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} updateTouchpoint={updateTouchpoint} deleteTouchpoint={deleteTouchpoint} createAppointment={createAppointment} updateAppointment={updateAppointment} deleteAppointment={deleteAppointment} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
           {page === 'fto' && activeRole === 'admin' && <FTOTracker />}
           {page === 'course_notes' && activeRole === 'admin' && <CourseNotes />}
           {page === 'mood' && <MoodTracker />}
@@ -4139,9 +4189,10 @@ const touchpointTypes = [
 const riskLevels = ['Low', 'Medium', 'High', 'High Risk'];
 const studentStatuses = ['Active', 'Support', 'Ghost', 'Portal-only', 'Archived'];
 
-function Students({ students, touchpoints, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, unarchiveStudent, createTouchpoint, updateTouchpoint, deleteTouchpoint, copyText, ferpaWarnings, generateSingleDraft, drafts, setPage }: {
+function Students({ students, touchpoints, appointments, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, unarchiveStudent, createTouchpoint, updateTouchpoint, deleteTouchpoint, createAppointment, updateAppointment, deleteAppointment, copyText, ferpaWarnings, generateSingleDraft, drafts, setPage }: {
   students: Student[];
   touchpoints: Touchpoint[];
+  appointments: StudentAppointment[];
   importStudentsFromCsv: (text: string) => Promise<void>;
   createStudent: (student: Omit<Student, 'id' | 'copied' | 'archived'>) => void;
   updateStudent: (id: string, patch: Partial<Student>) => void;
@@ -4150,6 +4201,9 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
   createTouchpoint: (touchpoint: Omit<Touchpoint, 'id' | 'next_call_prep' | 'constructive_note' | 'follow_up_email' | 'follow_up_text' | 'copied'>) => void;
   updateTouchpoint: (id: string, patch: Partial<Touchpoint>) => void;
   deleteTouchpoint: (id: string) => void;
+  createAppointment: (appointment: Omit<StudentAppointment, 'id'>) => void;
+  updateAppointment: (id: string, patch: Partial<StudentAppointment>) => void;
+  deleteAppointment: (id: string) => void;
   copyText: (text: string, id?: string, table?: 'students' | 'student_touchpoints') => void;
   ferpaWarnings: (text: string) => string[];
   generateSingleDraft: (studentId: string, kind: string) => void;
@@ -4176,6 +4230,7 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
   const [selectedId, setSelectedId] = useState(visibleStudents[0]?.id || students[0]?.id || '');
   const selected = students.find((student) => student.id === selectedId) || visibleStudents[0] || students[0];
   const selectedTouchpoints = selected ? touchpoints.filter((touchpoint) => touchpoint.student_id === selected.id) : [];
+  const selectedAppointments = selected ? appointments.filter((a) => a.student_id === selected.id).sort((a, b) => b.appointment_at.localeCompare(a.appointment_at)) : [];
   const [addingStudent, setAddingStudent] = useState(false);
   const [importingCsv, setImportingCsv] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
@@ -4187,6 +4242,83 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
     touchpoint_type: 'Call to student', touchpoint_date: new Date().toISOString().slice(0, 10),
     course: '', momentum: '', note: '', next_call_at: ''
   });
+  const [listCollapsed, setListCollapsed] = useState(false);
+  const [weeklyForm, setWeeklyForm] = useState({ is_weekly_appointment: false, weekly_appointment_day_of_week: '1', weekly_appointment_time: '' });
+  const [apptForm, setApptForm] = useState({
+    appointment_date: new Date().toISOString().slice(0, 10), appointment_time: '',
+    missed: false, missed_email_sent: false, voicemail_left: false, is_weekly: false, notes: ''
+  });
+  const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
+  const [editApptForm, setEditApptForm] = useState({ appointment_date: '', appointment_time: '', missed: false, missed_email_sent: false, voicemail_left: false, is_weekly: false, notes: '' });
+
+  useEffect(() => {
+    if (selected) {
+      setWeeklyForm({
+        is_weekly_appointment: !!selected.is_weekly_appointment,
+        weekly_appointment_day_of_week: String(selected.weekly_appointment_day_of_week ?? 1),
+        weekly_appointment_time: selected.weekly_appointment_time || ''
+      });
+      setApptForm((f) => ({ ...f, is_weekly: !!selected.is_weekly_appointment }));
+    }
+  }, [selected?.id]);
+
+  const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  function saveWeeklySettings() {
+    if (!selected) return;
+    updateStudent(selected.id, {
+      is_weekly_appointment: weeklyForm.is_weekly_appointment,
+      weekly_appointment_day_of_week: weeklyForm.is_weekly_appointment ? Number(weeklyForm.weekly_appointment_day_of_week) : null,
+      weekly_appointment_time: weeklyForm.is_weekly_appointment ? weeklyForm.weekly_appointment_time : null
+    } as Partial<Student>);
+  }
+
+  function submitAppointment() {
+    if (!selected || !apptForm.appointment_date) return;
+    const iso = new Date(`${apptForm.appointment_date}T${apptForm.appointment_time || '00:00'}`).toISOString();
+    createAppointment({
+      student_id: selected.id,
+      appointment_at: iso,
+      is_weekly: apptForm.is_weekly,
+      missed: apptForm.missed,
+      missed_email_sent: apptForm.missed ? apptForm.missed_email_sent : false,
+      voicemail_left: apptForm.missed ? apptForm.voicemail_left : false,
+      notes: apptForm.notes || null
+    });
+    setApptForm({
+      appointment_date: new Date().toISOString().slice(0, 10), appointment_time: '',
+      missed: false, missed_email_sent: false, voicemail_left: false,
+      is_weekly: !!selected.is_weekly_appointment, notes: ''
+    });
+  }
+
+  function startEditAppointment(a: StudentAppointment) {
+    const d = new Date(a.appointment_at);
+    setEditingAppointmentId(a.id);
+    setEditApptForm({
+      appointment_date: d.toISOString().slice(0, 10),
+      appointment_time: d.toISOString().slice(11, 16),
+      missed: a.missed, missed_email_sent: a.missed_email_sent, voicemail_left: a.voicemail_left,
+      is_weekly: a.is_weekly, notes: a.notes || ''
+    });
+  }
+
+  function saveEditAppointment() {
+    if (!editingAppointmentId) return;
+    const iso = new Date(`${editApptForm.appointment_date}T${editApptForm.appointment_time || '00:00'}`).toISOString();
+    updateAppointment(editingAppointmentId, {
+      appointment_at: iso, is_weekly: editApptForm.is_weekly,
+      missed: editApptForm.missed,
+      missed_email_sent: editApptForm.missed ? editApptForm.missed_email_sent : false,
+      voicemail_left: editApptForm.missed ? editApptForm.voicemail_left : false,
+      notes: editApptForm.notes || null
+    });
+    setEditingAppointmentId(null);
+  }
+
+  function confirmDeleteAppointment(id: string) {
+    if (confirm('Delete this appointment record? This cannot be undone.')) deleteAppointment(id);
+  }
 
   useEffect(() => {
     if (!selected && visibleStudents[0]) setSelectedId(visibleStudents[0].id);
@@ -4319,8 +4451,9 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
     <Stats items={[["Active", String(activeStudents.length)], ["Archived", String(archivedStudents.length)], ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived).length)], ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived).length)]]} />
     {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input placeholder="Course" value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email (for outreach drafts)" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
     <div className="students-crm-layout">
-      <section className="panel student-scroll-list"><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div><div className="student-search-row"><Search size={15} /><input type="text" placeholder="Search by name or ID" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search students" /></div>{visibleStudents.length === 0 && <div className="brief-item">{search ? 'No students match that search.' : 'No students in this view yet.'}</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} style={student.on_term_break ? { opacity: 0.6, background: '#f5f5f8' } : {}} onClick={() => setSelectedId(student.id)}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}{student.on_term_break ? ' · ☕ Break' : ''}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>
+      {!listCollapsed && <section className="panel student-scroll-list"><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div><div className="student-search-row"><Search size={15} /><input type="text" placeholder="Search by name or ID" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search students" /></div>{visibleStudents.length === 0 && <div className="brief-item">{search ? 'No students match that search.' : 'No students in this view yet.'}</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} style={student.on_term_break ? { opacity: 0.6, background: '#f5f5f8' } : {}} onClick={() => { setSelectedId(student.id); setListCollapsed(true); }}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}{student.on_term_break ? ' · ☕ Break' : ''}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>}
       {selected ? <section className="student-detail-pane" style={selected.on_term_break ? { filter: 'grayscale(0.6)', opacity: 0.75, background: '#f0f0f5' } : {}}>
+        {listCollapsed && <button className="btn ghost" style={{ marginBottom: 10 }} onClick={() => setListCollapsed(false)}>← Back to student list</button>}
         {/* TOP ZONE: header + health + quick facts + next call prep — always visible without scrolling */}
         <section className="panel student-top-zone">
           {/* student-top-zone header */}
@@ -4479,6 +4612,105 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
           </div>
           <aside className="student-work-side">
             <section className="panel"><h2>Add Touchpoint</h2><div className="form-grid"><select value={touchForm.touchpoint_type} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_type: e.target.value })}>{touchpointTypes.map((type) => <option key={type}>{type}</option>)}</select><input type="date" value={touchForm.touchpoint_date} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_date: e.target.value })} /><input placeholder="Course" value={touchForm.course || selected.course || ''} onChange={(e) => setTouchForm({ ...touchForm, course: e.target.value })} /><input placeholder="Momentum" value={touchForm.momentum} onChange={(e) => setTouchForm({ ...touchForm, momentum: e.target.value })} /></div><label className="date-field"><span>Next call with this student (optional)</span><input type="datetime-local" value={touchForm.next_call_at} onChange={(e) => setTouchForm({ ...touchForm, next_call_at: e.target.value })} /></label><textarea placeholder={touchForm.touchpoint_type === 'Email thread' ? 'Paste the full email thread here (all back-and-forth messages in one entry)...' : 'What happened? What did the student say? What is the next step?'} style={touchForm.touchpoint_type === 'Email thread' ? { minHeight: 200 } : undefined} value={touchForm.note} onChange={(e) => setTouchForm({ ...touchForm, note: e.target.value })} />{ferpaWarnings(touchForm.note).length > 0 && <FerpaWarning warnings={ferpaWarnings(touchForm.note)} />}<div className="form-actions"><button className="btn primary" onClick={submitTouchpoint}><Save size={15} /> Save Touchpoint + Generate Prep</button></div></section>
+
+            <section className="panel">
+              <h2>Weekly Appointment Settings</h2>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 10 }}>
+                <input type="checkbox" checked={weeklyForm.is_weekly_appointment} onChange={(e) => setWeeklyForm({ ...weeklyForm, is_weekly_appointment: e.target.checked })} />
+                This student has a standing weekly appointment
+              </label>
+              {weeklyForm.is_weekly_appointment && (
+                <div className="form-grid">
+                  <select value={weeklyForm.weekly_appointment_day_of_week} onChange={(e) => setWeeklyForm({ ...weeklyForm, weekly_appointment_day_of_week: e.target.value })}>
+                    {WEEKDAY_NAMES.map((name, i) => <option key={name} value={i}>{name}</option>)}
+                  </select>
+                  <input type="time" value={weeklyForm.weekly_appointment_time} onChange={(e) => setWeeklyForm({ ...weeklyForm, weekly_appointment_time: e.target.value })} />
+                </div>
+              )}
+              <div className="form-actions"><button className="btn primary" onClick={saveWeeklySettings}><Save size={15} /> Save Weekly Setting</button></div>
+              <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>Once set, checking "This was the weekly appointment" when you log an appointment below will automatically push the next appointment date forward by a week — you won't need to re-enter the time each week.</p>
+            </section>
+
+            <section className="panel">
+              <h2>Log Appointment</h2>
+              <div className="form-grid">
+                <input type="date" value={apptForm.appointment_date} onChange={(e) => setApptForm({ ...apptForm, appointment_date: e.target.value })} />
+                <input type="time" value={apptForm.appointment_time} onChange={(e) => setApptForm({ ...apptForm, appointment_time: e.target.value })} />
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '8px 0' }}>
+                <input type="checkbox" checked={apptForm.is_weekly} onChange={(e) => setApptForm({ ...apptForm, is_weekly: e.target.checked })} />
+                This was the weekly appointment
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '8px 0' }}>
+                <input type="checkbox" checked={apptForm.missed} onChange={(e) => setApptForm({ ...apptForm, missed: e.target.checked })} />
+                Call was missed
+              </label>
+              {apptForm.missed && (
+                <div style={{ paddingLeft: 24, marginBottom: 8 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 6 }}>
+                    <input type="checkbox" checked={apptForm.missed_email_sent} onChange={(e) => setApptForm({ ...apptForm, missed_email_sent: e.target.checked })} />
+                    Missed-call email sent
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                    <input type="checkbox" checked={apptForm.voicemail_left} onChange={(e) => setApptForm({ ...apptForm, voicemail_left: e.target.checked })} />
+                    Voicemail left
+                  </label>
+                </div>
+              )}
+              <textarea placeholder="Optional notes" value={apptForm.notes} onChange={(e) => setApptForm({ ...apptForm, notes: e.target.value })} />
+              <div className="form-actions"><button className="btn primary" onClick={submitAppointment}><Save size={15} /> Save Appointment</button></div>
+            </section>
+
+            <section className="panel">
+              <h2>Appointment History</h2>
+              {selectedAppointments.length === 0 && <div className="brief-item">No appointments logged yet.</div>}
+              {selectedAppointments.map((a) => {
+                const isEditing = editingAppointmentId === a.id;
+                if (isEditing) return (
+                  <div className="touchpoint-card touchpoint-card-editing" key={a.id}>
+                    <div className="form-grid">
+                      <input type="date" value={editApptForm.appointment_date} onChange={(e) => setEditApptForm({ ...editApptForm, appointment_date: e.target.value })} />
+                      <input type="time" value={editApptForm.appointment_time} onChange={(e) => setEditApptForm({ ...editApptForm, appointment_time: e.target.value })} />
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '6px 0' }}><input type="checkbox" checked={editApptForm.is_weekly} onChange={(e) => setEditApptForm({ ...editApptForm, is_weekly: e.target.checked })} /> Weekly appointment</label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '6px 0' }}><input type="checkbox" checked={editApptForm.missed} onChange={(e) => setEditApptForm({ ...editApptForm, missed: e.target.checked })} /> Missed</label>
+                    {editApptForm.missed && (
+                      <div style={{ paddingLeft: 24 }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 6 }}><input type="checkbox" checked={editApptForm.missed_email_sent} onChange={(e) => setEditApptForm({ ...editApptForm, missed_email_sent: e.target.checked })} /> Missed-call email sent</label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}><input type="checkbox" checked={editApptForm.voicemail_left} onChange={(e) => setEditApptForm({ ...editApptForm, voicemail_left: e.target.checked })} /> Voicemail left</label>
+                      </div>
+                    )}
+                    <textarea value={editApptForm.notes} onChange={(e) => setEditApptForm({ ...editApptForm, notes: e.target.value })} />
+                    <div className="form-actions">
+                      <button className="btn primary" onClick={saveEditAppointment}><Save size={15} /> Save Changes</button>
+                      <button className="btn ghost" onClick={() => setEditingAppointmentId(null)}>Cancel</button>
+                    </div>
+                  </div>
+                );
+
+                const d = new Date(a.appointment_at);
+                return (
+                  <div className="touchpoint-card" key={a.id}>
+                    <div className="panel-head">
+                      <div>
+                        <strong>{d.toLocaleDateString()} {d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</strong>
+                        <p>{a.is_weekly ? 'Weekly appointment' : 'One-off appointment'} · {a.missed ? '❌ Missed' : '✅ Attended'}</p>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <button className="btn ghost tiny" title="Edit" onClick={() => startEditAppointment(a)}><Edit3 size={14} /></button>
+                        <button className="btn ghost tiny" title="Delete" onClick={() => confirmDeleteAppointment(a.id)}><Trash2 size={14} /></button>
+                      </div>
+                    </div>
+                    {a.missed && (
+                      <p style={{ fontSize: 12, color: 'var(--muted)' }}>
+                        {a.missed_email_sent ? '✅' : '⬜'} Missed-call email sent · {a.voicemail_left ? '✅' : '⬜'} Voicemail left
+                      </p>
+                    )}
+                    {a.notes && <p>{a.notes}</p>}
+                  </div>
+                );
+              })}
+            </section>
           </aside>
         </div>
       </section> : <section className="panel"><h2>Select a student</h2><p>Add or select a student to view their profile, touchpoints, and next-call prep.</p></section>}
