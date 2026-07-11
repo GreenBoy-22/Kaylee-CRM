@@ -1131,6 +1131,21 @@ Kaylee`;
     setMessage('Touchpoint saved and next-call prep generated.');
   }
 
+  async function updateTouchpoint(id: string, patch: Partial<Touchpoint>) {
+    setTouchpoints((current) => current.map((t) => t.id === id ? { ...t, ...patch } : t));
+    if (!supabase) return setMessage('Touchpoint updated locally.');
+    const { error } = await supabase.from('student_touchpoints').update(patch).eq('id', id);
+    if (error) setMessage(`Touchpoint update failed: ${error.message}`);
+  }
+
+  async function deleteTouchpoint(id: string) {
+    const prev = touchpoints;
+    setTouchpoints((current) => current.filter((t) => t.id !== id));
+    if (!supabase) return setMessage('Touchpoint deleted locally.');
+    const { error } = await supabase.from('student_touchpoints').delete().eq('id', id);
+    if (error) { setTouchpoints(prev); setMessage(`Delete failed: ${error.message}`); }
+  }
+
   function buildDraftForStudent(student: Student, kind: string, cohortLabel: string): { subject: string; body: string } {
     const name = student.display_name || 'there';
     const course = student.course || 'your current course';
@@ -1639,7 +1654,7 @@ Kaylee`;
           {page === 'books' && <Books />}
           {page === 'work_performance' && <WorkPerformance />}
           {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
-          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
+          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} updateTouchpoint={updateTouchpoint} deleteTouchpoint={deleteTouchpoint} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} />}
           {page === 'fto' && activeRole === 'admin' && <FTOTracker />}
           {page === 'course_notes' && activeRole === 'admin' && <CourseNotes />}
           {page === 'mood' && <MoodTracker />}
@@ -4115,7 +4130,8 @@ function SuggestionCard({ suggestion, editable, onAdd, onDone, onSnooze, onDismi
 }
 
 const touchpointTypes = [
-  'Email from student', 'Email to student', 'Text from student', 'Text to student',
+  'Email from student', 'Email to student', 'Email thread',
+  'Text from student', 'Text to student',
   'Call from student', 'Call to student', 'Voicemail from student', 'Voicemail to student',
   'Appointment', 'No-show / missed call'
 ];
@@ -4123,7 +4139,7 @@ const touchpointTypes = [
 const riskLevels = ['Low', 'Medium', 'High', 'High Risk'];
 const studentStatuses = ['Active', 'Support', 'Ghost', 'Portal-only', 'Archived'];
 
-function Students({ students, touchpoints, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, unarchiveStudent, createTouchpoint, copyText, ferpaWarnings, generateSingleDraft, drafts, setPage }: {
+function Students({ students, touchpoints, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, unarchiveStudent, createTouchpoint, updateTouchpoint, deleteTouchpoint, copyText, ferpaWarnings, generateSingleDraft, drafts, setPage }: {
   students: Student[];
   touchpoints: Touchpoint[];
   importStudentsFromCsv: (text: string) => Promise<void>;
@@ -4132,6 +4148,8 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
   archiveStudent: (id: string) => void;
   unarchiveStudent: (id: string) => void;
   createTouchpoint: (touchpoint: Omit<Touchpoint, 'id' | 'next_call_prep' | 'constructive_note' | 'follow_up_email' | 'follow_up_text' | 'copied'>) => void;
+  updateTouchpoint: (id: string, patch: Partial<Touchpoint>) => void;
+  deleteTouchpoint: (id: string) => void;
   copyText: (text: string, id?: string, table?: 'students' | 'student_touchpoints') => void;
   ferpaWarnings: (text: string) => string[];
   generateSingleDraft: (studentId: string, kind: string) => void;
@@ -4141,18 +4159,20 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
   const activeStudents = students.filter((student) => !student.archived);
   const archivedStudents = students.filter((student) => student.archived);
   const [showArchived, setShowArchived] = useState(false);
+  const [termBreakOnly, setTermBreakOnly] = useState(false);
   const [search, setSearch] = useState('');
   const baseList = showArchived ? archivedStudents : activeStudents;
+  const filteredByBreak = termBreakOnly ? baseList.filter((s) => s.on_term_break) : baseList;
   const visibleStudents = useMemo(() => {
     const q = search.trim().toLowerCase();
     const filtered = q
-      ? baseList.filter((s) =>
+      ? filteredByBreak.filter((s) =>
           s.display_name.toLowerCase().includes(q) ||
           String(s.student_id || '').toLowerCase().includes(q)
         )
-      : baseList;
+      : filteredByBreak;
     return [...filtered].sort((a, b) => a.display_name.localeCompare(b.display_name, undefined, { sensitivity: 'base' }));
-  }, [baseList, search]);
+  }, [filteredByBreak, search]);
   const [selectedId, setSelectedId] = useState(visibleStudents[0]?.id || students[0]?.id || '');
   const selected = students.find((student) => student.id === selectedId) || visibleStudents[0] || students[0];
   const selectedTouchpoints = selected ? touchpoints.filter((touchpoint) => touchpoint.student_id === selected.id) : [];
@@ -4257,6 +4277,24 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
     setTouchForm({ touchpoint_type: 'Call to student', touchpoint_date: new Date().toISOString().slice(0, 10), course: selected.course || '', momentum: '', note: '', next_call_at: '' });
   }
 
+  const [editingTouchpointId, setEditingTouchpointId] = useState<string | null>(null);
+  const [editTouchForm, setEditTouchForm] = useState({ touchpoint_type: '', touchpoint_date: '', course: '', momentum: '', note: '' });
+
+  function startEditTouchpoint(t: Touchpoint) {
+    setEditingTouchpointId(t.id);
+    setEditTouchForm({ touchpoint_type: t.touchpoint_type, touchpoint_date: t.touchpoint_date, course: t.course || '', momentum: t.momentum || '', note: t.note });
+  }
+
+  function saveEditTouchpoint() {
+    if (!editingTouchpointId) return;
+    updateTouchpoint(editingTouchpointId, { ...editTouchForm });
+    setEditingTouchpointId(null);
+  }
+
+  function confirmDeleteTouchpoint(id: string) {
+    if (confirm('Delete this touchpoint? This cannot be undone.')) deleteTouchpoint(id);
+  }
+
 
   async function handleCsvUpload(file?: File) {
     if (!file) return;
@@ -4276,6 +4314,7 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
       <button className="btn primary" onClick={() => setAddingStudent(!addingStudent)}><Plus size={15} /> Add Student</button>
       <label className="btn ghost upload-button" title="Updates existing students from Salesforce CSV by Student ID. Does not create new students or overwrite your notes."><Upload size={15} /> {importingCsv ? 'Updating...' : 'Update from Salesforce CSV'}<input type="file" accept=".csv,text/csv" onChange={(e) => handleCsvUpload(e.target.files?.[0])} /></label>
       <button className="btn ghost" onClick={() => setShowArchived(!showArchived)}><Archive size={15} /> {showArchived ? 'Active' : 'Archived'}</button>
+      <button className={`btn ${termBreakOnly ? 'warning' : 'ghost'}`} onClick={() => setTermBreakOnly(!termBreakOnly)}>☕ {termBreakOnly ? 'Showing Break Only' : 'Term Break'}</button>
     </Header>
     <Stats items={[["Active", String(activeStudents.length)], ["Archived", String(archivedStudents.length)], ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived).length)], ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived).length)]]} />
     {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input placeholder="Course" value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email (for outreach drafts)" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
@@ -4385,10 +4424,61 @@ function Students({ students, touchpoints, importStudentsFromCsv, createStudent,
             <section className="panel"><h2>Admin Notes</h2><textarea value={selected.admin_notes || ''} onChange={(e) => updateStudent(selected.id, { admin_notes: e.target.value })} placeholder="Private notes for Kaylee. Keep FERPA-safe." /></section>
             <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{selected.last_contact_date || '—'}</p></div><div><strong>Next appointment</strong><p>{selected.next_appointment_date || '—'}</p></div><div><strong>Graduation goal</strong><p>{selected.graduation_goal_date || '—'}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Last academic activity</strong><p>{selected.last_academic_activity_date || '—'}</p></div><div><strong>Term end</strong><p>{selected.term_end_date || '—'}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
             <StudentTimeline student={selected} touchpoints={selectedTouchpoints} />
-            <section className="panel"><h2>Touchpoint Log</h2>{selectedTouchpoints.length === 0 && <div className="brief-item">No touchpoints yet. Add the first call, email, text, or voicemail in the panel on the right.</div>}{selectedTouchpoints.map((touchpoint) => <div className="touchpoint-card" key={touchpoint.id}><div className="panel-head"><div><strong>{touchpoint.touchpoint_type}</strong><p>{touchpoint.touchpoint_date} · {touchpoint.course || selected.course || 'No course'} · {touchpoint.momentum || 'Momentum not set'}</p></div>{touchpoint.touchpoint_type.includes('Email') ? <Mail size={17} /> : touchpoint.touchpoint_type.includes('Text') ? <MessageSquare size={17} /> : <Phone size={17} />}</div><p>{touchpoint.note}</p><details><summary>Next-call prep and follow-up drafts</summary><div className="brief-item"><strong>Next call:</strong> {touchpoint.next_call_prep}</div><div className="brief-item"><strong>Kaylee coaching:</strong> {touchpoint.constructive_note}</div><textarea readOnly value={touchpoint.follow_up_email || ''} /><button className="btn primary" onClick={() => copyText(touchpoint.follow_up_email || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Email Draft</button><textarea readOnly value={touchpoint.follow_up_text || ''} /><button className="btn ghost" onClick={() => copyText(touchpoint.follow_up_text || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Text Draft</button></details></div>)}</section>
+            <section className="panel">
+              <h2>Touchpoint Log</h2>
+              {selectedTouchpoints.length === 0 && <div className="brief-item">No touchpoints yet. Add the first call, email, text, thread, or voicemail in the panel on the right.</div>}
+              {selectedTouchpoints.map((touchpoint) => {
+                const isEditing = editingTouchpointId === touchpoint.id;
+                const icon = touchpoint.touchpoint_type.includes('Email') ? <Mail size={16} /> : touchpoint.touchpoint_type.includes('Text') ? <MessageSquare size={16} /> : <Phone size={16} />;
+
+                if (isEditing) return (
+                  <div className="touchpoint-card touchpoint-card-editing" key={touchpoint.id}>
+                    <div className="form-grid">
+                      <select value={editTouchForm.touchpoint_type} onChange={(e) => setEditTouchForm({ ...editTouchForm, touchpoint_type: e.target.value })}>
+                        {touchpointTypes.map((type) => <option key={type}>{type}</option>)}
+                      </select>
+                      <input type="date" value={editTouchForm.touchpoint_date} onChange={(e) => setEditTouchForm({ ...editTouchForm, touchpoint_date: e.target.value })} />
+                      <input placeholder="Course" value={editTouchForm.course} onChange={(e) => setEditTouchForm({ ...editTouchForm, course: e.target.value })} />
+                      <input placeholder="Momentum" value={editTouchForm.momentum} onChange={(e) => setEditTouchForm({ ...editTouchForm, momentum: e.target.value })} />
+                    </div>
+                    <textarea style={editTouchForm.touchpoint_type === 'Email thread' ? { minHeight: 200 } : undefined} value={editTouchForm.note} onChange={(e) => setEditTouchForm({ ...editTouchForm, note: e.target.value })} />
+                    <div className="form-actions">
+                      <button className="btn primary" onClick={saveEditTouchpoint}><Save size={15} /> Save Changes</button>
+                      <button className="btn ghost" onClick={() => setEditingTouchpointId(null)}>Cancel</button>
+                    </div>
+                  </div>
+                );
+
+                return (
+                  <div className="touchpoint-card" key={touchpoint.id}>
+                    <div className="panel-head">
+                      <div>
+                        <strong>{touchpoint.touchpoint_type}</strong>
+                        <p>{touchpoint.touchpoint_date} · {touchpoint.course || selected.course || 'No course'} · {touchpoint.momentum || 'Momentum not set'}</p>
+                      </div>
+                      <div className="touchpoint-card-actions" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {icon}
+                        <button className="btn ghost tiny" title="Edit" onClick={() => startEditTouchpoint(touchpoint)}><Edit3 size={14} /></button>
+                        <button className="btn ghost tiny" title="Delete" onClick={() => confirmDeleteTouchpoint(touchpoint.id)}><Trash2 size={14} /></button>
+                      </div>
+                    </div>
+                    <p style={touchpoint.touchpoint_type === 'Email thread' ? { whiteSpace: 'pre-wrap', background: '#f7f7fb', padding: 10, borderRadius: 6 } : undefined}>{touchpoint.note}</p>
+                    <details>
+                      <summary>Next-call prep and follow-up drafts</summary>
+                      <div className="brief-item"><strong>Next call:</strong> {touchpoint.next_call_prep}</div>
+                      <div className="brief-item"><strong>Kaylee coaching:</strong> {touchpoint.constructive_note}</div>
+                      <textarea readOnly value={touchpoint.follow_up_email || ''} />
+                      <button className="btn primary" onClick={() => copyText(touchpoint.follow_up_email || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Email Draft</button>
+                      <textarea readOnly value={touchpoint.follow_up_text || ''} />
+                      <button className="btn ghost" onClick={() => copyText(touchpoint.follow_up_text || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Text Draft</button>
+                    </details>
+                  </div>
+                );
+              })}
+            </section>
           </div>
           <aside className="student-work-side">
-            <section className="panel"><h2>Add Touchpoint</h2><div className="form-grid"><select value={touchForm.touchpoint_type} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_type: e.target.value })}>{touchpointTypes.map((type) => <option key={type}>{type}</option>)}</select><input type="date" value={touchForm.touchpoint_date} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_date: e.target.value })} /><input placeholder="Course" value={touchForm.course || selected.course || ''} onChange={(e) => setTouchForm({ ...touchForm, course: e.target.value })} /><input placeholder="Momentum" value={touchForm.momentum} onChange={(e) => setTouchForm({ ...touchForm, momentum: e.target.value })} /></div><label className="date-field"><span>Next call with this student (optional)</span><input type="datetime-local" value={touchForm.next_call_at} onChange={(e) => setTouchForm({ ...touchForm, next_call_at: e.target.value })} /></label><textarea placeholder="What happened? What did the student say? What is the next step?" value={touchForm.note} onChange={(e) => setTouchForm({ ...touchForm, note: e.target.value })} />{ferpaWarnings(touchForm.note).length > 0 && <FerpaWarning warnings={ferpaWarnings(touchForm.note)} />}<div className="form-actions"><button className="btn primary" onClick={submitTouchpoint}><Save size={15} /> Save Touchpoint + Generate Prep</button></div></section>
+            <section className="panel"><h2>Add Touchpoint</h2><div className="form-grid"><select value={touchForm.touchpoint_type} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_type: e.target.value })}>{touchpointTypes.map((type) => <option key={type}>{type}</option>)}</select><input type="date" value={touchForm.touchpoint_date} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_date: e.target.value })} /><input placeholder="Course" value={touchForm.course || selected.course || ''} onChange={(e) => setTouchForm({ ...touchForm, course: e.target.value })} /><input placeholder="Momentum" value={touchForm.momentum} onChange={(e) => setTouchForm({ ...touchForm, momentum: e.target.value })} /></div><label className="date-field"><span>Next call with this student (optional)</span><input type="datetime-local" value={touchForm.next_call_at} onChange={(e) => setTouchForm({ ...touchForm, next_call_at: e.target.value })} /></label><textarea placeholder={touchForm.touchpoint_type === 'Email thread' ? 'Paste the full email thread here (all back-and-forth messages in one entry)...' : 'What happened? What did the student say? What is the next step?'} style={touchForm.touchpoint_type === 'Email thread' ? { minHeight: 200 } : undefined} value={touchForm.note} onChange={(e) => setTouchForm({ ...touchForm, note: e.target.value })} />{ferpaWarnings(touchForm.note).length > 0 && <FerpaWarning warnings={ferpaWarnings(touchForm.note)} />}<div className="form-actions"><button className="btn primary" onClick={submitTouchpoint}><Save size={15} /> Save Touchpoint + Generate Prep</button></div></section>
           </aside>
         </div>
       </section> : <section className="panel"><h2>Select a student</h2><p>Add or select a student to view their profile, touchpoints, and next-call prep.</p></section>}

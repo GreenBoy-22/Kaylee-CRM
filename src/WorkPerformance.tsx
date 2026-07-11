@@ -12,6 +12,15 @@ import { supabase } from './lib/supabase';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
+interface TouchpointRow {
+  id: string;
+  student_id: string;
+  touchpoint_type: string;
+  touchpoint_date: string;
+  note: string;
+  momentum: string | null;
+}
+
 interface KpiMonth {
   id: string;
   month_date: string;
@@ -90,6 +99,7 @@ interface StudentRow {
   missed_call_count: number | null;
   known_blockers: string | null;
   next_conversation_focus: string | null;
+  on_term_break?: boolean;
 }
 
 const BLANK_KPI = { month_date: '', enrollment_total: '', drops: '', graduates: '', otp_pct: '', grad_rate_4yr_pct: '', drop_rate_pct: '', pacing_2m_pct: '', pacing_4m_pct: '', vsat_pct: '', notes: '', t1_t2_ret_pct: '', t2_t3_ret_pct: '', t3_plus_ret_pct: '' };
@@ -248,6 +258,7 @@ export default function WorkPerformance() {
   const [tab, setTab] = useState<'kpi' | 'reviews' | 'coaching' | 'goals' | 'insights'>('insights');
   const [loading, setLoading] = useState(true);
   const [students, setStudents] = useState<StudentRow[]>([]);
+  const [touchpoints, setTouchpoints] = useState<TouchpointRow[]>([]);
 
   const [kpis, setKpis] = useState<KpiMonth[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -279,18 +290,20 @@ export default function WorkPerformance() {
     const { data: sd } = await supabase.auth.getSession();
     const uid = sd.session?.user?.id;
     if (!uid) { setLoading(false); return; }
-    const [k, r, c, g, s] = await Promise.all([
+    const [k, r, c, g, s, tp] = await Promise.all([
       supabase.from('work_kpi_monthly').select('*').eq('user_id', uid).order('month_date', { ascending: true }),
       supabase.from('work_reviews').select('*').eq('user_id', uid).order('review_date', { ascending: false }),
       supabase.from('work_coaching_notes').select('*').eq('user_id', uid).order('note_date', { ascending: false }),
       supabase.from('work_goals').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
-      supabase.from('students').select('id, display_name, risk, momentum, last_contact_date, next_call_at, missed_call_count, known_blockers, next_conversation_focus').eq('archived', false),
+      supabase.from('students').select('id, display_name, risk, momentum, last_contact_date, next_call_at, missed_call_count, known_blockers, next_conversation_focus, on_term_break').eq('archived', false),
+      supabase.from('student_touchpoints').select('id, student_id, touchpoint_type, touchpoint_date, note, momentum').order('touchpoint_date', { ascending: true }),
     ]);
     setKpis((k.data as KpiMonth[]) ?? []);
     setReviews((r.data as Review[]) ?? []);
     setNotes((c.data as CoachingNote[]) ?? []);
     setGoals((g.data as Goal[]) ?? []);
-    setStudents((s.data as StudentRow[]) ?? []);
+    setStudents(((s.data as StudentRow[]) ?? []).filter((st) => !st.on_term_break));
+    setTouchpoints((tp.data as TouchpointRow[]) ?? []);
     setLoading(false);
   }, []);
 
@@ -870,7 +883,7 @@ export default function WorkPerformance() {
                 <section className="panel" style={{ marginBottom: 14 }}>
                   <div className="panel-head"><h2>📅 Monthly Recaps</h2></div>
                   <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
-                    For each month: what likely went well, what likely held you back, and an idea to try next month. This is my best-effort read based on the metric itself and general patterns — not reconstructed history, since I don't have your day-to-day student activity from that specific month. Add notes on any month (via the KPI form) and future recaps get sharper.
+                    For each month: what you actually logged (when touchpoint history exists) plus what likely went well or held you back based on the metric itself. Months before you started logging touchpoints fall back to metric-pattern reasoning only.
                   </p>
                   {[...kpis].reverse().map(k => {
                     const isOpen = expandedRecap === k.id;
@@ -902,6 +915,12 @@ export default function WorkPerformance() {
                         : `T3+ Retention was ${k.t3_plus_ret_pct}%, below average. These students usually need blocker-specific problem-solving, not general check-ins — review known_blockers notes before your next round of calls.`
                     );
 
+                    const monthKey = k.month_date.slice(0, 7); // 'YYYY-MM'
+                    const monthTouchpoints = touchpoints.filter(t => t.touchpoint_date.slice(0, 7) === monthKey);
+                    const studentsSeen = new Set(monthTouchpoints.map(t => t.student_id));
+                    const typeCounts: Record<string, number> = {};
+                    monthTouchpoints.forEach(t => { typeCounts[t.touchpoint_type] = (typeCounts[t.touchpoint_type] || 0) + 1; });
+
                     return (
                       <div key={k.id} style={{ marginBottom: 8, borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
                         <div onClick={() => setExpandedRecap(isOpen ? null : k.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', cursor: 'pointer', background: 'var(--surface-1)' }}>
@@ -910,6 +929,16 @@ export default function WorkPerformance() {
                         </div>
                         {isOpen && (
                           <div style={{ padding: 12 }}>
+                            {monthTouchpoints.length > 0 ? (
+                              <div style={{ marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid var(--border)' }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>📋 What you actually logged this month ({monthTouchpoints.length} touchpoints · {studentsSeen.size} students)</div>
+                                <ul style={{ paddingLeft: 18, margin: 0, fontSize: 12, lineHeight: 1.7 }}>
+                                  {Object.entries(typeCounts).map(([type, count]) => <li key={type}>{type}: {count}</li>)}
+                                </ul>
+                              </div>
+                            ) : (
+                              <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>No touchpoints logged for this month — recap below is metric-average reasoning only, not grounded history.</div>
+                            )}
                             {wins.length > 0 && (
                               <div style={{ marginBottom: 10 }}>
                                 <div style={{ fontSize: 12, fontWeight: 700, color: '#16a34a', marginBottom: 4 }}>✅ What went well</div>
