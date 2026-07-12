@@ -615,10 +615,11 @@ td small { display: block; margin-top: 2px; color: var(--muted); }
     display: none !important;
   }
 
-  /* Topbar: slimmer on mobile */
+  /* Topbar: slimmer on mobile, padded below the phone's status bar/notch */
   .topbar {
     min-height: 48px !important;
     padding: 6px 12px !important;
+    padding-top: calc(6px + var(--safe-top)) !important;
     position: sticky;
     top: 0;
     z-index: 100;
@@ -628,10 +629,10 @@ td small { display: block; margin-top: 2px; color: var(--muted); }
   .toggle-wrap button span { display: none; }
   .toggle-wrap button { padding: 6px 8px !important; }
 
-  /* Main: full height minus topbar and bottom nav */
+  /* Main: full height minus topbar (incl. safe-top padding) and bottom nav */
   .main {
     flex-direction: column !important;
-    height: calc(100dvh - 48px - var(--bottom-nav-height) - var(--safe-bottom)) !important;
+    height: calc(100dvh - 48px - var(--safe-top) - var(--bottom-nav-height) - var(--safe-bottom)) !important;
     overflow: hidden !important;
   }
 
