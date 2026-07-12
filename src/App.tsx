@@ -789,7 +789,8 @@ Kaylee`;
   }
 
   function isAdmin() {
-    return profile?.role === 'admin';
+    const role = profile?.role || getRoleFromEmail(session?.user?.email || '');
+    return role === 'admin';
   }
 
   function moduleFor(section: Page) {
@@ -4514,7 +4515,8 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
       ["Active", String(activeStudents.length), undefined, () => { setShowArchived(false); setStatFilter(null); }, !showArchived && statFilter === null],
       ["Archived", String(archivedStudents.length), undefined, () => { setShowArchived(true); setStatFilter(null); }, showArchived],
       ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived).length), undefined, () => { setShowArchived(false); setStatFilter('high_risk'); }, statFilter === 'high_risk'],
-      ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived).length), undefined, () => { setShowArchived(false); setStatFilter('ghost'); }, statFilter === 'ghost']
+      ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived).length), undefined, () => { setShowArchived(false); setStatFilter('ghost'); }, statFilter === 'ghost'],
+      ["Term Break", String(students.filter((s) => s.on_term_break && !s.archived).length), undefined, () => { setShowArchived(false); setStatFilter(null); setTermBreakOnly(!termBreakOnly); }, termBreakOnly]
     ]} />
     {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input placeholder="Course" value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email (for outreach drafts)" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
     <div className="students-crm-layout" style={listCollapsed ? { gridTemplateColumns: '1fr' } : undefined}>
