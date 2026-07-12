@@ -1942,6 +1942,51 @@ function studentHealth(student: Student, touchpoints: Touchpoint[]) {
   return { overall, momentum, engagement, risk, goalProgress };
 }
 
+function healthActionPlan(student: Student, touchpoints: Touchpoint[]) {
+  const signals = studentStatusSignals(student, touchpoints);
+  const health = studentHealth(student, touchpoints);
+  const gap = daysSince(student.last_contact_date || signals.lastMeaningful?.touchpoint_date || signals.lastTouchpoint?.touchpoint_date);
+  const momentumText = `${student.goal || ''} ${student.grow_note || ''} ${student.admin_notes || ''} ${signals.lastTouchpoint?.note || ''} ${signals.lastTouchpoint?.momentum || ''}`.toLowerCase();
+  const allNotesText = signals.studentTouchpoints.map((t) => t.note || '').join(' ').toLowerCase();
+  const gradDays = daysUntil(student.graduation_goal_date);
+  const riskLabel = String(student.risk);
+
+  const actions: { area: string; points: string; action: string; severity: 'urgent' | 'watch' | 'good' }[] = [];
+
+  // Momentum (30% of overall)
+  if (gap > 14) actions.push({ area: 'Momentum', points: '-12 pts · contact gap', action: `It's been ${gap} day(s) since meaningful contact. One touch this week recovers momentum and directly protects your OTP and retention numbers.`, severity: 'urgent' });
+  if (/behind|stuck|overwhelm|slow/.test(momentumText)) actions.push({ area: 'Momentum', points: '-18 pts · note language', action: `Recent notes use language like "behind / stuck / overwhelmed." Reframe the next call around one small, completable win instead of the whole course.`, severity: 'watch' });
+  else if (!/passed|complete|scheduled|progress/.test(momentumText)) actions.push({ area: 'Momentum', points: 'no bonus yet', action: `Notes don't yet reflect forward motion ("passed / scheduled / progress"). Ask directly what's been completed since last contact and log it — this both helps the student and documents real movement.`, severity: 'watch' });
+
+  // Engagement (30% of overall)
+  if (signals.missedCalls >= 1) actions.push({ area: 'Engagement', points: `-${Math.min(signals.missedCalls * 12, 36)} pts · missed calls`, action: `${signals.missedCalls} missed call(s) on record. Try switching contact method (text/email) or asking for a better time before the next attempt.`, severity: signals.missedCalls >= 3 ? 'urgent' : 'watch' });
+  if (signals.isGhost) actions.push({ area: 'Engagement', points: '-28 pts · Ghost flag', action: `Flagged as Ghost — the single biggest engagement drag and a real retention risk. Prioritize this student for outreach this week.`, severity: 'urgent' });
+  if (signals.isPortalOnly) actions.push({ area: 'Engagement', points: '-28 pts · Portal-only', action: `Portal-only status carries the same size penalty as Ghost. Confirm they know how to reach you and get a live conversation scheduled.`, severity: 'urgent' });
+  if (gap <= 7 && !signals.isGhost) actions.push({ area: 'Engagement', points: '+10 pts · within 7 days', action: `Contact within the last 7 days — this cadence is actively helping the score. Keep it going.`, severity: 'good' });
+
+  // Risk safety (25% of overall)
+  if (riskLabel.toLowerCase().includes('high risk')) actions.push({ area: 'Risk safety', points: '-32 pts · High Risk tag', action: `Risk is set to "High Risk." If circumstances have genuinely improved, updating this directly raises the score — otherwise this is the student most worth a retention-focused call this week.`, severity: 'urgent' });
+  else if (riskLabel.toLowerCase().includes('high')) actions.push({ area: 'Risk safety', points: '-22 pts · High tag', action: `Risk is set to "High." Same logic — update it if it's stale, or make this student a priority call.`, severity: 'urgent' });
+  if (gap >= 21) actions.push({ area: 'Risk safety', points: '-24 pts · 21+ day gap', action: `21+ days since contact is the steepest risk penalty tier and puts T1→T2 / T2→T3 / T3+ retention at real risk. Treat as priority outreach.`, severity: 'urgent' });
+  else if (gap >= 14) actions.push({ area: 'Risk safety', points: '-16 pts · 14+ day gap', action: `14+ days since contact. Closing this gap protects both the risk score and your retention numbers.`, severity: 'watch' });
+
+  // Goal progress (15% of overall)
+  if (gradDays !== null && gradDays <= 90 && riskLabel.toLowerCase().includes('high')) actions.push({ area: 'Goal progress', points: '-18 pts · goal <90 days + High risk', action: `Graduation goal is within 90 days while risk is flagged High. Either recalibrate the goal date to something realistic, or use this as the anchor for an urgent pacing conversation.`, severity: 'urgent' });
+  if (health.momentum < 75) actions.push({ area: 'Goal progress', points: 'missing +12 pt bonus', action: `Goal progress gets a bonus once Momentum crosses 75 — the fastest lever here is actually the Momentum items above, not this metric directly.`, severity: 'watch' });
+
+  // Qualitative themes pulled from actual touchpoint notes
+  if (/\b(assessment|oa\b|pa\b|exam|test|proctored)/.test(allNotesText)) actions.push({ area: 'From notes', points: 'assessment mentioned', action: `Past notes reference an assessment/OA/PA. Confirm a scheduled date exists — an unscheduled assessment is a common silent driver of stalled momentum.`, severity: 'watch' });
+  if (/\bzy ?books?|labs?\b/.test(allNotesText)) actions.push({ area: 'From notes', points: 'ZyBooks/labs mentioned', action: `ZyBooks or lab work has come up before. A quick percent-complete check-in is a fast, concrete momentum win to log.`, severity: 'watch' });
+  if (/\b(work|job|family|kid|sick|health|move|moving|loss|funeral|childcare)/.test(allNotesText)) actions.push({ area: 'From notes', points: 'life circumstance mentioned', action: `A life circumstance (work/family/health) has come up in notes. Acknowledging it briefly, then asking how it's affecting study time this week, tends to open the conversation without prying.`, severity: 'watch' });
+
+  if (actions.length === 0) {
+    actions.push({ area: 'Overall', points: 'no red flags', action: `Nothing in the score breakdown is currently dragging this student down — keep the current touchpoint cadence going.`, severity: 'good' });
+  }
+
+  const order = { urgent: 0, watch: 1, good: 2 };
+  return actions.sort((a, b) => order[a.severity] - order[b.severity]);
+}
+
 function healthClass(score: number) {
   if (score >= 80) return 'good';
   if (score >= 60) return 'medium';
@@ -4688,6 +4733,18 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
               })}
             </section>
             <section className="panel"><h2>Admin Notes</h2><textarea value={selected.admin_notes || ''} onChange={(e) => updateStudent(selected.id, { admin_notes: e.target.value })} placeholder="Private notes for Kaylee. Keep FERPA-safe." /></section>
+            <section className="panel">
+              <h2>📈 Ways to Raise {selected.display_name}'s Health Score</h2>
+              <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
+                Pulled directly from what's actually dragging the score down — momentum, engagement, risk, and goal progress each map to real KPI levers (contact cadence, retention, OTP, pacing).
+              </p>
+              {healthActionPlan(selected, touchpoints).map((a, i) => (
+                <div key={i} className="brief-item" style={{ marginBottom: 8 }}>
+                  <span className={`health-pill ${a.severity === 'urgent' ? 'high-risk' : a.severity === 'watch' ? 'medium' : 'good'}`} style={{ marginBottom: 4 }}>{a.area} · {a.points}</span>
+                  <p style={{ margin: '4px 0 0' }}>{a.action}</p>
+                </div>
+              ))}
+            </section>
           </div>
           <aside className="student-work-side">
             <section className="panel">
