@@ -1,7 +1,12 @@
 // Kaylee's Hub — Service Worker
-// Strategy: network-first for API calls, cache-first for assets
-
-const CACHE_NAME = 'kaylees-hub-v1';
+// Strategy: network-first for API calls, stale-while-revalidate for assets
+//
+// CACHE VERSION: bump this string every time you want to force a clean
+// cache purge on next deploy (e.g. after a big visual/layout change).
+// Not required for normal updates — stale-while-revalidate below already
+// self-heals within one extra page load — but bumping it guarantees an
+// immediate full refresh instead of a one-visit lag.
+const CACHE_NAME = 'kaylees-hub-v2';
 
 const PRECACHE_URLS = [
   '/',
@@ -22,6 +27,15 @@ self.addEventListener('activate', (event) => {
     )
   );
   self.clients.claim();
+});
+
+// Lets the app force this worker to activate immediately instead of
+// waiting for all tabs to close — paired with the update-prompt logic
+// in main.tsx (see chat message for that snippet).
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING' || (event.data && event.data.type === 'SKIP_WAITING')) {
+    self.skipWaiting();
+  }
 });
 
 // ── Push notifications: display the notification when one arrives ─────────
@@ -84,17 +98,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for static assets (JS, CSS, images)
+  // Stale-while-revalidate for static assets (JS, CSS, images): serve the
+  // cached version instantly for speed, but always fetch a fresh copy in
+  // the background and update the cache for next time. This means even an
+  // asset that somehow gets "stuck" only stays stale for one extra visit,
+  // never indefinitely — no more needing to delete and reinstall the app.
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
-        if (response.ok && event.request.method === 'GET') {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      });
-    })
+    caches.open(CACHE_NAME).then((cache) =>
+      cache.match(event.request).then((cached) => {
+        const network = fetch(event.request).then((response) => {
+          if (response.ok && event.request.method === 'GET') {
+            cache.put(event.request, response.clone());
+          }
+          return response;
+        }).catch(() => cached);
+        return cached || network;
+      })
+    )
   );
 });
