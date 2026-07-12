@@ -315,6 +315,7 @@ export default function WorkPerformance() {
 
   const [showKpiForm, setShowKpiForm] = useState(false);
   const [expandedRecap, setExpandedRecap] = useState<string | null>(null);
+  const [expandedStat, setExpandedStat] = useState<'high_risk' | 'low_momentum' | 'no_contact' | 'overdue' | null>(null);
   const [kpiForm, setKpiForm] = useState({ ...BLANK_KPI });
   const [showKpiPaste, setShowKpiPaste] = useState(false);
   const [pasteText, setPasteText] = useState('');
@@ -947,15 +948,24 @@ export default function WorkPerformance() {
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 14 }}>
               {[
-                ['High Risk Students', highRisk.length, '#dc2626'],
-                ['Low Momentum', lowMomentum.length, '#f59e0b'],
-                ['No Contact 14d+', noContact14d.length, '#0891b2'],
-                ['Overdue Call Prep', overdueCallPrep.length, '#7c3aed'],
-              ].map(([label, val, color]) => (
-                <section key={String(label)} className="panel" style={{ textAlign: 'center', padding: '10px 8px' }}>
+                ['High Risk Students', highRisk.length, '#dc2626', 'high_risk'],
+                ['Low Momentum', lowMomentum.length, '#f59e0b', 'low_momentum'],
+                ['No Contact 14d+', noContact14d.length, '#0891b2', 'no_contact'],
+                ['Overdue Call Prep', overdueCallPrep.length, '#7c3aed', 'overdue'],
+              ].map(([label, val, color, key]) => (
+                <button
+                  key={String(label)}
+                  className="panel"
+                  onClick={() => setExpandedStat(expandedStat === key ? null : key as any)}
+                  style={{
+                    textAlign: 'center', padding: '10px 8px', cursor: 'pointer',
+                    border: expandedStat === key ? `2px solid ${color}` : '1px solid transparent',
+                    background: expandedStat === key ? `${color}0f` : undefined
+                  }}
+                >
                   <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{label}</div>
                   <div style={{ fontSize: 24, fontWeight: 800, color: String(color) }}>{val}</div>
-                </section>
+                </button>
               ))}
             </div>
 
@@ -978,32 +988,45 @@ export default function WorkPerformance() {
               </ol>
             </section>
 
-            {highRisk.length > 0 && (
-              <section className="panel" style={{ overflowX: 'auto' }}>
-                <div className="panel-head"><h2>High Risk Students</h2><span className="readonly-pill">{highRisk.length}</span></div>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                      {['Name', 'Momentum', 'Last Contact', 'Missed Calls', 'Blocker'].map(h => <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted)' }}>{h}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {highRisk.map(s => {
-                      const daysSince = s.last_contact_date ? Math.round((now - new Date(s.last_contact_date).getTime()) / 86400000) : null;
-                      return (
-                        <tr key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td style={{ padding: '6px 8px', fontWeight: 700 }}>{s.display_name}</td>
-                          <td style={{ padding: '6px 8px' }}>{s.momentum || '—'}</td>
-                          <td style={{ padding: '6px 8px', color: daysSince !== null && daysSince > 14 ? 'var(--red)' : undefined, fontWeight: daysSince !== null && daysSince > 14 ? 700 : undefined }}>{daysSince !== null ? `${daysSince}d ago` : 'Never'}</td>
-                          <td style={{ padding: '6px 8px' }}>{s.missed_call_count ?? 0}</td>
-                          <td style={{ padding: '6px 8px', fontSize: 11, color: 'var(--muted)' }}>{s.known_blockers ? s.known_blockers.slice(0, 40) : '—'}</td>
+            {expandedStat && (() => {
+              const cohortMap: Record<string, { title: string; color: string; list: StudentRow[] }> = {
+                high_risk: { title: 'High Risk Students', color: '#dc2626', list: highRisk },
+                low_momentum: { title: 'Low Momentum', color: '#f59e0b', list: lowMomentum },
+                no_contact: { title: 'No Contact 14d+', color: '#0891b2', list: noContact14d },
+                overdue: { title: 'Overdue Call Prep', color: '#7c3aed', list: overdueCallPrep },
+              };
+              const { title, color, list } = cohortMap[expandedStat];
+              return (
+                <section className="panel" style={{ overflowX: 'auto', borderTop: `3px solid ${color}`, marginBottom: 14 }}>
+                  <div className="panel-head"><h2>{title}</h2><span className="readonly-pill">{list.length}</span></div>
+                  {list.length === 0 ? <div className="brief-item">No students currently in this group.</div> : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                          {['Name', 'Momentum', 'Last Contact', 'Missed Calls', 'Next Call', 'Blocker'].map(h => <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted)' }}>{h}</th>)}
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </section>
-            )}
+                      </thead>
+                      <tbody>
+                        {list.map(s => {
+                          const daysSince = s.last_contact_date ? Math.round((now - new Date(s.last_contact_date).getTime()) / 86400000) : null;
+                          const nextCallOverdue = s.next_call_at ? new Date(s.next_call_at).getTime() < now : false;
+                          return (
+                            <tr key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                              <td style={{ padding: '6px 8px', fontWeight: 700 }}>{s.display_name}</td>
+                              <td style={{ padding: '6px 8px' }}>{s.momentum || '—'}</td>
+                              <td style={{ padding: '6px 8px', color: daysSince !== null && daysSince > 14 ? 'var(--red)' : undefined, fontWeight: daysSince !== null && daysSince > 14 ? 700 : undefined }}>{daysSince !== null ? `${daysSince}d ago` : 'Never'}</td>
+                              <td style={{ padding: '6px 8px' }}>{s.missed_call_count ?? 0}</td>
+                              <td style={{ padding: '6px 8px', color: nextCallOverdue ? 'var(--red)' : undefined, fontWeight: nextCallOverdue ? 700 : undefined }}>{s.next_call_at ? new Date(s.next_call_at).toLocaleDateString() : '—'}</td>
+                              <td style={{ padding: '6px 8px', fontSize: 11, color: 'var(--muted)' }}>{s.known_blockers ? s.known_blockers.slice(0, 40) : '—'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </section>
+              );
+            })()}
           </div>
         );
       })()}
