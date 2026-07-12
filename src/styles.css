@@ -1,7 +1,7 @@
 :root {
-  --purple: #534AB7;
-  --purple-bg: #EEEDFE;
-  --purple-dark: #3C3489;
+  --purple: #4B5320;
+  --purple-bg: #E9EBDB;
+  --purple-dark: #363C17;
   --green: #0F6E56;
   --green-bg: #E1F5EE;
   --red: #A32D2D;
@@ -21,9 +21,9 @@
 }
 
 [data-theme="dark"] {
-  --purple: #7B72D4;
-  --purple-bg: #1e1a3a;
-  --purple-dark: #a89ee8;
+  --purple: #8FA24A;
+  --purple-bg: #1E220E;
+  --purple-dark: #B7C97D;
   --green: #2db891;
   --green-bg: #0d2620;
   --red: #e05c5c;
