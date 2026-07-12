@@ -1848,7 +1848,7 @@ function Stats({ items }: { items: [string, string, string?, (() => void)?, bool
       key={label}
       onClick={onClick}
       type="button"
-      style={{ cursor: 'pointer', textAlign: 'left', border: active ? '2px solid #6d28d9' : '1px solid transparent', background: active ? 'rgba(109,40,217,0.06)' : undefined }}
+      style={{ cursor: 'pointer', textAlign: 'left', border: active ? '2px solid var(--purple)' : '1px solid transparent', background: active ? 'var(--purple-bg)' : undefined }}
     >
       <div className="stat-label">{label}</div><div className="stat-val">{value}</div>{sub && <div className="stat-sub">{sub}</div>}
     </button>
@@ -4472,12 +4472,12 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
       ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived).length), undefined, () => { setShowArchived(false); setStatFilter('ghost'); }, statFilter === 'ghost']
     ]} />
     {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input placeholder="Course" value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email (for outreach drafts)" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
-    <div className="students-crm-layout" style={{ display: 'flex', gap: 16, alignItems: 'flex-start', width: '100%' }}>
-      {!listCollapsed && <section className="panel student-scroll-list" style={{ flexShrink: 0, width: 360 }}><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div><div className="student-search-row"><Search size={15} /><input type="text" placeholder="Search by name or ID" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search students" /></div>{visibleStudents.length === 0 && <div className="brief-item">{search ? 'No students match that search.' : 'No students in this view yet.'}</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} style={student.on_term_break ? { opacity: 0.6, background: '#f5f5f8' } : {}} onClick={() => { setSelectedId(student.id); setListCollapsed(true); }}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}{student.on_term_break ? ' · ☕ Break' : ''}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>}
-      {selected ? <section className="student-detail-pane" style={{ flex: 1, minWidth: 0, width: '100%', ...(selected.on_term_break ? { filter: 'grayscale(0.6)', opacity: 0.75, background: '#f0f0f5' } : {}) }}>
+    <div className="students-crm-layout" style={listCollapsed ? { gridTemplateColumns: '1fr' } : undefined}>
+      {!listCollapsed && <section className="panel student-scroll-list"><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div><div className="student-search-row"><Search size={15} /><input type="text" placeholder="Search by name or ID" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search students" /></div>{visibleStudents.length === 0 && <div className="brief-item">{search ? 'No students match that search.' : 'No students in this view yet.'}</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} style={student.on_term_break ? { opacity: 0.6, background: 'var(--surface-3)' } : {}} onClick={() => { setSelectedId(student.id); setListCollapsed(true); }}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}{student.on_term_break ? ' · ☕ Break' : ''}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>}
+      {selected ? <section className="student-detail-pane" style={selected.on_term_break ? { filter: 'grayscale(0.6)', opacity: 0.75, background: 'var(--surface-1)' } : undefined}>
         {listCollapsed && <button className="btn ghost" style={{ marginBottom: 10 }} onClick={() => setListCollapsed(false)}>← Back to student list</button>}
         {/* TOP ZONE: header + health + quick facts + next call prep — always visible without scrolling */}
-        <section className="panel student-top-zone" style={{ width: '100%' }}>
+        <section className="panel student-top-zone">
           {/* student-top-zone header */}
           <div className="panel-head">
             <div>
@@ -4529,12 +4529,12 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
           </div>
           {activeWarnings.length > 0 && <FerpaWarning warnings={activeWarnings} />}
           <StudentHealthPanel student={selected} touchpoints={touchpoints} />
-          <div className="quick-facts" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            <div style={{ padding: '3px 8px', fontSize: 11 }}><span style={{ fontSize: 9, textTransform: 'uppercase', opacity: 0.7 }}>Student ID</span><br /><strong style={{ fontSize: 12 }}>{selected.student_id || '—'}</strong></div>
-            <div style={{ padding: '3px 8px', fontSize: 11 }}><span style={{ fontSize: 9, textTransform: 'uppercase', opacity: 0.7 }}>Course</span><br /><strong style={{ fontSize: 12 }}>{selected.course || '—'}</strong></div>
-            <div style={{ padding: '3px 8px', fontSize: 11 }}><span style={{ fontSize: 9, textTransform: 'uppercase', opacity: 0.7 }}>Course end</span><br /><strong style={{ fontSize: 12 }}>{selected.course_end_date || '—'}</strong></div>
-            <div style={{ padding: '3px 8px', fontSize: 11 }}><span style={{ fontSize: 9, textTransform: 'uppercase', opacity: 0.7 }}>Next call</span><br /><strong style={{ fontSize: 12 }}>{selected.next_call_at ? new Date(selected.next_call_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '—'}</strong></div>
-            <div className="quick-facts-goal" style={{ padding: '3px 8px', fontSize: 11, flex: 1, minWidth: 160 }}><span style={{ fontSize: 9, textTransform: 'uppercase', opacity: 0.7 }}>Goal</span><br /><strong style={{ fontSize: 12 }}>{selected.goal || 'No goal saved yet.'}</strong></div>
+          <div className="quick-facts">
+            <div><span>Student ID</span><strong>{selected.student_id || '—'}</strong></div>
+            <div><span>Course</span><strong>{selected.course || '—'}</strong></div>
+            <div><span>Course end</span><strong>{selected.course_end_date || '—'}</strong></div>
+            <div><span>Next call</span><strong>{selected.next_call_at ? new Date(selected.next_call_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '—'}</strong></div>
+            <div className="quick-facts-goal"><span>Goal</span><strong>{selected.goal || 'No goal saved yet.'}</strong></div>
           </div>
           <div className="next-call-compact">
             <div className="next-call-compact-head"><FileText size={15} /> <strong>Call Prep</strong></div>
@@ -4574,8 +4574,8 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
         {editingProfile && <section className="panel" id="student-edit-form"><h2>Edit profile</h2><div className="form-grid"><input value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} /><div className="form-actions"><button className="btn primary" onClick={saveProfileEdit}><Save size={15} /> Save Profile</button></div></section>}
 
         {/* TWO-COLUMN ZONE: scrollable history on left, sticky touchpoint form on right */}
-        <div className="student-work-area" style={{ display: 'flex', gap: 16, alignItems: 'flex-start', width: '100%' }}>
-          <div className="student-work-main" style={{ flex: 1, minWidth: 0 }}>
+        <div className="student-work-area">
+          <div className="student-work-main">
             <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{selected.last_contact_date || '—'}</p></div><div><strong>Next appointment</strong><p>{selected.next_appointment_date || '—'}</p></div><div><strong>Graduation goal</strong><p>{selected.graduation_goal_date || '—'}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Last academic activity</strong><p>{selected.last_academic_activity_date || '—'}</p></div><div><strong>Term #</strong><p>{selected.term_number ?? '—'}{selected.graduated ? ' · 🎓 Graduated' : ''}</p></div><div><strong>Term start</strong><p>{selected.term_start_date || '—'}</p></div><div><strong>Term end</strong><p>{selected.term_end_date || '—'}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
             <section className="panel">
               <div className="panel-head">
@@ -4626,7 +4626,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
                           <button className="btn ghost tiny" title="Delete" onClick={() => confirmDeleteTouchpoint(touchpoint.id)}><Trash2 size={14} /></button>
                         </div>
                       </div>
-                      <p style={touchpoint.touchpoint_type === 'Email thread' ? { whiteSpace: 'pre-wrap', background: '#f7f7fb', padding: 10, borderRadius: 6 } : undefined}>{touchpoint.note}</p>
+                      <p style={touchpoint.touchpoint_type === 'Email thread' ? { whiteSpace: 'pre-wrap', background: 'var(--surface-1)', padding: 10, borderRadius: 6 } : undefined}>{touchpoint.note}</p>
                       <details>
                         <summary>Next-call prep and follow-up drafts</summary>
                         <div className="brief-item"><strong>Next call:</strong> {touchpoint.next_call_prep}</div>
@@ -4689,7 +4689,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
             </section>
             <section className="panel"><h2>Admin Notes</h2><textarea value={selected.admin_notes || ''} onChange={(e) => updateStudent(selected.id, { admin_notes: e.target.value })} placeholder="Private notes for Kaylee. Keep FERPA-safe." /></section>
           </div>
-          <aside className="student-work-side" style={{ flexShrink: 0, width: 380 }}>
+          <aside className="student-work-side">
             <section className="panel">
               <h2>Add Touchpoint</h2>
               <div className="form-grid">
@@ -4749,13 +4749,6 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
 }
 
 
-function healthColor(score: number) {
-  if (score >= 80) return '#16a34a';
-  if (score >= 60) return '#d97706';
-  if (score >= 40) return '#ea580c';
-  return '#dc2626';
-}
-
 function StudentHealthPanel({ student, touchpoints }: { student: Student; touchpoints: Touchpoint[] }) {
   const health = studentHealth(student, touchpoints);
   const signals = studentStatusSignals(student, touchpoints);
@@ -4768,28 +4761,13 @@ function StudentHealthPanel({ student, touchpoints }: { student: Student; touchp
     { label: 'Goal progress', value: health.goalProgress },
   ];
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'stretch', gap: 6, padding: '6px 0' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '4px 12px', borderRadius: 8, minWidth: 84, background: `${healthColor(health.overall)}1a`, color: healthColor(health.overall) }}>
-        <span style={{ fontSize: 9, opacity: 0.85, textTransform: 'uppercase', letterSpacing: '0.03em' }}>Health</span>
-        <strong style={{ fontSize: 20, lineHeight: 1.15 }}>{health.overall}</strong>
-      </div>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', margin: '14px 0' }}>
+      <span className={`health-pill ${healthClass(health.overall)}`} style={{ fontSize: 14, fontWeight: 700 }}>Health {health.overall}</span>
       {metrics.map((m) => (
-        <div key={m.label} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '4px 10px', borderRadius: 6, minWidth: 64, background: `${healthColor(m.value)}14`, color: healthColor(m.value) }}>
-          <span style={{ fontSize: 9, opacity: 0.85, textTransform: 'uppercase', letterSpacing: '0.02em' }}>{m.label}</span>
-          <strong style={{ fontSize: 14, lineHeight: 1.2 }}>{m.value}</strong>
-          <div style={{ height: 3, borderRadius: 2, background: 'rgba(0,0,0,0.08)', marginTop: 2 }}>
-            <div style={{ height: '100%', width: `${m.value}%`, borderRadius: 2, background: healthColor(m.value) }} />
-          </div>
-        </div>
+        <span key={m.label} className={`health-pill ${healthClass(m.value)}`}>{m.label} {m.value}</span>
       ))}
-      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '4px 10px', fontSize: 11, minWidth: 100, color: 'var(--muted)' }}>
-        <span style={{ fontSize: 9, opacity: 0.8, textTransform: 'uppercase' }}>Contact gap</span>
-        <strong style={{ color: 'var(--text)', fontSize: 12 }}>{contactGapDays >= 999 ? 'No contact yet' : `${contactGapDays}d ago`}</strong>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '4px 10px', fontSize: 11, minWidth: 100, color: 'var(--muted)' }}>
-        <span style={{ fontSize: 9, opacity: 0.8, textTransform: 'uppercase' }}>Graduation</span>
-        <strong style={{ color: 'var(--text)', fontSize: 12 }}>{gradDays === null ? 'No goal date' : gradDays >= 0 ? `${gradDays}d out` : `${Math.abs(gradDays)}d past`}</strong>
-      </div>
+      <span className="health-pill">Contact gap: {contactGapDays >= 999 ? '—' : `${contactGapDays}d`}</span>
+      <span className="health-pill">Grad: {gradDays === null ? '—' : gradDays >= 0 ? `${gradDays}d out` : `${Math.abs(gradDays)}d past`}</span>
     </div>
   );
 }
