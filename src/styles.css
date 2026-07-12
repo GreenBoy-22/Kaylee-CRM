@@ -572,13 +572,12 @@ td small { display: block; margin-top: 2px; color: var(--muted); }
   .dashboard-grid-3 { grid-template-columns: 1fr; }
 }
 
-/* ── Students: keep scroll on the list panel only ── */
-.student-scroll-list {
-  max-height: calc(100vh - 240px);
-  overflow-y: auto;
-  position: sticky;
-  top: 0;
-}
+/* ── Students: keep scroll on the list panel only ──
+   (position/overflow/max-height for this are already set at the top of
+   this file, scoped correctly per breakpoint — do not redeclare here
+   unscoped, it previously overrode the mobile position:static fix below
+   and caused the list to render as a stuck-in-place scrolling overlay
+   on top of the detail pane instead of scrolling normally.) */
 
 /* ═══════════════════════════════════════════════════════════════
    PWA + MOBILE RESPONSIVE LAYOUT
@@ -780,7 +779,9 @@ td small { display: block; margin-top: 2px; color: var(--muted); }
     grid-template-columns: 1fr !important;
   }
   .student-scroll-list {
+    position: static !important;
     max-height: 260px !important;
+    overflow-y: auto !important;
   }
 
   /* Health panel: single column */
