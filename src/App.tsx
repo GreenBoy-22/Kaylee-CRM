@@ -1262,7 +1262,7 @@ Kaylee`;
   }
 
   function selectCohort(cohort: string): Student[] {
-    const active = students.filter((s) => !s.archived);
+    const active = students.filter((s) => !s.archived && !s.on_term_break);
     const today = new Date();
     if (cohort === 'high_risk') return active.filter((s) => String(s.risk).toLowerCase().includes('high'));
     if (cohort === 'ghost') return active.filter((s) => studentStatusSignals(s, touchpoints).isGhost);
@@ -2000,7 +2000,7 @@ function healthClass(score: number) {
 function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, householdUsers, role, setPage }: { mode: Mode; inventory: InventoryItem[]; students: Student[]; touchpoints: Touchpoint[]; tasks: TaskItem[]; choreTasks: ChoreTask[]; householdUsers: HouseholdUser[]; role: Role; setPage: (page: Page) => void }) {
   const expiring = inventory.filter((item) => item.expires).length;
   const pending = tasks.filter((task) => task.status === 'pending_approval').length;
-  const activeStudents = students.filter((student) => !student.archived);
+  const activeStudents = students.filter((student) => !student.archived && !student.on_term_break);
   const highRiskStudents = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).isHighRisk);
   const ghostRiskStudents = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).isGhost);
   const supportStudents = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).isSupport);
@@ -2092,7 +2092,7 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, 
       </div>
       <div className="grid two">
         <section className="panel"><h2>Risk Buckets</h2><div className="brief-item urgent"><strong>High risk:</strong> {highRiskStudents.map((s) => s.display_name).join(', ') || 'None'}</div><div className="brief-item"><strong>Ghost risk:</strong> {ghostRiskStudents.map((s) => s.display_name).join(', ') || 'None'}</div><div className="brief-item good"><strong>Support:</strong> {supportStudents.map((s) => s.display_name).join(', ') || 'None'}</div></section>
-        <section className="panel"><h2>Mentor Metrics</h2><div className="brief-item"><strong>Active students:</strong> {activeStudents.length}</div><div className="brief-item"><strong>Touchpoints logged:</strong> {touchpoints.length}</div><div className="brief-item"><strong>Salesforce copy pending:</strong> {students.filter((s) => !s.copied && !s.archived).length}</div><div className="brief-item"><strong>FERPA mode:</strong> First name/nickname only · clipboard only</div></section>
+        <section className="panel"><h2>Mentor Metrics</h2><div className="brief-item"><strong>Active students:</strong> {activeStudents.length}</div><div className="brief-item"><strong>Touchpoints logged:</strong> {touchpoints.length}</div><div className="brief-item"><strong>Salesforce copy pending:</strong> {activeStudents.filter((s) => !s.copied).length}</div><div className="brief-item"><strong>FERPA mode:</strong> First name/nickname only · clipboard only</div></section>
       </div>
     </>;
   }
@@ -4280,9 +4280,9 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
   const baseList = showArchived ? archivedStudents : activeStudents;
   const filteredByBreak = termBreakOnly ? baseList.filter((s) => s.on_term_break) : baseList;
   const filteredByStat = statFilter === 'high_risk'
-    ? filteredByBreak.filter((s) => s.risk === 'High Risk')
+    ? filteredByBreak.filter((s) => s.risk === 'High Risk' && !s.on_term_break)
     : statFilter === 'ghost'
-    ? filteredByBreak.filter((s) => s.status === 'Ghost')
+    ? filteredByBreak.filter((s) => s.status === 'Ghost' && !s.on_term_break)
     : filteredByBreak;
   const visibleStudents = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -4516,8 +4516,8 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
     <Stats items={[
       ["Active", String(activeStudents.length), undefined, () => { setShowArchived(false); setStatFilter(null); }, !showArchived && statFilter === null],
       ["Archived", String(archivedStudents.length), undefined, () => { setShowArchived(true); setStatFilter(null); }, showArchived],
-      ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived).length), undefined, () => { setShowArchived(false); setStatFilter('high_risk'); }, statFilter === 'high_risk'],
-      ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived).length), undefined, () => { setShowArchived(false); setStatFilter('ghost'); }, statFilter === 'ghost'],
+      ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived && !s.on_term_break).length), undefined, () => { setShowArchived(false); setStatFilter('high_risk'); }, statFilter === 'high_risk'],
+      ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived && !s.on_term_break).length), undefined, () => { setShowArchived(false); setStatFilter('ghost'); }, statFilter === 'ghost'],
       ["Term Break", String(students.filter((s) => s.on_term_break && !s.archived).length), undefined, () => { setShowArchived(false); setStatFilter(null); setTermBreakOnly(!termBreakOnly); }, termBreakOnly]
     ]} />
     {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input placeholder="Course" value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email (for outreach drafts)" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
