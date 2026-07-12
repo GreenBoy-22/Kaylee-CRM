@@ -988,12 +988,14 @@ Kaylee`;
     const records: Record<string, string>[] = rows.slice(1).map((cells) => Object.fromEntries(headers.map((header, index) => [header, cells[index] || ''])));
 
     // Accept either "Name" or "DisplayName" as the student name column.
-    // Also accept several plausible aliases for the WGU student ID column.
+    // Also accept several plausible aliases for the WGU student ID column,
+    // and for the current-term-number column (WGU exports use inconsistent names).
     const cleaned = records
       .map((row): Record<string, string> => ({
         ...row,
         displayname: row.displayname || row.name || '',
-        studentid: row.studentid || row.wguid || row.studentidnumber || ''
+        studentid: row.studentid || row.wguid || row.studentidnumber || '',
+        contactterm: row.contactterm || row.term || row.termnumber || row.currentterm || row.termno || row.termnum || ''
       }))
       .filter((row) => row.displayname)
       .map((row) => {
@@ -4623,7 +4625,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
         {/* TWO-COLUMN ZONE: scrollable history on left, sticky touchpoint form on right */}
         <div className="student-work-area">
           <div className="student-work-main">
-            <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{selected.last_contact_date || '—'}</p></div><div><strong>Next appointment</strong><p>{selected.next_appointment_date || '—'}</p></div><div><strong>Graduation goal</strong><p>{selected.graduation_goal_date || '—'}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Last academic activity</strong><p>{selected.last_academic_activity_date || '—'}</p></div><div><strong>Term #</strong><p>{selected.term_number ?? '—'}{selected.graduated ? ' · 🎓 Graduated' : ''}</p></div><div><strong>Term start</strong><p>{selected.term_start_date || '—'}</p></div><div><strong>Term end</strong><p>{selected.term_end_date || '—'}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
+            <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{selected.last_contact_date || '—'}</p></div><div><strong>Next appointment</strong><p>{selected.next_appointment_date || '—'}</p></div><div><strong>Graduation goal</strong><p>{selected.graduation_goal_date || '—'}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Last academic activity</strong><p>{selected.last_academic_activity_date || '—'}</p></div><div><strong>Term #</strong><p><input type="number" value={selected.contact_term ?? ''} onChange={(e) => updateStudent(selected.id, { contact_term: e.target.value ? Number(e.target.value) : null } as Partial<Student>)} style={{ width: 60, padding: '2px 6px' }} />{selected.graduated ? ' · 🎓 Graduated' : ''}</p></div><div><strong>Term start</strong><p>{selected.term_start_date || '—'}</p></div><div><strong>Term end</strong><p>{selected.term_end_date || '—'}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
             <section className="panel">
               <div className="panel-head">
                 <h2>History Log</h2>
