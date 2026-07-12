@@ -149,7 +149,7 @@ const BLANK_NOTE = { note_date: '', subject: '', from_person: '', summary: '', f
 const BLANK_GOAL = { title: '', description: '', metric_name: '', target_value: '', current_value: '', unit: '%', fiscal_year: '', due_date: '', status: 'on_track' as Goal['status'] };
 
 const STATUS_COLORS: Record<string, string> = {
-  on_track: '#16a34a', at_risk: '#f59e0b', achieved: '#7c3aed', missed: '#dc2626',
+  on_track: '#16a34a', at_risk: '#f59e0b', achieved: '#4B5320', missed: '#dc2626',
   open: '#f59e0b', addressed: '#16a34a', ongoing: '#0891b2',
 };
 
@@ -170,7 +170,7 @@ const PROGRAM_TARGETS = [
 // students) rather than generic advice.
 const METRIC_INFO: Record<string, { color: string; definition: string; tip: string }> = {
   'OTP %': {
-    color: '#7c3aed',
+    color: '#4B5320',
     definition: 'Term On-Time Progress: % of students ending a term who met the pace needed to stay on track for on-time graduation.',
     tip: 'Run Momentum Indicator reviews mid-term (not just at term-end) so a slipping student gets a pacing conversation before it shows up as a miss. Prioritize your Low/Med-Low momentum students first — see Weak Areas tab.',
   },
@@ -732,7 +732,7 @@ export default function WorkPerformance() {
                       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Outcome</div>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <button className="btn tiny" style={draft.outcome === 'continued' ? { background: '#16a34a', color: '#fff' } : {}} onClick={() => setEndsDraftField(st.id, { outcome: 'continued' })}>Continued</button>
-                        <button className="btn tiny" style={draft.outcome === 'graduated' ? { background: '#7c3aed', color: '#fff' } : {}} onClick={() => setEndsDraftField(st.id, { outcome: 'graduated' })}>🎓 Graduated</button>
+                        <button className="btn tiny" style={draft.outcome === 'graduated' ? { background: '#4B5320', color: '#fff' } : {}} onClick={() => setEndsDraftField(st.id, { outcome: 'graduated' })}>🎓 Graduated</button>
                         <button className="btn tiny" style={draft.outcome === 'dropped' ? { background: '#dc2626', color: '#fff' } : {}} onClick={() => setEndsDraftField(st.id, { outcome: 'dropped' })}>Dropped</button>
                         <button className="btn tiny" style={draft.outcome === 'deferred' ? { background: '#666', color: '#fff' } : {}} onClick={() => setEndsDraftField(st.id, { outcome: 'deferred' })}>☕ Deferred</button>
                       </div>
@@ -833,7 +833,7 @@ export default function WorkPerformance() {
 
         const overallScore = Math.round(commScore * 0.65 + kpiScore * 0.35);
         const rating = overallScore >= 78 ? 'Exceeds' : overallScore >= 55 ? 'Achieves' : 'Needs Improvement';
-        const ratingColor = rating === 'Exceeds' ? '#7c3aed' : rating === 'Achieves' ? '#16a34a' : '#dc2626';
+        const ratingColor = rating === 'Exceeds' ? '#4B5320' : rating === 'Achieves' ? '#16a34a' : '#dc2626';
 
         // Plain-language reasons behind the score, built from the exact
         // same numbers driving the calculation above — nothing here is
@@ -918,7 +918,7 @@ export default function WorkPerformance() {
                     <span style={{ fontWeight: 700 }}>KPI Outcomes (35% weight)</span><span>{kpiScore}/100</span>
                   </div>
                   <div style={{ height: 8, borderRadius: 999, background: 'var(--surface-1)', overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${kpiScore}%`, background: '#7c3aed' }} />
+                    <div style={{ height: '100%', width: `${kpiScore}%`, background: '#4B5320' }} />
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>OTP vs target, pacing, drop rate, and retention from your latest logged month{!latest ? ' (no month logged yet — using neutral defaults)' : ''}.</div>
                 </div>
@@ -951,7 +951,7 @@ export default function WorkPerformance() {
                 ['High Risk Students', highRisk.length, '#dc2626', 'high_risk'],
                 ['Low Momentum', lowMomentum.length, '#f59e0b', 'low_momentum'],
                 ['No Contact 14d+', noContact14d.length, '#0891b2', 'no_contact'],
-                ['Overdue Call Prep', overdueCallPrep.length, '#7c3aed', 'overdue'],
+                ['Overdue Call Prep', overdueCallPrep.length, '#4B5320', 'overdue'],
               ].map(([label, val, color, key]) => (
                 <button
                   key={String(label)}
@@ -993,7 +993,7 @@ export default function WorkPerformance() {
                 high_risk: { title: 'High Risk Students', color: '#dc2626', list: highRisk },
                 low_momentum: { title: 'Low Momentum', color: '#f59e0b', list: lowMomentum },
                 no_contact: { title: 'No Contact 14d+', color: '#0891b2', list: noContact14d },
-                overdue: { title: 'Overdue Call Prep', color: '#7c3aed', list: overdueCallPrep },
+                overdue: { title: 'Overdue Call Prep', color: '#4B5320', list: overdueCallPrep },
               };
               const { title, color, list } = cohortMap[expandedStat];
               return (
@@ -1151,7 +1151,7 @@ export default function WorkPerformance() {
                 <section className="panel" style={{ marginBottom: 14 }}>
                   <div className="panel-head"><h2>Quality Metrics Trend</h2></div>
                   <TrendChart data={kpis} fields={[
-                    { key: 'otp_pct', label: 'OTP %', color: '#7c3aed' },
+                    { key: 'otp_pct', label: 'OTP %', color: '#4B5320' },
                     { key: 'pacing_2m_pct', label: 'Pacing 2M %', color: '#0891b2' },
                     { key: 'pacing_4m_pct', label: 'Pacing 4M %', color: '#16a34a' },
                     { key: 'drop_rate_pct', label: 'Drop Rate %', color: '#dc2626' },
@@ -1358,7 +1358,7 @@ export default function WorkPerformance() {
           {reviews.map(r => {
             const isOpen = expandedReview === r.id;
             return (
-              <section key={r.id} className="panel" style={{ marginBottom: 10, borderLeft: `3px solid ${r.review_type === 'annual_comp_review' ? '#16a34a' : '#7c3aed'}` }}>
+              <section key={r.id} className="panel" style={{ marginBottom: 10, borderLeft: `3px solid ${r.review_type === 'annual_comp_review' ? '#16a34a' : '#4B5320'}` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', cursor: 'pointer' }} onClick={() => setExpandedReview(isOpen ? null : r.id)}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 15 }}>{r.title}</div>
