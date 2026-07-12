@@ -75,6 +75,16 @@ interface KpiMonth {
   avg_call_time_min?: number | null;
   team_avg_calls_over_45s?: number | null;
   team_avg_call_time_min?: number | null;
+  otp_met?: number | null;
+  otp_total?: number | null;
+  rolling_6m_otp_met?: number | null;
+  rolling_6m_otp_total?: number | null;
+  t1_t2_met?: number | null;
+  t1_t2_total?: number | null;
+  t2_t3_met?: number | null;
+  t2_t3_total?: number | null;
+  t3_plus_met?: number | null;
+  t3_plus_total?: number | null;
 }
 
 interface Review {
@@ -133,7 +143,7 @@ interface StudentRow {
   graduated?: boolean;
 }
 
-const BLANK_KPI = { month_date: '', enrollment_total: '', drops: '', graduates: '', otp_pct: '', grad_rate_4yr_pct: '', drop_rate_pct: '', pacing_2m_pct: '', pacing_4m_pct: '', vsat_pct: '', notes: '', t1_t2_ret_pct: '', t2_t3_ret_pct: '', t3_plus_ret_pct: '' };
+const BLANK_KPI = { month_date: '', enrollment_total: '', drops: '', graduates: '', otp_pct: '', grad_rate_4yr_pct: '', drop_rate_pct: '', pacing_2m_pct: '', pacing_4m_pct: '', vsat_pct: '', notes: '', t1_t2_ret_pct: '', t2_t3_ret_pct: '', t3_plus_ret_pct: '', otp_met: '', otp_total: '', rolling_6m_otp_met: '', rolling_6m_otp_total: '', t1_t2_met: '', t1_t2_total: '', t2_t3_met: '', t2_t3_total: '', t3_plus_met: '', t3_plus_total: '' };
 const BLANK_REVIEW = { review_type: 'midyear_checkin' as Review['review_type'], title: '', review_date: '', period_start: '', period_end: '', performance_rating: '', base_pay_before: '', base_pay_after: '', pay_increase_pct: '', manager_name: '', full_text: '' };
 const BLANK_NOTE = { note_date: '', subject: '', from_person: '', summary: '', full_text: '', status: 'open' as CoachingNote['status'] };
 const BLANK_GOAL = { title: '', description: '', metric_name: '', target_value: '', current_value: '', unit: '%', fiscal_year: '', due_date: '', status: 'on_track' as Goal['status'] };
@@ -463,6 +473,16 @@ export default function WorkPerformance() {
       t1_t2_ret_pct: n(kpiForm.t1_t2_ret_pct),
       t2_t3_ret_pct: n(kpiForm.t2_t3_ret_pct),
       t3_plus_ret_pct: n(kpiForm.t3_plus_ret_pct),
+      otp_met: n(kpiForm.otp_met),
+      otp_total: n(kpiForm.otp_total),
+      rolling_6m_otp_met: n(kpiForm.rolling_6m_otp_met),
+      rolling_6m_otp_total: n(kpiForm.rolling_6m_otp_total),
+      t1_t2_met: n(kpiForm.t1_t2_met),
+      t1_t2_total: n(kpiForm.t1_t2_total),
+      t2_t3_met: n(kpiForm.t2_t3_met),
+      t2_t3_total: n(kpiForm.t2_t3_total),
+      t3_plus_met: n(kpiForm.t3_plus_met),
+      t3_plus_total: n(kpiForm.t3_plus_total),
       notes: kpiForm.notes || null,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id,month_date' });
@@ -1031,14 +1051,19 @@ export default function WorkPerformance() {
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Drops<input type="number" value={kpiForm.drops} onChange={e => setKpiForm(p => ({ ...p, drops: e.target.value }))} /></label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Graduates<input type="number" value={kpiForm.graduates} onChange={e => setKpiForm(p => ({ ...p, graduates: e.target.value }))} /></label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>OTP %<input type="number" step="0.1" value={kpiForm.otp_pct} onChange={e => setKpiForm(p => ({ ...p, otp_pct: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>OTP met / total students<span style={{ display: 'flex', gap: 6 }}><input type="number" placeholder="met" value={kpiForm.otp_met} onChange={e => setKpiForm(p => ({ ...p, otp_met: e.target.value }))} /><input type="number" placeholder="total" value={kpiForm.otp_total} onChange={e => setKpiForm(p => ({ ...p, otp_total: e.target.value }))} /></span></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>6-Month Rolling OTP met / total<span style={{ display: 'flex', gap: 6 }}><input type="number" placeholder="met" value={kpiForm.rolling_6m_otp_met} onChange={e => setKpiForm(p => ({ ...p, rolling_6m_otp_met: e.target.value }))} /><input type="number" placeholder="total" value={kpiForm.rolling_6m_otp_total} onChange={e => setKpiForm(p => ({ ...p, rolling_6m_otp_total: e.target.value }))} /></span></label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Grad Rate 4YR %<input type="number" step="0.1" value={kpiForm.grad_rate_4yr_pct} onChange={e => setKpiForm(p => ({ ...p, grad_rate_4yr_pct: e.target.value }))} /></label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Drop Rate %<input type="number" step="0.1" value={kpiForm.drop_rate_pct} onChange={e => setKpiForm(p => ({ ...p, drop_rate_pct: e.target.value }))} /></label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Pacing 2M %<input type="number" step="0.1" value={kpiForm.pacing_2m_pct} onChange={e => setKpiForm(p => ({ ...p, pacing_2m_pct: e.target.value }))} /></label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Pacing 4M %<input type="number" step="0.1" value={kpiForm.pacing_4m_pct} onChange={e => setKpiForm(p => ({ ...p, pacing_4m_pct: e.target.value }))} /></label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>VSAT %<input type="number" step="0.1" value={kpiForm.vsat_pct} onChange={e => setKpiForm(p => ({ ...p, vsat_pct: e.target.value }))} /></label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>T1→T2 Retention %<input type="number" step="0.1" value={kpiForm.t1_t2_ret_pct} onChange={e => setKpiForm(p => ({ ...p, t1_t2_ret_pct: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>T1→T2 met / total students<span style={{ display: 'flex', gap: 6 }}><input type="number" placeholder="met" value={kpiForm.t1_t2_met} onChange={e => setKpiForm(p => ({ ...p, t1_t2_met: e.target.value }))} /><input type="number" placeholder="total" value={kpiForm.t1_t2_total} onChange={e => setKpiForm(p => ({ ...p, t1_t2_total: e.target.value }))} /></span></label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>T2→T3 Retention %<input type="number" step="0.1" value={kpiForm.t2_t3_ret_pct} onChange={e => setKpiForm(p => ({ ...p, t2_t3_ret_pct: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>T2→T3 met / total students<span style={{ display: 'flex', gap: 6 }}><input type="number" placeholder="met" value={kpiForm.t2_t3_met} onChange={e => setKpiForm(p => ({ ...p, t2_t3_met: e.target.value }))} /><input type="number" placeholder="total" value={kpiForm.t2_t3_total} onChange={e => setKpiForm(p => ({ ...p, t2_t3_total: e.target.value }))} /></span></label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>T3+ Retention %<input type="number" step="0.1" value={kpiForm.t3_plus_ret_pct} onChange={e => setKpiForm(p => ({ ...p, t3_plus_ret_pct: e.target.value }))} /></label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>T3+ met / total students<span style={{ display: 'flex', gap: 6 }}><input type="number" placeholder="met" value={kpiForm.t3_plus_met} onChange={e => setKpiForm(p => ({ ...p, t3_plus_met: e.target.value }))} /><input type="number" placeholder="total" value={kpiForm.t3_plus_total} onChange={e => setKpiForm(p => ({ ...p, t3_plus_total: e.target.value }))} /></span></label>
               </div>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>Notes<textarea value={kpiForm.notes} onChange={e => setKpiForm(p => ({ ...p, notes: e.target.value }))} style={{ minHeight: 50 }} /></label>
               <button className="btn primary" onClick={saveKpi} disabled={!kpiForm.month_date} style={{ marginTop: 12 }}>Save Month</button>
@@ -1114,34 +1139,40 @@ export default function WorkPerformance() {
                 <section className="panel" style={{ overflowX: 'auto', marginBottom: 14 }}>
                   <div className="panel-head"><h2>Monthly Detail</h2></div>
                   <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
-                    <span style={{ background: '#dcfce7', color: '#15803d', fontWeight: 700, padding: '1px 6px', borderRadius: 4 }}>Green</span> = better than your period average · <span style={{ background: '#fee2e2', color: '#b91c1c', fontWeight: 700, padding: '1px 6px', borderRadius: 4 }}>Red</span> = worse than your period average
+                    <span style={{ background: '#dcfce7', color: '#15803d', fontWeight: 700, padding: '1px 6px', borderRadius: 4 }}>Green</span> = better than your period average · <span style={{ background: '#fee2e2', color: '#b91c1c', fontWeight: 700, padding: '1px 6px', borderRadius: 4 }}>Red</span> = worse than your period average · small gray numbers under OTP/retention % show the actual student count behind them
                   </p>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, border: '1px solid var(--border)' }}>
                     <thead>
                       <tr style={{ borderBottom: '2px solid var(--border)' }}>
                         {['Month', 'Enroll', 'Drops', 'Grads', 'OTP%', 'Drop%', 'Pace2M%', 'Pace4M%', 'VSAT%', 'T1→T2%', 'T2→T3%', 'T3+%', ''].map(h => (
-                          <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted)' }}>{h}</th>
+                          <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted)', border: '1px solid var(--border)' }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {[...kpis].reverse().map(k => (
+                      {[...kpis].reverse().map(k => {
+                        const countSub = (met?: number | null, total?: number | null) =>
+                          (met != null && total != null) ? <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>({met}/{total})</div> : null;
+                        const countTitle = (label: string, met?: number | null, total?: number | null) =>
+                          (met != null && total != null) ? `${label}: ${met} of ${total} students` : undefined;
+                        return (
                         <tr key={k.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td style={{ padding: '6px 8px', fontWeight: 700 }}>{fmtMonth(k.month_date)}</td>
-                          <td style={{ padding: '6px 8px' }}>{k.enrollment_total ?? '—'}</td>
-                          <td style={{ padding: '6px 8px' }}>{k.drops ?? '—'}</td>
-                          <td style={{ padding: '6px 8px' }}>{k.graduates ?? '—'}</td>
-                          <td style={{ padding: '6px 8px', ...cellStyle(k.otp_pct, avgOtp, true) }}>{k.otp_pct ?? '—'}</td>
-                          <td style={{ padding: '6px 8px', ...cellStyle(k.drop_rate_pct, avgDrop, false) }}>{k.drop_rate_pct ?? '—'}</td>
-                          <td style={{ padding: '6px 8px', ...cellStyle(k.pacing_2m_pct, avg2m, true) }}>{k.pacing_2m_pct ?? '—'}</td>
-                          <td style={{ padding: '6px 8px', ...cellStyle(k.pacing_4m_pct, avg4m, true) }}>{k.pacing_4m_pct ?? '—'}</td>
-                          <td style={{ padding: '6px 8px', ...cellStyle(k.vsat_pct, avgVsat, true) }}>{k.vsat_pct ?? '—'}</td>
-                          <td style={{ padding: '6px 8px', ...cellStyle(k.t1_t2_ret_pct, avgT1, true) }}>{k.t1_t2_ret_pct ?? '—'}</td>
-                          <td style={{ padding: '6px 8px', ...cellStyle(k.t2_t3_ret_pct, avgT2, true) }}>{k.t2_t3_ret_pct ?? '—'}</td>
-                          <td style={{ padding: '6px 8px', ...cellStyle(k.t3_plus_ret_pct, avgT3, true) }}>{k.t3_plus_ret_pct ?? '—'}</td>
-                          <td style={{ padding: '6px 8px' }}><button onClick={() => deleteKpi(k.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)' }}><Trash2 size={12} /></button></td>
+                          <td style={{ padding: '6px 8px', fontWeight: 700, border: '1px solid var(--border)' }}>{fmtMonth(k.month_date)}</td>
+                          <td style={{ padding: '6px 8px', border: '1px solid var(--border)' }}>{k.enrollment_total ?? '—'}</td>
+                          <td style={{ padding: '6px 8px', border: '1px solid var(--border)' }}>{k.drops ?? '—'}</td>
+                          <td style={{ padding: '6px 8px', border: '1px solid var(--border)' }}>{k.graduates ?? '—'}</td>
+                          <td style={{ padding: '6px 8px', border: '1px solid var(--border)', ...cellStyle(k.otp_pct, avgOtp, true) }} title={countTitle('OTP', k.otp_met, k.otp_total)}>{k.otp_pct ?? '—'}{countSub(k.otp_met, k.otp_total)}</td>
+                          <td style={{ padding: '6px 8px', border: '1px solid var(--border)', ...cellStyle(k.drop_rate_pct, avgDrop, false) }}>{k.drop_rate_pct ?? '—'}</td>
+                          <td style={{ padding: '6px 8px', border: '1px solid var(--border)', ...cellStyle(k.pacing_2m_pct, avg2m, true) }}>{k.pacing_2m_pct ?? '—'}</td>
+                          <td style={{ padding: '6px 8px', border: '1px solid var(--border)', ...cellStyle(k.pacing_4m_pct, avg4m, true) }}>{k.pacing_4m_pct ?? '—'}</td>
+                          <td style={{ padding: '6px 8px', border: '1px solid var(--border)', ...cellStyle(k.vsat_pct, avgVsat, true) }}>{k.vsat_pct ?? '—'}</td>
+                          <td style={{ padding: '6px 8px', border: '1px solid var(--border)', ...cellStyle(k.t1_t2_ret_pct, avgT1, true) }} title={countTitle('T1→T2', k.t1_t2_met, k.t1_t2_total)}>{k.t1_t2_ret_pct ?? '—'}{countSub(k.t1_t2_met, k.t1_t2_total)}</td>
+                          <td style={{ padding: '6px 8px', border: '1px solid var(--border)', ...cellStyle(k.t2_t3_ret_pct, avgT2, true) }} title={countTitle('T2→T3', k.t2_t3_met, k.t2_t3_total)}>{k.t2_t3_ret_pct ?? '—'}{countSub(k.t2_t3_met, k.t2_t3_total)}</td>
+                          <td style={{ padding: '6px 8px', border: '1px solid var(--border)', ...cellStyle(k.t3_plus_ret_pct, avgT3, true) }} title={countTitle('T3+', k.t3_plus_met, k.t3_plus_total)}>{k.t3_plus_ret_pct ?? '—'}{countSub(k.t3_plus_met, k.t3_plus_total)}</td>
+                          <td style={{ padding: '6px 8px', border: '1px solid var(--border)' }}><button onClick={() => deleteKpi(k.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)' }}><Trash2 size={12} /></button></td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </section>
