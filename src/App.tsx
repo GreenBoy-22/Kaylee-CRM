@@ -1949,22 +1949,6 @@ function healthClass(score: number) {
   return 'high-risk';
 }
 
-function timelineForStudent(student: Student, touchpoints: Touchpoint[]) {
-  const studentTouchpoints = touchpoints.filter((touchpoint) => touchpoint.student_id === student.id);
-  const profileEvents = [
-    student.next_appointment_date ? { id: `next-${student.id}`, date: student.next_appointment_date, title: 'Next appointment', detail: 'Manual appointment date · Outlook sync later', kind: 'appointment' } : null,
-    student.graduation_goal_date ? { id: `grad-${student.id}`, date: student.graduation_goal_date, title: 'Graduation goal date', detail: 'Student success target date', kind: 'goal' } : null
-  ].filter(Boolean) as { id: string; date: string; title: string; detail: string; kind: string }[];
-  const touchEvents = studentTouchpoints.map((touchpoint) => ({
-    id: touchpoint.id,
-    date: touchpoint.touchpoint_date,
-    title: touchpoint.touchpoint_type,
-    detail: touchpoint.note,
-    kind: 'touchpoint'
-  }));
-  return [...profileEvents, ...touchEvents].sort((a, b) => String(b.date).localeCompare(String(a.date)));
-}
-
 function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, householdUsers, role, setPage }: { mode: Mode; inventory: InventoryItem[]; students: Student[]; touchpoints: Touchpoint[]; tasks: TaskItem[]; choreTasks: ChoreTask[]; householdUsers: HouseholdUser[]; role: Role; setPage: (page: Page) => void }) {
   const expiring = inventory.filter((item) => item.expires).length;
   const pending = tasks.filter((task) => task.status === 'pending_approval').length;
@@ -4266,6 +4250,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
   const selected = students.find((student) => student.id === selectedId) || visibleStudents[0] || students[0];
   const selectedTouchpoints = selected ? touchpoints.filter((touchpoint) => touchpoint.student_id === selected.id) : [];
   const selectedAppointments = selected ? appointments.filter((a) => a.student_id === selected.id).sort((a, b) => b.appointment_at.localeCompare(a.appointment_at)) : [];
+  const touchpointDates = new Set(selectedTouchpoints.map((t) => t.touchpoint_date).filter(Boolean));
   const [addingStudent, setAddingStudent] = useState(false);
   const [importingCsv, setImportingCsv] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
@@ -4275,17 +4260,14 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
   });
   const [touchForm, setTouchForm] = useState({
     touchpoint_type: 'Call to student', touchpoint_date: new Date().toISOString().slice(0, 10),
-    course: '', momentum: '', note: '', next_call_at: ''
+    course: '', momentum: '', note: '', next_call_at: addDays(new Date(), 7).toISOString().slice(0, 10),
+    is_weekly: false, missed: false, missed_email_sent: false, voicemail_left: false
   });
   const [listCollapsed, setListCollapsed] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const [weeklyForm, setWeeklyForm] = useState({ is_weekly_appointment: false, weekly_appointment_day_of_week: '1', weekly_appointment_time: '' });
-  const [apptForm, setApptForm] = useState({
-    appointment_date: new Date().toISOString().slice(0, 10), appointment_time: '',
-    missed: false, missed_email_sent: false, voicemail_left: false, is_weekly: false, notes: ''
-  });
   const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
   const [editApptForm, setEditApptForm] = useState({ appointment_date: '', appointment_time: '', missed: false, missed_email_sent: false, voicemail_left: false, is_weekly: false, notes: '' });
-  const [termForm, setTermForm] = useState({ term_number: '1', term_start_date: '', term_end_date: '' });
 
   useEffect(() => {
     if (selected) {
@@ -4294,45 +4276,10 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
         weekly_appointment_day_of_week: String(selected.weekly_appointment_day_of_week ?? 1),
         weekly_appointment_time: selected.weekly_appointment_time || ''
       });
-      setApptForm((f) => ({ ...f, is_weekly: !!selected.is_weekly_appointment }));
-      setTermForm({
-        term_number: String(selected.term_number ?? 1),
-        term_start_date: selected.term_start_date || '',
-        term_end_date: selected.term_end_date || ''
-      });
     }
   }, [selected?.id]);
 
   const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-
-  function saveTermInfo() {
-    if (!selected) return;
-    updateStudent(selected.id, {
-      term_number: Number(termForm.term_number || 1),
-      term_start_date: termForm.term_start_date || null,
-      term_end_date: termForm.term_end_date || null
-    } as Partial<Student>);
-  }
-
-  async function markGraduated() {
-    if (!selected) return;
-    if (!confirm(`Mark ${selected.display_name} as graduated? This will close out their current term.`)) return;
-    const today = new Date().toISOString().slice(0, 10);
-    updateStudent(selected.id, { graduated: true, graduation_date: today, status: 'Graduated' } as Partial<Student>);
-    if (supabase) {
-      const { error } = await supabase.from('student_term_history').insert({
-        student_id: selected.id,
-        term_number: selected.term_number ?? 1,
-        term_start_date: selected.term_start_date || null,
-        term_end_date: today,
-        met_otp: null,
-        outcome: 'graduated',
-        notes: 'Marked graduated from student profile.'
-      });
-      if (error) setMessage(`Graduation logged locally, but term history save failed: ${error.message}`);
-      else setMessage(`${selected.display_name} marked as graduated. 🎓`);
-    }
-  }
 
   function saveWeeklySettings() {
     if (!selected) return;
@@ -4341,25 +4288,6 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
       weekly_appointment_day_of_week: weeklyForm.is_weekly_appointment ? Number(weeklyForm.weekly_appointment_day_of_week) : null,
       weekly_appointment_time: weeklyForm.is_weekly_appointment ? weeklyForm.weekly_appointment_time : null
     } as Partial<Student>);
-  }
-
-  function submitAppointment() {
-    if (!selected || !apptForm.appointment_date) return;
-    const iso = new Date(`${apptForm.appointment_date}T${apptForm.appointment_time || '00:00'}`).toISOString();
-    createAppointment({
-      student_id: selected.id,
-      appointment_at: iso,
-      is_weekly: apptForm.is_weekly,
-      missed: apptForm.missed,
-      missed_email_sent: apptForm.missed ? apptForm.missed_email_sent : false,
-      voicemail_left: apptForm.missed ? apptForm.voicemail_left : false,
-      notes: apptForm.notes || null
-    });
-    setApptForm({
-      appointment_date: new Date().toISOString().slice(0, 10), appointment_time: '',
-      missed: false, missed_email_sent: false, voicemail_left: false,
-      is_weekly: !!selected.is_weekly_appointment, notes: ''
-    });
   }
 
   function startEditAppointment(a: StudentAppointment) {
@@ -4476,7 +4404,26 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
       const iso = new Date(touchForm.next_call_at).toISOString();
       updateStudent(selected.id, { next_call_at: iso } as Partial<Student>);
     }
-    setTouchForm({ touchpoint_type: 'Call to student', touchpoint_date: new Date().toISOString().slice(0, 10), course: selected.course || '', momentum: '', note: '', next_call_at: '' });
+    // A touchpoint flagged as the weekly appointment or a missed call also
+    // logs a real appointment record, so weekly auto-advance and the
+    // missed-appointment tracking in Work Performance keep working without
+    // a separate Log Appointment step.
+    if (touchForm.is_weekly || touchForm.missed) {
+      createAppointment({
+        student_id: selected.id,
+        appointment_at: new Date(`${touchForm.touchpoint_date}T00:00`).toISOString(),
+        is_weekly: touchForm.is_weekly,
+        missed: touchForm.missed,
+        missed_email_sent: touchForm.missed ? touchForm.missed_email_sent : false,
+        voicemail_left: touchForm.missed ? touchForm.voicemail_left : false,
+        notes: null
+      });
+    }
+    setTouchForm({
+      touchpoint_type: 'Call to student', touchpoint_date: new Date().toISOString().slice(0, 10),
+      course: selected.course || '', momentum: '', note: '', next_call_at: addDays(new Date(), 7).toISOString().slice(0, 10),
+      is_weekly: false, missed: false, missed_email_sent: false, voicemail_left: false
+    });
   }
 
   const [editingTouchpointId, setEditingTouchpointId] = useState<string | null>(null);
@@ -4582,12 +4529,12 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
           </div>
           {activeWarnings.length > 0 && <FerpaWarning warnings={activeWarnings} />}
           <StudentHealthPanel student={selected} touchpoints={touchpoints} />
-          <div className="quick-facts">
-            <div><span>Student ID</span><strong>{selected.student_id || '—'}</strong></div>
-            <div><span>Course</span><strong>{selected.course || '—'}</strong></div>
-            <div><span>Course end</span><strong>{selected.course_end_date || '—'}</strong></div>
-            <div><span>Next call</span><strong>{selected.next_call_at ? new Date(selected.next_call_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}</strong></div>
-            <div className="quick-facts-goal"><span>Goal</span><strong>{selected.goal || 'No goal saved yet.'}</strong></div>
+          <div className="quick-facts" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <div style={{ padding: '3px 8px', fontSize: 11 }}><span style={{ fontSize: 9, textTransform: 'uppercase', opacity: 0.7 }}>Student ID</span><br /><strong style={{ fontSize: 12 }}>{selected.student_id || '—'}</strong></div>
+            <div style={{ padding: '3px 8px', fontSize: 11 }}><span style={{ fontSize: 9, textTransform: 'uppercase', opacity: 0.7 }}>Course</span><br /><strong style={{ fontSize: 12 }}>{selected.course || '—'}</strong></div>
+            <div style={{ padding: '3px 8px', fontSize: 11 }}><span style={{ fontSize: 9, textTransform: 'uppercase', opacity: 0.7 }}>Course end</span><br /><strong style={{ fontSize: 12 }}>{selected.course_end_date || '—'}</strong></div>
+            <div style={{ padding: '3px 8px', fontSize: 11 }}><span style={{ fontSize: 9, textTransform: 'uppercase', opacity: 0.7 }}>Next call</span><br /><strong style={{ fontSize: 12 }}>{selected.next_call_at ? new Date(selected.next_call_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '—'}</strong></div>
+            <div className="quick-facts-goal" style={{ padding: '3px 8px', fontSize: 11, flex: 1, minWidth: 160 }}><span style={{ fontSize: 9, textTransform: 'uppercase', opacity: 0.7 }}>Goal</span><br /><strong style={{ fontSize: 12 }}>{selected.goal || 'No goal saved yet.'}</strong></div>
           </div>
           <div className="next-call-compact">
             <div className="next-call-compact-head"><FileText size={15} /> <strong>Call Prep</strong></div>
@@ -4629,136 +4576,73 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
         {/* TWO-COLUMN ZONE: scrollable history on left, sticky touchpoint form on right */}
         <div className="student-work-area" style={{ display: 'flex', gap: 16, alignItems: 'flex-start', width: '100%' }}>
           <div className="student-work-main" style={{ flex: 1, minWidth: 0 }}>
-            <section className="panel"><h2>Admin Notes</h2><textarea value={selected.admin_notes || ''} onChange={(e) => updateStudent(selected.id, { admin_notes: e.target.value })} placeholder="Private notes for Kaylee. Keep FERPA-safe." /></section>
-            <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{selected.last_contact_date || '—'}</p></div><div><strong>Next appointment</strong><p>{selected.next_appointment_date || '—'}</p></div><div><strong>Graduation goal</strong><p>{selected.graduation_goal_date || '—'}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Last academic activity</strong><p>{selected.last_academic_activity_date || '—'}</p></div><div><strong>Term end</strong><p>{selected.term_end_date || '—'}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
-            <StudentTimeline student={selected} touchpoints={selectedTouchpoints} />
+            <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{selected.last_contact_date || '—'}</p></div><div><strong>Next appointment</strong><p>{selected.next_appointment_date || '—'}</p></div><div><strong>Graduation goal</strong><p>{selected.graduation_goal_date || '—'}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Last academic activity</strong><p>{selected.last_academic_activity_date || '—'}</p></div><div><strong>Term #</strong><p>{selected.term_number ?? '—'}{selected.graduated ? ' · 🎓 Graduated' : ''}</p></div><div><strong>Term start</strong><p>{selected.term_start_date || '—'}</p></div><div><strong>Term end</strong><p>{selected.term_end_date || '—'}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
             <section className="panel">
-              <h2>Touchpoint Log</h2>
-              {selectedTouchpoints.length === 0 && <div className="brief-item">No touchpoints yet. Add the first call, email, text, thread, or voicemail in the panel on the right.</div>}
-              {selectedTouchpoints.map((touchpoint) => {
-                const isEditing = editingTouchpointId === touchpoint.id;
-                const icon = touchpoint.touchpoint_type.includes('Email') ? <Mail size={16} /> : touchpoint.touchpoint_type.includes('Text') ? <MessageSquare size={16} /> : <Phone size={16} />;
+              <div className="panel-head">
+                <h2>History Log</h2>
+                <button className="readonly-pill timeline-cal-btn" onClick={() => setCalendarOpen(!calendarOpen)} aria-expanded={calendarOpen}>
+                  <CalendarDays size={14} /> {touchpointDates.size} touchpoint{touchpointDates.size === 1 ? '' : 's'}
+                </button>
+              </div>
+              {calendarOpen && <TouchpointCalendar dates={touchpointDates} />}
+              {selectedTouchpoints.length === 0 && selectedAppointments.length === 0 && <div className="brief-item">Nothing logged yet. Add the first call, email, text, thread, or voicemail in the panel on the right.</div>}
+              {([
+                ...selectedTouchpoints.map((t) => ({ kind: 'touchpoint' as const, date: t.touchpoint_date, item: t })),
+                ...selectedAppointments.map((a) => ({ kind: 'appointment' as const, date: a.appointment_at, item: a }))
+              ].sort((x, y) => y.date.localeCompare(x.date))).map((entry) => {
+                if (entry.kind === 'touchpoint') {
+                  const touchpoint = entry.item;
+                  const isEditing = editingTouchpointId === touchpoint.id;
+                  const icon = touchpoint.touchpoint_type.includes('Email') ? <Mail size={16} /> : touchpoint.touchpoint_type.includes('Text') ? <MessageSquare size={16} /> : <Phone size={16} />;
 
-                if (isEditing) return (
-                  <div className="touchpoint-card touchpoint-card-editing" key={touchpoint.id}>
-                    <div className="form-grid">
-                      <select value={editTouchForm.touchpoint_type} onChange={(e) => setEditTouchForm({ ...editTouchForm, touchpoint_type: e.target.value })}>
-                        {touchpointTypes.map((type) => <option key={type}>{type}</option>)}
-                      </select>
-                      <input type="date" value={editTouchForm.touchpoint_date} onChange={(e) => setEditTouchForm({ ...editTouchForm, touchpoint_date: e.target.value })} />
-                      <input placeholder="Course" value={editTouchForm.course} onChange={(e) => setEditTouchForm({ ...editTouchForm, course: e.target.value })} />
-                      <input placeholder="Momentum" value={editTouchForm.momentum} onChange={(e) => setEditTouchForm({ ...editTouchForm, momentum: e.target.value })} />
-                    </div>
-                    <textarea style={editTouchForm.touchpoint_type === 'Email thread' ? { minHeight: 200 } : undefined} value={editTouchForm.note} onChange={(e) => setEditTouchForm({ ...editTouchForm, note: e.target.value })} />
-                    <div className="form-actions">
-                      <button className="btn primary" onClick={saveEditTouchpoint}><Save size={15} /> Save Changes</button>
-                      <button className="btn ghost" onClick={() => setEditingTouchpointId(null)}>Cancel</button>
-                    </div>
-                  </div>
-                );
-
-                return (
-                  <div className="touchpoint-card" key={touchpoint.id}>
-                    <div className="panel-head">
-                      <div>
-                        <strong>{touchpoint.touchpoint_type}</strong>
-                        <p>{touchpoint.touchpoint_date} · {touchpoint.course || selected.course || 'No course'} · {touchpoint.momentum || 'Momentum not set'}</p>
+                  if (isEditing) return (
+                    <div className="touchpoint-card touchpoint-card-editing" key={touchpoint.id}>
+                      <div className="form-grid">
+                        <select value={editTouchForm.touchpoint_type} onChange={(e) => setEditTouchForm({ ...editTouchForm, touchpoint_type: e.target.value })}>
+                          {touchpointTypes.map((type) => <option key={type}>{type}</option>)}
+                        </select>
+                        <input type="date" value={editTouchForm.touchpoint_date} onChange={(e) => setEditTouchForm({ ...editTouchForm, touchpoint_date: e.target.value })} />
+                        <input placeholder="Course" value={editTouchForm.course} onChange={(e) => setEditTouchForm({ ...editTouchForm, course: e.target.value })} />
+                        <input placeholder="Momentum" value={editTouchForm.momentum} onChange={(e) => setEditTouchForm({ ...editTouchForm, momentum: e.target.value })} />
                       </div>
-                      <div className="touchpoint-card-actions" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        {icon}
-                        <button className="btn ghost tiny" title="Edit" onClick={() => startEditTouchpoint(touchpoint)}><Edit3 size={14} /></button>
-                        <button className="btn ghost tiny" title="Delete" onClick={() => confirmDeleteTouchpoint(touchpoint.id)}><Trash2 size={14} /></button>
+                      <textarea style={editTouchForm.touchpoint_type === 'Email thread' ? { minHeight: 200 } : undefined} value={editTouchForm.note} onChange={(e) => setEditTouchForm({ ...editTouchForm, note: e.target.value })} />
+                      <div className="form-actions">
+                        <button className="btn primary" onClick={saveEditTouchpoint}><Save size={15} /> Save Changes</button>
+                        <button className="btn ghost" onClick={() => setEditingTouchpointId(null)}>Cancel</button>
                       </div>
                     </div>
-                    <p style={touchpoint.touchpoint_type === 'Email thread' ? { whiteSpace: 'pre-wrap', background: '#f7f7fb', padding: 10, borderRadius: 6 } : undefined}>{touchpoint.note}</p>
-                    <details>
-                      <summary>Next-call prep and follow-up drafts</summary>
-                      <div className="brief-item"><strong>Next call:</strong> {touchpoint.next_call_prep}</div>
-                      <div className="brief-item"><strong>Kaylee coaching:</strong> {touchpoint.constructive_note}</div>
-                      <textarea readOnly value={touchpoint.follow_up_email || ''} />
-                      <button className="btn primary" onClick={() => copyText(touchpoint.follow_up_email || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Email Draft</button>
-                      <textarea readOnly value={touchpoint.follow_up_text || ''} />
-                      <button className="btn ghost" onClick={() => copyText(touchpoint.follow_up_text || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Text Draft</button>
-                    </details>
-                  </div>
-                );
-              })}
-            </section>
-          </div>
-          <aside className="student-work-side" style={{ flexShrink: 0, width: 380 }}>
-            <section className="panel"><h2>Add Touchpoint</h2><div className="form-grid"><select value={touchForm.touchpoint_type} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_type: e.target.value })}>{touchpointTypes.map((type) => <option key={type}>{type}</option>)}</select><input type="date" value={touchForm.touchpoint_date} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_date: e.target.value })} /><input placeholder="Course" value={touchForm.course || selected.course || ''} onChange={(e) => setTouchForm({ ...touchForm, course: e.target.value })} /><input placeholder="Momentum" value={touchForm.momentum} onChange={(e) => setTouchForm({ ...touchForm, momentum: e.target.value })} /></div><label className="date-field"><span>Next call with this student (optional)</span><input type="datetime-local" value={touchForm.next_call_at} onChange={(e) => setTouchForm({ ...touchForm, next_call_at: e.target.value })} /></label><textarea placeholder={touchForm.touchpoint_type === 'Email thread' ? 'Paste the full email thread here (all back-and-forth messages in one entry)...' : 'What happened? What did the student say? What is the next step?'} style={touchForm.touchpoint_type === 'Email thread' ? { minHeight: 200 } : undefined} value={touchForm.note} onChange={(e) => setTouchForm({ ...touchForm, note: e.target.value })} />{ferpaWarnings(touchForm.note).length > 0 && <FerpaWarning warnings={ferpaWarnings(touchForm.note)} />}<div className="form-actions"><button className="btn primary" onClick={submitTouchpoint}><Save size={15} /> Save Touchpoint + Generate Prep</button></div></section>
+                  );
 
-            <section className="panel">
-              <h2>Term & Graduation</h2>
-              <div className="form-grid">
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Term #<input type="number" min={1} value={termForm.term_number} onChange={(e) => setTermForm({ ...termForm, term_number: e.target.value })} /></label>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Term Start<input type="date" value={termForm.term_start_date} onChange={(e) => setTermForm({ ...termForm, term_start_date: e.target.value })} /></label>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>Term End<input type="date" value={termForm.term_end_date} onChange={(e) => setTermForm({ ...termForm, term_end_date: e.target.value })} /></label>
-              </div>
-              <div className="form-actions"><button className="btn primary" onClick={saveTermInfo}><Save size={15} /> Save Term Info</button></div>
-              {selected.graduated ? (
-                <p style={{ fontSize: 12, color: '#7c3aed', fontWeight: 600, marginTop: 10 }}>🎓 Graduated {selected.graduation_date ? `on ${selected.graduation_date}` : ''}</p>
-              ) : (
-                <div className="form-actions" style={{ marginTop: 10 }}>
-                  <button className="btn" style={{ background: '#7c3aed', color: '#fff' }} onClick={markGraduated}>🎓 Mark Graduated</button>
-                </div>
-              )}
-            </section>
+                  return (
+                    <div className="touchpoint-card" key={touchpoint.id}>
+                      <div className="panel-head">
+                        <div>
+                          <strong>{touchpoint.touchpoint_type}</strong>
+                          <p>{touchpoint.touchpoint_date} · {touchpoint.course || selected.course || 'No course'} · {touchpoint.momentum || 'Momentum not set'}</p>
+                        </div>
+                        <div className="touchpoint-card-actions" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {icon}
+                          <button className="btn ghost tiny" title="Edit" onClick={() => startEditTouchpoint(touchpoint)}><Edit3 size={14} /></button>
+                          <button className="btn ghost tiny" title="Delete" onClick={() => confirmDeleteTouchpoint(touchpoint.id)}><Trash2 size={14} /></button>
+                        </div>
+                      </div>
+                      <p style={touchpoint.touchpoint_type === 'Email thread' ? { whiteSpace: 'pre-wrap', background: '#f7f7fb', padding: 10, borderRadius: 6 } : undefined}>{touchpoint.note}</p>
+                      <details>
+                        <summary>Next-call prep and follow-up drafts</summary>
+                        <div className="brief-item"><strong>Next call:</strong> {touchpoint.next_call_prep}</div>
+                        <div className="brief-item"><strong>Kaylee coaching:</strong> {touchpoint.constructive_note}</div>
+                        <textarea readOnly value={touchpoint.follow_up_email || ''} />
+                        <button className="btn primary" onClick={() => copyText(touchpoint.follow_up_email || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Email Draft</button>
+                        <textarea readOnly value={touchpoint.follow_up_text || ''} />
+                        <button className="btn ghost" onClick={() => copyText(touchpoint.follow_up_text || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Text Draft</button>
+                      </details>
+                    </div>
+                  );
+                }
 
-            <section className="panel">
-              <h2>Weekly Appointment Settings</h2>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 10 }}>
-                <input type="checkbox" checked={weeklyForm.is_weekly_appointment} onChange={(e) => setWeeklyForm({ ...weeklyForm, is_weekly_appointment: e.target.checked })} />
-                This student has a standing weekly appointment
-              </label>
-              {weeklyForm.is_weekly_appointment && (
-                <div className="form-grid">
-                  <select value={weeklyForm.weekly_appointment_day_of_week} onChange={(e) => setWeeklyForm({ ...weeklyForm, weekly_appointment_day_of_week: e.target.value })}>
-                    {WEEKDAY_NAMES.map((name, i) => <option key={name} value={i}>{name}</option>)}
-                  </select>
-                  <input type="time" value={weeklyForm.weekly_appointment_time} onChange={(e) => setWeeklyForm({ ...weeklyForm, weekly_appointment_time: e.target.value })} />
-                </div>
-              )}
-              <div className="form-actions"><button className="btn primary" onClick={saveWeeklySettings}><Save size={15} /> Save Weekly Setting</button></div>
-              <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>Once set, checking "This was the weekly appointment" when you log an appointment below will automatically push the next appointment date forward by a week — you won't need to re-enter the time each week.</p>
-            </section>
-
-            <section className="panel">
-              <h2>Log Appointment</h2>
-              <div className="form-grid">
-                <input type="date" value={apptForm.appointment_date} onChange={(e) => setApptForm({ ...apptForm, appointment_date: e.target.value })} />
-                <input type="time" value={apptForm.appointment_time} onChange={(e) => setApptForm({ ...apptForm, appointment_time: e.target.value })} />
-              </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '8px 0' }}>
-                <input type="checkbox" checked={apptForm.is_weekly} onChange={(e) => setApptForm({ ...apptForm, is_weekly: e.target.checked })} />
-                This was the weekly appointment
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '8px 0' }}>
-                <input type="checkbox" checked={apptForm.missed} onChange={(e) => setApptForm({ ...apptForm, missed: e.target.checked })} />
-                Call was missed
-              </label>
-              {apptForm.missed && (
-                <div style={{ paddingLeft: 24, marginBottom: 8 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 6 }}>
-                    <input type="checkbox" checked={apptForm.missed_email_sent} onChange={(e) => setApptForm({ ...apptForm, missed_email_sent: e.target.checked })} />
-                    Missed-call email sent
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                    <input type="checkbox" checked={apptForm.voicemail_left} onChange={(e) => setApptForm({ ...apptForm, voicemail_left: e.target.checked })} />
-                    Voicemail left
-                  </label>
-                </div>
-              )}
-              <textarea placeholder="Optional notes" value={apptForm.notes} onChange={(e) => setApptForm({ ...apptForm, notes: e.target.value })} />
-              <div className="form-actions"><button className="btn primary" onClick={submitAppointment}><Save size={15} /> Save Appointment</button></div>
-            </section>
-
-            <section className="panel">
-              <h2>Appointment History</h2>
-              {selectedAppointments.length === 0 && <div className="brief-item">No appointments logged yet.</div>}
-              {selectedAppointments.map((a) => {
-                const isEditing = editingAppointmentId === a.id;
-                if (isEditing) return (
+                const a = entry.item;
+                const isEditingAppt = editingAppointmentId === a.id;
+                if (isEditingAppt) return (
                   <div className="touchpoint-card touchpoint-card-editing" key={a.id}>
                     <div className="form-grid">
                       <input type="date" value={editApptForm.appointment_date} onChange={(e) => setEditApptForm({ ...editApptForm, appointment_date: e.target.value })} />
@@ -4785,7 +4669,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
                   <div className="touchpoint-card" key={a.id}>
                     <div className="panel-head">
                       <div>
-                        <strong>{d.toLocaleDateString()} {d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</strong>
+                        <strong>📅 {d.toLocaleDateString()}</strong>
                         <p>{a.is_weekly ? 'Weekly appointment' : 'One-off appointment'} · {a.missed ? '❌ Missed' : '✅ Attended'}</p>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -4803,6 +4687,60 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
                 );
               })}
             </section>
+            <section className="panel"><h2>Admin Notes</h2><textarea value={selected.admin_notes || ''} onChange={(e) => updateStudent(selected.id, { admin_notes: e.target.value })} placeholder="Private notes for Kaylee. Keep FERPA-safe." /></section>
+          </div>
+          <aside className="student-work-side" style={{ flexShrink: 0, width: 380 }}>
+            <section className="panel">
+              <h2>Add Touchpoint</h2>
+              <div className="form-grid">
+                <select value={touchForm.touchpoint_type} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_type: e.target.value })}>{touchpointTypes.map((type) => <option key={type}>{type}</option>)}</select>
+                <input type="date" value={touchForm.touchpoint_date} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_date: e.target.value, next_call_at: addDays(new Date(`${e.target.value}T00:00`), 7).toISOString().slice(0, 10) })} />
+                <input placeholder="Course" value={touchForm.course || selected.course || ''} onChange={(e) => setTouchForm({ ...touchForm, course: e.target.value })} />
+                <input placeholder="Momentum" value={touchForm.momentum} onChange={(e) => setTouchForm({ ...touchForm, momentum: e.target.value })} />
+              </div>
+              <label className="date-field"><span>Next touchpoint date (auto-set one week out, editable)</span><input type="date" value={touchForm.next_call_at} onChange={(e) => setTouchForm({ ...touchForm, next_call_at: e.target.value })} /></label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '8px 0' }}>
+                <input type="checkbox" checked={touchForm.is_weekly} onChange={(e) => setTouchForm({ ...touchForm, is_weekly: e.target.checked })} />
+                This was the weekly appointment
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '8px 0' }}>
+                <input type="checkbox" checked={touchForm.missed} onChange={(e) => setTouchForm({ ...touchForm, missed: e.target.checked })} />
+                Call was missed
+              </label>
+              {touchForm.missed && (
+                <div style={{ paddingLeft: 24, marginBottom: 8 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 6 }}>
+                    <input type="checkbox" checked={touchForm.missed_email_sent} onChange={(e) => setTouchForm({ ...touchForm, missed_email_sent: e.target.checked })} />
+                    Missed-call email sent
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                    <input type="checkbox" checked={touchForm.voicemail_left} onChange={(e) => setTouchForm({ ...touchForm, voicemail_left: e.target.checked })} />
+                    Voicemail left
+                  </label>
+                </div>
+              )}
+              <textarea placeholder={touchForm.touchpoint_type === 'Email thread' ? 'Paste the full email thread here (all back-and-forth messages in one entry)...' : 'What happened? What did the student say? What is the next step?'} style={touchForm.touchpoint_type === 'Email thread' ? { minHeight: 200 } : undefined} value={touchForm.note} onChange={(e) => setTouchForm({ ...touchForm, note: e.target.value })} />
+              {ferpaWarnings(touchForm.note).length > 0 && <FerpaWarning warnings={ferpaWarnings(touchForm.note)} />}
+              <div className="form-actions"><button className="btn primary" onClick={submitTouchpoint}><Save size={15} /> Save Touchpoint + Generate Prep</button></div>
+            </section>
+
+            <section className="panel">
+              <h2>Weekly Appointment Settings</h2>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 10 }}>
+                <input type="checkbox" checked={weeklyForm.is_weekly_appointment} onChange={(e) => setWeeklyForm({ ...weeklyForm, is_weekly_appointment: e.target.checked })} />
+                This student has a standing weekly appointment
+              </label>
+              {weeklyForm.is_weekly_appointment && (
+                <div className="form-grid">
+                  <select value={weeklyForm.weekly_appointment_day_of_week} onChange={(e) => setWeeklyForm({ ...weeklyForm, weekly_appointment_day_of_week: e.target.value })}>
+                    {WEEKDAY_NAMES.map((name, i) => <option key={name} value={i}>{name}</option>)}
+                  </select>
+                  <input type="time" value={weeklyForm.weekly_appointment_time} onChange={(e) => setWeeklyForm({ ...weeklyForm, weekly_appointment_time: e.target.value })} />
+                </div>
+              )}
+              <div className="form-actions"><button className="btn primary" onClick={saveWeeklySettings}><Save size={15} /> Save Weekly Setting</button></div>
+              <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>Once set, checking "This was the weekly appointment" in Add Touchpoint will automatically push the next appointment date forward by a week — you won't need to re-enter the time each week.</p>
+            </section>
           </aside>
         </div>
       </section> : <section className="panel"><h2>Select a student</h2><p>Add or select a student to view their profile, touchpoints, and next-call prep.</p></section>}
@@ -4811,51 +4749,49 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
 }
 
 
+function healthColor(score: number) {
+  if (score >= 80) return '#16a34a';
+  if (score >= 60) return '#d97706';
+  if (score >= 40) return '#ea580c';
+  return '#dc2626';
+}
+
 function StudentHealthPanel({ student, touchpoints }: { student: Student; touchpoints: Touchpoint[] }) {
   const health = studentHealth(student, touchpoints);
   const signals = studentStatusSignals(student, touchpoints);
   const gradDays = daysUntil(student.graduation_goal_date);
-  return <section className="health-panel">
-    <div className={`health-score ${healthClass(health.overall)}`}>
-      <span>Student Health</span>
-      <strong>{health.overall}</strong>
-      <small>{signals.isGhost ? 'Ghost risk' : signals.isSupport ? 'Support active' : signals.isPortalOnly ? 'Portal-only risk' : 'Monitor weekly'}</small>
+  const contactGapDays = daysSince(student.last_contact_date || signals.lastMeaningful?.touchpoint_date || signals.lastTouchpoint?.touchpoint_date);
+  const metrics: { label: string; value: number }[] = [
+    { label: 'Momentum', value: health.momentum },
+    { label: 'Engagement', value: health.engagement },
+    { label: 'Risk safety', value: health.risk },
+    { label: 'Goal progress', value: health.goalProgress },
+  ];
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'stretch', gap: 6, padding: '6px 0' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '4px 12px', borderRadius: 8, minWidth: 84, background: `${healthColor(health.overall)}1a`, color: healthColor(health.overall) }}>
+        <span style={{ fontSize: 9, opacity: 0.85, textTransform: 'uppercase', letterSpacing: '0.03em' }}>Health</span>
+        <strong style={{ fontSize: 20, lineHeight: 1.15 }}>{health.overall}</strong>
+      </div>
+      {metrics.map((m) => (
+        <div key={m.label} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '4px 10px', borderRadius: 6, minWidth: 64, background: `${healthColor(m.value)}14`, color: healthColor(m.value) }}>
+          <span style={{ fontSize: 9, opacity: 0.85, textTransform: 'uppercase', letterSpacing: '0.02em' }}>{m.label}</span>
+          <strong style={{ fontSize: 14, lineHeight: 1.2 }}>{m.value}</strong>
+          <div style={{ height: 3, borderRadius: 2, background: 'rgba(0,0,0,0.08)', marginTop: 2 }}>
+            <div style={{ height: '100%', width: `${m.value}%`, borderRadius: 2, background: healthColor(m.value) }} />
+          </div>
+        </div>
+      ))}
+      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '4px 10px', fontSize: 11, minWidth: 100, color: 'var(--muted)' }}>
+        <span style={{ fontSize: 9, opacity: 0.8, textTransform: 'uppercase' }}>Contact gap</span>
+        <strong style={{ color: 'var(--text)', fontSize: 12 }}>{contactGapDays >= 999 ? 'No contact yet' : `${contactGapDays}d ago`}</strong>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '4px 10px', fontSize: 11, minWidth: 100, color: 'var(--muted)' }}>
+        <span style={{ fontSize: 9, opacity: 0.8, textTransform: 'uppercase' }}>Graduation</span>
+        <strong style={{ color: 'var(--text)', fontSize: 12 }}>{gradDays === null ? 'No goal date' : gradDays >= 0 ? `${gradDays}d out` : `${Math.abs(gradDays)}d past`}</strong>
+      </div>
     </div>
-    <div className="health-bars">
-      <HealthBar label="Momentum" value={health.momentum} />
-      <HealthBar label="Engagement" value={health.engagement} />
-      <HealthBar label="Risk safety" value={health.risk} />
-      <HealthBar label="Goal progress" value={health.goalProgress} />
-    </div>
-    <div className="health-insights">
-      <div><strong>Contact gap</strong><p>{daysSince(student.last_contact_date || signals.lastMeaningful?.touchpoint_date || signals.lastTouchpoint?.touchpoint_date) >= 999 ? 'No meaningful contact logged yet' : `${daysSince(student.last_contact_date || signals.lastMeaningful?.touchpoint_date || signals.lastTouchpoint?.touchpoint_date)} day(s) since contact`}</p></div>
-      <div><strong>Graduation timing</strong><p>{gradDays === null ? 'No graduation goal date yet' : gradDays >= 0 ? `${gradDays} day(s) until goal` : `${Math.abs(gradDays)} day(s) past goal`}</p></div>
-    </div>
-  </section>;
-}
-
-function HealthBar({ label, value }: { label: string; value: number }) {
-  return <div className="health-bar-row"><div><strong>{label}</strong><span>{value}/100</span></div><div className="health-bar-track"><span className={`health-bar-fill ${healthClass(value)}`} style={{ width: `${value}%` }} /></div></div>;
-}
-
-function StudentTimeline({ student, touchpoints }: { student: Student; touchpoints: Touchpoint[] }) {
-  const events = timelineForStudent(student, touchpoints).slice(0, 12);
-  const [calendarOpen, setCalendarOpen] = useState(false);
-  const touchpointDates = new Set(touchpoints.map((t) => t.touchpoint_date).filter(Boolean));
-  return <section className="panel">
-    <div className="panel-head">
-      <h2>Student Timeline</h2>
-      <button className="readonly-pill timeline-cal-btn" onClick={() => setCalendarOpen(!calendarOpen)} aria-expanded={calendarOpen}>
-        <CalendarDays size={14} /> {touchpointDates.size} touchpoint{touchpointDates.size === 1 ? '' : 's'}
-      </button>
-    </div>
-    {calendarOpen && <TouchpointCalendar dates={touchpointDates} />}
-    {events.length === 0 && <div className="brief-item">No timeline events yet.</div>}
-    {events.map((event) => <details className={`timeline-item-collapsible ${event.kind}`} key={event.id}>
-      <summary><span className="timeline-date">{event.date}</span> <strong>{event.title}</strong></summary>
-      <p>{event.detail}</p>
-    </details>)}
-  </section>;
+  );
 }
 
 function TouchpointCalendar({ dates }: { dates: Set<string> }) {
