@@ -4377,8 +4377,9 @@ const COURSES: { code: string; title: string }[] = [
 ];
 
 // Type-ahead course picker: filters by course code OR title as you type,
-// shows "CODE - Title" in the dropdown for easy searching, but stores just
-// the code (matching how course is used everywhere else in the app).
+// shows "CODE - Title" in the dropdown for easy searching, and stores the
+// full "CODE - Title" string once selected, so the field itself always
+// shows both the code and the name together for quick reference either way.
 function CourseCombobox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   const [query, setQuery] = useState(value || '');
   const [open, setOpen] = useState(false);
@@ -4413,7 +4414,7 @@ function CourseCombobox({ value, onChange, placeholder }: { value: string; onCha
             <div
               key={c.code}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { onChange(c.code); setQuery(c.code); setOpen(false); }}
+              onClick={() => { const full = `${c.code} - ${c.title}`; onChange(full); setQuery(full); setOpen(false); }}
               style={{ padding: '7px 10px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid var(--border)' }}
             >
               <strong>{c.code}</strong> - {c.title}
@@ -4796,9 +4797,6 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
                     </div>
                   );
                 })}
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, fontStyle: 'italic' }}>
-                  {selected.constructive_note || 'Ask before advising. End with a commitment in their words.'}
-                </div>
               </div>
             ) : (
               <div className="brief-item">Log a touchpoint to generate call prep.</div>
@@ -4873,7 +4871,6 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
                             ))}
                           </div>
                         </div>
-                        <div className="brief-item"><strong>Kaylee coaching:</strong> {touchpoint.constructive_note}</div>
                         <textarea readOnly value={touchpoint.follow_up_email || ''} />
                         <button className="btn primary" onClick={() => copyText(touchpoint.follow_up_email || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Email Draft</button>
                         <textarea readOnly value={touchpoint.follow_up_text || ''} />
