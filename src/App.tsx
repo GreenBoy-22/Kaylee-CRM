@@ -736,9 +736,10 @@ function App() {
   // weekday, etc.) are prioritized, since those are the most actionable.
   function extractAssessmentMentions(text: string | null | undefined): string[] {
     if (!text) return [];
+    const cleaned = text.replace(/^\**\s*(call summary|goal for (?:the )?next week)\s*:?\**\s*$/gim, '');
     const kw = /\b(objective assessment|performance assessment|\bOA\b|\bPA\b|certification exam|the exam\b|proctored|voucher|assessment date)/i;
     const timing = /\b(scheduled|reschedul|postpon|this week|next week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|by [A-Z][a-z]+ \d|on [A-Z][a-z]+ \d|\d{1,2}\/\d{1,2})/i;
-    const sentences = text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter((s) => kw.test(s));
+    const sentences = cleaned.split(/(?<=[.!?])\s+/).map((s) => s.replace(/\n+/g, ' ').trim()).filter((s) => kw.test(s) && s.length < 300);
     return sentences.sort((a, b) => Number(timing.test(b)) - Number(timing.test(a))).slice(0, 2);
   }
 
@@ -755,11 +756,9 @@ function App() {
     const missedCount = Number(student?.missed_call_count || 0);
     const courseEnd = student?.course_end_date || '';
     const gradGoal = student?.graduation_goal_date || '';
-    const lastActivity = student?.last_academic_activity_date || '';
 
     // Pull recent touchpoint history (most recent 3, excluding this note)
     const recent = (pastTouchpoints || []).slice(0, 3);
-    const recentSummary = recent.map((t) => `${t.touchpoint_date} (${t.touchpoint_type}): ${(t.note || '').slice(0, 140)}`).filter(Boolean);
     const lastGoal = extractStatedGoal(recent[0]?.note);
     const lastRecap = extractLastSummary(recent[0]?.note);
 
@@ -773,70 +772,60 @@ function App() {
     const isLowMomentum = m.includes('low');
     const isHighMomentum = m.includes('high') && !m.includes('low');
 
-    // ===== 1. What we discussed last time ===== 
-    const lastTimeSection: string[] = [];
-    if (recent[0]) {
-      lastTimeSection.push(`On ${recent[0].touchpoint_date} (${recent[0].touchpoint_type})${lastRecap ? `: ${lastRecap}` : ''}`);
-    } else {
-      lastTimeSection.push(`No prior touchpoint on file — this is either a first contact or the history hasn't been logged yet.`);
-    }
+    const firstName = (student?.display_name || '').trim().split(/\s+/)[0] || 'there';
 
-    // ===== 2. The goal set last week, and questions to check on it ===== 
-    const goalCheckSection: string[] = [];
+    // ===== Opening + last week's goal check (SAY lines are literal, ready to speak) =====
+    const openingSection: string[] = [];
+    if (hasGhost) {
+      openingSection.push(`"Hey ${firstName}, I've been trying to reach you — I just want you to know I'm not chasing you down, I genuinely want to check in on how you're doing."`);
+    } else {
+      openingSection.push(`"Hi ${firstName}! Good to connect again."`);
+    }
     if (lastGoal) {
-      goalCheckSection.push(`Last week's stated goal: "${lastGoal}"`);
-      goalCheckSection.push(`Ask directly: "Last time you said you'd ${lastGoal.replace(/^the student /i, '').replace(/^will /i, '')} — how did that go?"`);
-      goalCheckSection.push(`If they didn't get to it: "What got in the way? Was it time, difficulty, or something else?" — don't let a vague "I've been busy" close the loop.`);
-      goalCheckSection.push(`If they did: confirm it explicitly and ask what made it work, so it can be repeated.`);
+      const spokenGoal = lastGoal.replace(/^the student\s+/i, '').replace(/^will\s+/i, 'plans to ');
+      openingSection.push(`"Last time, here's what we talked about you working on: '${spokenGoal}' — how did that go this week?"`);
+      openingSection.push(`If they made progress: "That's great — what worked well, so we can keep doing more of that?"`);
+      openingSection.push(`If they didn't get to it: "No worries at all — what got in the way this week?"`);
+    } else if (recent[0]) {
+      openingSection.push(`"How have things been going in ${courseText} since we last talked${lastRecap ? `? Last time we touched on ${lastRecap.charAt(0).toLowerCase()}${lastRecap.slice(1)}` : ''}"`);
     } else {
-      goalCheckSection.push(`No specific goal was logged from last time — use this call to set one concrete, dated commitment before you hang up.`);
+      openingSection.push(`"I'd love to hear how things are going in ${courseText} so far."`);
     }
 
-    // ===== 3. OA/PA/assessment status — grounded in exactly what was said =====
+    // ===== OA/PA/assessment status — grounded in exactly what was said =====
     const assessmentMentions = [
       ...extractAssessmentMentions(note),
       ...extractAssessmentMentions(recent[0]?.note),
     ].filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 2);
     const assessmentSection: string[] = [];
     if (assessmentMentions.length) {
-      assessmentMentions.forEach((mention) => {
-        assessmentSection.push(`Last noted: "${mention}"`);
-      });
-      assessmentSection.push(`Confirm directly: has this happened yet? If not, what's the exact new date and is it actually on the calendar (not just planned)?`);
-      assessmentSection.push(`If it's been taken: ask the outcome and, if it wasn't a pass, what the retake plan is.`);
+      assessmentSection.push(`"Last time you mentioned: '${assessmentMentions[0]}' — has that happened yet, or is it still coming up?"`);
+      assessmentSection.push(`If it's not scheduled yet: "Let's go ahead and pick a specific date right now, while we're on the phone."`);
+      assessmentSection.push(`If it's already happened: "How did it go? If it wasn't a pass, what's the plan for the retake?"`);
     } else {
-      assessmentSection.push(`No OA/PA/assessment mentioned in recent notes — worth directly asking whether one is coming up before course end${courseEnd ? ` (${courseEnd})` : ''}, so it doesn't surface as a surprise later.`);
+      assessmentSection.push(`"Do you have an assessment or exam coming up for ${courseText}? I want to make sure we're planning ahead for it${courseEnd ? ` before your course ends ${courseEnd}` : ''}."`);
     }
 
-    // ===== 4. Questions that show you were paying attention =====
-    const attentiveSection: string[] = [];
-    attentiveSection.push(`Open with a specific reference to last contact${recent[0] ? ` (${recent[0].touchpoint_date}, ${recent[0].touchpoint_type})` : ''} so the student knows you remember — not a generic "how's it going."`);
-    if (hasZyBooks) attentiveSection.push(`Ask specifically which ZyBooks module/lab they're on now, referencing what they said before.`);
-    if (hasBlocked) attentiveSection.push(`Past notes show a blocker theme — surface it by name: "Last time you mentioned ___; how is that piece going now?"`);
-    if (hasLife) attentiveSection.push(`A life circumstance came up before — acknowledge it briefly without prying, then ask how it's affecting study time this week.`);
-    if (isHighMomentum) attentiveSection.push(`Momentum was high last time — celebrate it explicitly and ask what's fueling the rhythm so it can be protected.`);
-    if (hasGhost) attentiveSection.push(`Multiple missed touches on record — lead with "I've been trying to reach you because I care about your progress, not to chase you."`);
+    // ===== Other things worth bringing up, only if they're actually relevant =====
+    const otherSection: string[] = [];
+    if (hasZyBooks) otherSection.push(`"How's it going with ZyBooks — which module or lab are you on right now?"`);
+    if (hasBlocked) otherSection.push(`"Is there anything specific that's been slowing you down lately?"`);
+    if (hasLife) otherSection.push(`"How are things going outside of school right now — is that affecting your study time this week?"`);
+    if (isHighMomentum) otherSection.push(`"You've had really strong momentum lately — what's been working so well for you?"`);
+    if (isLowMomentum) otherSection.push(`"What would one small, doable win look like for you this week? Let's not stack too much on your plate."`);
 
-    // ===== 5. Questions to verify they're on track for their actual goal =====
-    const onTrackSection: string[] = [];
-    if (courseEnd) onTrackSection.push(`Course end date is ${courseEnd} — calculate weeks remaining out loud together and confirm the pace is realistic, not just hoped-for.`);
-    if (gradGoal) onTrackSection.push(`Graduation goal is ${gradGoal} — ask what this week's work does to move toward that specific date.`);
-    if (lastActivity) onTrackSection.push(`Most recent academic activity on file was ${lastActivity} — ask what they've completed in ${courseText} since then, specifically.`);
-    onTrackSection.push(`Ask them to rate 1-10 where they are with ${courseText} right now, and what would move that number up by one point.`);
-    if (isLowMomentum) onTrackSection.push(`Momentum is flagged low — ask what one small, finishable win this week would look like. Don't stack multiple goals.`);
-
-    // ===== 6. Other reference material =====
-    const referenceSection: string[] = [];
-    if (recentSummary.length > 1) referenceSection.push(`Fuller recent history for cross-reference: ${recentSummary.slice(1).join(' | ')}`);
-    referenceSection.push(`End the call with one specific, dated commitment in the student's own words — that becomes next week's goal check.`);
+    // ===== Wrapping up: pace check + one dated commitment =====
+    const closingSection: string[] = [];
+    if (courseEnd) closingSection.push(`"Your course wraps up ${courseEnd} — let's count the weeks together out loud and make sure the pace still makes sense."`);
+    if (gradGoal) closingSection.push(`"Thinking about your graduation goal of ${gradGoal} — how does this week's plan move you toward that?"`);
+    closingSection.push(`"On a scale of 1 to 10, where do you feel you are with ${courseText} right now?"`);
+    closingSection.push(`"Before we hang up — what's the ONE thing you'll get done before we talk again, and what day will you do it by?"`);
 
     const next_call_prep =
-      `WHAT WE DISCUSSED LAST TIME:\n• ${lastTimeSection.join('\n• ')}\n\n` +
-      `GOAL FROM LAST WEEK — CHECK ON THIS FIRST:\n• ${goalCheckSection.join('\n• ')}\n\n` +
-      `OA / PA / ASSESSMENT STATUS:\n• ${assessmentSection.join('\n• ')}\n\n` +
-      `QUESTIONS THAT SHOW YOU WERE LISTENING:\n• ${attentiveSection.join('\n• ')}\n\n` +
-      `QUESTIONS TO CONFIRM THEY'RE ON TRACK:\n• ${onTrackSection.join('\n• ')}\n\n` +
-      `OTHER REFERENCE MATERIAL:\n• ${referenceSection.join('\n• ')}`;
+      `OPENING & LAST WEEK'S GOAL:\n• ${openingSection.join('\n• ')}\n\n` +
+      `ASSESSMENT CHECK:\n• ${assessmentSection.join('\n• ')}\n\n` +
+      (otherSection.length ? `OTHER THINGS TO BRING UP:\n• ${otherSection.join('\n• ')}\n\n` : '') +
+      `WRAPPING UP:\n• ${closingSection.join('\n• ')}`;
 
     // ===== Coaching questions for Kaylee (specific, GROW-aligned) =====
     const coachQuestions: string[] = [];
