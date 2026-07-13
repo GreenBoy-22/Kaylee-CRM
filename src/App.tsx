@@ -4331,6 +4331,100 @@ function SuggestionCard({ suggestion, editable, onAdd, onDone, onSnooze, onDismi
   </section>;
 }
 
+// Full BSCSIA course catalog (code + title), same list used in Course Notes,
+// so the course field can be searched by code OR name instead of requiring
+// Kaylee to already know the exact course code.
+const COURSES: { code: string; title: string }[] = [
+  { code: 'PROGRAM', title: 'Program Overview -- All Certs & Stackables' },
+  { code: 'C458', title: 'Health, Fitness, and Wellness' },
+  { code: 'D322', title: 'Introduction to IT' },
+  { code: 'C683', title: 'Natural Science Lab' },
+  { code: 'D685', title: 'Practical Applications of Prompt' },
+  { code: 'D333', title: 'Ethics in Technology' },
+  { code: 'D316', title: 'IT Foundations' },
+  { code: 'C955', title: 'Applied Probability and Statistics' },
+  { code: 'D270', title: 'Composition - Successful Self-Expression' },
+  { code: 'C957', title: 'Applied Algebra' },
+  { code: 'D317', title: 'IT Applications' },
+  { code: 'D827', title: 'Fundamentals of Information Security' },
+  { code: 'D315', title: 'Network and Security - Foundations' },
+  { code: 'D265', title: 'Critical Thinking: Reason and Evidence' },
+  { code: 'D325', title: 'Networks' },
+  { code: 'D268', title: 'Intro to Communication: Connecting with Others' },
+  { code: 'D336', title: 'Business of IT - Applications' },
+  { code: 'C963', title: 'American Politics and the US Constitution' },
+  { code: 'D420', title: 'Discrete Math: Logic' },
+  { code: 'D329', title: 'Network and Security - Applications' },
+  { code: 'D828', title: 'Legal Issues in Information Security' },
+  { code: 'D829', title: 'Digital Forensics in Cybersecurity' },
+  { code: 'C845', title: 'Information Systems Security' },
+  { code: 'D324', title: 'Business of IT - Project Management' },
+  { code: 'D421', title: 'Discrete Math: Functions and Relations' },
+  { code: 'D422', title: 'Discrete Math: Algorithms and Cryptography' },
+  { code: 'D830', title: 'Introduction to Cryptography' },
+  { code: 'D832', title: 'Managing Information Security' },
+  { code: 'D278', title: 'Scripting and Programming - Foundations' },
+  { code: 'D281', title: 'Linux Foundations' },
+  { code: 'D426', title: 'Data Management - Foundations' },
+  { code: 'D522', title: 'Python for IT Automation' },
+  { code: 'D492', title: 'Data Analytics - Applications' },
+  { code: 'D385', title: 'Software Security and Testing' },
+  { code: 'D831', title: 'Introduction to AI and Security' },
+  { code: 'D340', title: 'Cyber Defense and Countermeasures' },
+  { code: 'D320', title: 'Managing Cloud Security' },
+  { code: 'D332', title: 'Penetration Testing and Vulnerability Analysis' },
+  { code: 'D833', title: 'Cybersecurity and Information Assurance Capstone' },
+];
+
+// Type-ahead course picker: filters by course code OR title as you type,
+// shows "CODE - Title" in the dropdown for easy searching, but stores just
+// the code (matching how course is used everywhere else in the app).
+function CourseCombobox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const [query, setQuery] = useState(value || '');
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setQuery(value || ''); }, [value]);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const q = query.trim().toLowerCase();
+  const matches = q
+    ? COURSES.filter((c) => c.code.toLowerCase().includes(q) || c.title.toLowerCase().includes(q)).slice(0, 8)
+    : COURSES.slice(0, 8);
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <input
+        placeholder={placeholder || 'Course'}
+        value={query}
+        onChange={(e) => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+      />
+      {open && matches.length > 0 && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, marginTop: 2, maxHeight: 220, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.15)' }}>
+          {matches.map((c) => (
+            <div
+              key={c.code}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { onChange(c.code); setQuery(c.code); setOpen(false); }}
+              style={{ padding: '7px 10px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid var(--border)' }}
+            >
+              <strong>{c.code}</strong> - {c.title}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const touchpointTypes = [
   'Email from student', 'Email to student', 'Email thread',
   'Text from student', 'Text to student',
@@ -4612,7 +4706,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
       ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived && !s.on_term_break).length), undefined, () => { setShowArchived(false); setStatFilter('ghost'); }, statFilter === 'ghost'],
       ["Term Break", String(students.filter((s) => s.on_term_break && !s.archived).length), undefined, () => { setShowArchived(false); setStatFilter(null); setTermBreakOnly(!termBreakOnly); }, termBreakOnly]
     ]} />
-    {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><input placeholder="Course" value={studentForm.course} onChange={(e) => setStudentForm({ ...studentForm, course: e.target.value })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email (for outreach drafts)" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
+    {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><CourseCombobox value={studentForm.course} onChange={(v) => setStudentForm({ ...studentForm, course: v })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email (for outreach drafts)" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
     <div className="students-crm-layout" style={listCollapsed ? { gridTemplateColumns: '1fr' } : undefined}>
       {!listCollapsed && <section className="panel student-scroll-list"><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div><div className="student-search-row"><Search size={15} /><input type="text" placeholder="Search by name or ID" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search students" /></div>{visibleStudents.length === 0 && <div className="brief-item">{search ? 'No students match that search.' : 'No students in this view yet.'}</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} style={student.on_term_break ? { opacity: 0.6, background: 'var(--surface-3)' } : {}} onClick={() => { setSelectedId(student.id); setListCollapsed(true); }}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}{student.on_term_break ? ' · ☕ Break' : ''}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>}
       {selected ? <section className="student-detail-pane" style={selected.on_term_break ? { filter: 'grayscale(0.6)', opacity: 0.75, background: 'var(--surface-1)' } : undefined}>
@@ -4743,7 +4837,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
                           {touchpointTypes.map((type) => <option key={type}>{type}</option>)}
                         </select>
                         <input type="date" value={editTouchForm.touchpoint_date} onChange={(e) => setEditTouchForm({ ...editTouchForm, touchpoint_date: e.target.value })} />
-                        <input placeholder="Course" value={editTouchForm.course} onChange={(e) => setEditTouchForm({ ...editTouchForm, course: e.target.value })} />
+                        <CourseCombobox value={editTouchForm.course} onChange={(v) => setEditTouchForm({ ...editTouchForm, course: v })} />
                         <input placeholder="Momentum" value={editTouchForm.momentum} onChange={(e) => setEditTouchForm({ ...editTouchForm, momentum: e.target.value })} />
                       </div>
                       <textarea style={editTouchForm.touchpoint_type === 'Email thread' ? { minHeight: 200 } : undefined} value={editTouchForm.note} onChange={(e) => setEditTouchForm({ ...editTouchForm, note: e.target.value })} />
@@ -4856,7 +4950,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
               <div className="form-grid">
                 <select value={touchForm.touchpoint_type} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_type: e.target.value })}>{touchpointTypes.map((type) => <option key={type}>{type}</option>)}</select>
                 <input type="date" value={touchForm.touchpoint_date} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_date: e.target.value, next_call_at: addDays(new Date(`${e.target.value}T00:00`), 7).toISOString().slice(0, 10) })} />
-                <input placeholder="Course" value={touchForm.course || selected.course || ''} onChange={(e) => setTouchForm({ ...touchForm, course: e.target.value })} />
+                <CourseCombobox value={touchForm.course || selected.course || ''} onChange={(v) => setTouchForm({ ...touchForm, course: v })} />
                 <input placeholder="Momentum" value={touchForm.momentum} onChange={(e) => setTouchForm({ ...touchForm, momentum: e.target.value })} />
               </div>
               <label className="date-field"><span>Next touchpoint date (auto-set one week out, editable)</span><input type="date" value={touchForm.next_call_at} onChange={(e) => setTouchForm({ ...touchForm, next_call_at: e.target.value })} /></label>
