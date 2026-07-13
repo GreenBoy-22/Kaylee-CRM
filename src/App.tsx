@@ -704,6 +704,30 @@ function App() {
     }));
   }
 
+  // Pulls the "Goal for the Next Week:" section out of a touchpoint note,
+  // since Kaylee's own note format already includes one — this lets call
+  // prep hold the student accountable to their own stated commitment
+  // instead of guessing at a generic goal.
+  function extractStatedGoal(note: string | null | undefined): string | null {
+    if (!note) return null;
+    const match = note.match(/goal for (?:the )?next week:?\**\s*\n*([\s\S]*?)(?:\n\n\*\*|\n\n[A-Z]|$)/i);
+    if (!match) return null;
+    const goal = match[1].replace(/\*\*/g, '').trim();
+    return goal || null;
+  }
+
+  // Pulls the "Call Summary" section if present, otherwise falls back to
+  // the first ~2 sentences of the note, for a short "what we talked about
+  // last time" recap.
+  function extractLastSummary(note: string | null | undefined): string | null {
+    if (!note) return null;
+    const match = note.match(/call summary:?\**\s*\n*([\s\S]*?)(?:\n\n\*\*|\n\ngoal for|$)/i);
+    const text = (match ? match[1] : note).replace(/\*\*/g, '').trim();
+    if (!text) return null;
+    const sentences = text.split(/(?<=[.!?])\s+/).slice(0, 2).join(' ');
+    return sentences.length < text.length ? `${sentences}..` : sentences;
+  }
+
   function generateStudentSupport(
     note: string,
     course?: string | null,
@@ -722,6 +746,8 @@ function App() {
     // Pull recent touchpoint history (most recent 3, excluding this note)
     const recent = (pastTouchpoints || []).slice(0, 3);
     const recentSummary = recent.map((t) => `${t.touchpoint_date} (${t.touchpoint_type}): ${(t.note || '').slice(0, 140)}`).filter(Boolean);
+    const lastGoal = extractStatedGoal(recent[0]?.note);
+    const lastRecap = extractLastSummary(recent[0]?.note);
 
     // Theme detection from current + past notes
     const allText = [note, ...recent.map((t) => t.note || '')].join(' ').toLowerCase();
@@ -733,22 +759,54 @@ function App() {
     const isLowMomentum = m.includes('low');
     const isHighMomentum = m.includes('high') && !m.includes('low');
 
-    // ===== Talking points: things to definitely curate / dig into =====
-    const talkingPoints: string[] = [];
-    talkingPoints.push(`Open with a specific reference to last contact${recent[0] ? ` (${recent[0].touchpoint_date}, ${recent[0].touchpoint_type})` : ''} so the student knows you remember.`);
-    if (hasAssessment) talkingPoints.push(`Curate from past notes any assessment chatter — confirm which OA/PA is up next in ${courseText} and whether they have a scheduled date.`);
-    if (hasZyBooks) talkingPoints.push(`Follow up on ZyBooks participation and labs — ask which module they are on and what percent complete.`);
-    if (hasBlocked) talkingPoints.push(`Past notes show a blocker theme — gently surface it: "Last time you mentioned ___; how is that piece going now?"`);
-    if (hasLife) talkingPoints.push(`Past notes flagged a life circumstance — acknowledge it briefly without prying, then ask how it is affecting study time this week.`);
-    if (courseEnd) talkingPoints.push(`Course end date is ${courseEnd} — calculate weeks remaining out loud and confirm pacing is realistic.`);
-    if (gradGoal) talkingPoints.push(`Graduation goal is ${gradGoal} — tie this week's action back to that target.`);
-    if (lastActivity) talkingPoints.push(`Most recent academic activity was ${lastActivity} — ask what they have done in the course since then.`);
-    if (isLowMomentum) talkingPoints.push(`Momentum is low — ask what one small win this week would look like. Avoid overwhelming with multiple goals.`);
-    if (isHighMomentum) talkingPoints.push(`Momentum is high — celebrate it explicitly and ask what is fueling the rhythm so you can help protect it.`);
-    if (hasGhost) talkingPoints.push(`Multiple missed touches — lead with "I have been trying to reach you because I care about your progress, not to chase you." Then confirm best contact method and time.`);
-    if (recentSummary.length) talkingPoints.push(`Recent notes for cross-reference: ${recentSummary.join(' | ')}`);
+    // ===== 1. What we discussed last time ===== 
+    const lastTimeSection: string[] = [];
+    if (recent[0]) {
+      lastTimeSection.push(`On ${recent[0].touchpoint_date} (${recent[0].touchpoint_type})${lastRecap ? `: ${lastRecap}` : ''}`);
+    } else {
+      lastTimeSection.push(`No prior touchpoint on file — this is either a first contact or the history hasn't been logged yet.`);
+    }
 
-    const next_call_prep = '• ' + talkingPoints.join('\n• ');
+    // ===== 2. The goal set last week, and questions to check on it ===== 
+    const goalCheckSection: string[] = [];
+    if (lastGoal) {
+      goalCheckSection.push(`Last week's stated goal: "${lastGoal}"`);
+      goalCheckSection.push(`Ask directly: "Last time you said you'd ${lastGoal.replace(/^the student /i, '').replace(/^will /i, '')} — how did that go?"`);
+      goalCheckSection.push(`If they didn't get to it: "What got in the way? Was it time, difficulty, or something else?" — don't let a vague "I've been busy" close the loop.`);
+      goalCheckSection.push(`If they did: confirm it explicitly and ask what made it work, so it can be repeated.`);
+    } else {
+      goalCheckSection.push(`No specific goal was logged from last time — use this call to set one concrete, dated commitment before you hang up.`);
+    }
+
+    // ===== 3. Questions that show you were paying attention =====
+    const attentiveSection: string[] = [];
+    attentiveSection.push(`Open with a specific reference to last contact${recent[0] ? ` (${recent[0].touchpoint_date}, ${recent[0].touchpoint_type})` : ''} so the student knows you remember — not a generic "how's it going."`);
+    if (hasAssessment) attentiveSection.push(`Follow up on the assessment/OA/PA mentioned before — ask directly whether it's scheduled yet.`);
+    if (hasZyBooks) attentiveSection.push(`Ask specifically which ZyBooks module/lab they're on now, referencing what they said before.`);
+    if (hasBlocked) attentiveSection.push(`Past notes show a blocker theme — surface it by name: "Last time you mentioned ___; how is that piece going now?"`);
+    if (hasLife) attentiveSection.push(`A life circumstance came up before — acknowledge it briefly without prying, then ask how it's affecting study time this week.`);
+    if (isHighMomentum) attentiveSection.push(`Momentum was high last time — celebrate it explicitly and ask what's fueling the rhythm so it can be protected.`);
+    if (hasGhost) attentiveSection.push(`Multiple missed touches on record — lead with "I've been trying to reach you because I care about your progress, not to chase you."`);
+
+    // ===== 4. Questions to verify they're on track for their actual goal =====
+    const onTrackSection: string[] = [];
+    if (courseEnd) onTrackSection.push(`Course end date is ${courseEnd} — calculate weeks remaining out loud together and confirm the pace is realistic, not just hoped-for.`);
+    if (gradGoal) onTrackSection.push(`Graduation goal is ${gradGoal} — ask what this week's work does to move toward that specific date.`);
+    if (lastActivity) onTrackSection.push(`Most recent academic activity on file was ${lastActivity} — ask what they've completed in ${courseText} since then, specifically.`);
+    onTrackSection.push(`Ask them to rate 1-10 where they are with ${courseText} right now, and what would move that number up by one point.`);
+    if (isLowMomentum) onTrackSection.push(`Momentum is flagged low — ask what one small, finishable win this week would look like. Don't stack multiple goals.`);
+
+    // ===== 5. Other reference material =====
+    const referenceSection: string[] = [];
+    if (recentSummary.length > 1) referenceSection.push(`Fuller recent history for cross-reference: ${recentSummary.slice(1).join(' | ')}`);
+    referenceSection.push(`End the call with one specific, dated commitment in the student's own words — that becomes next week's goal check.`);
+
+    const next_call_prep =
+      `WHAT WE DISCUSSED LAST TIME:\n• ${lastTimeSection.join('\n• ')}\n\n` +
+      `GOAL FROM LAST WEEK — CHECK ON THIS FIRST:\n• ${goalCheckSection.join('\n• ')}\n\n` +
+      `QUESTIONS THAT SHOW YOU WERE LISTENING:\n• ${attentiveSection.join('\n• ')}\n\n` +
+      `QUESTIONS TO CONFIRM THEY'RE ON TRACK:\n• ${onTrackSection.join('\n• ')}\n\n` +
+      `OTHER REFERENCE MATERIAL:\n• ${referenceSection.join('\n• ')}`;
 
     // ===== Coaching questions for Kaylee (specific, GROW-aligned) =====
     const coachQuestions: string[] = [];
@@ -2082,9 +2140,11 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, 
           {priorityQueue.slice(0, 3).map((student) => {
             const signals = studentStatusSignals(student, touchpoints);
             const prep = student.next_call_prep || signals.lastTouchpoint?.next_call_prep || 'Review course momentum, confirm the next measurable action, and end with one clear commitment.';
+            const goalLine = prep.split('\n').find((l) => l.trim().startsWith('Last week\u2019s stated goal') || l.trim().startsWith('Last week\'s stated goal'));
+            const prepPreview = goalLine || prep.split('\n').find((l) => l.trim() && !/^[A-Z][A-Z '’\-—]+:$/.test(l.trim())) || prep;
             return <div className="call-prep-card" key={student.id}>
               <strong>{student.display_name}</strong>
-              <p>{prep}</p>
+              <p>{prepPreview}</p>
               <small>{signals.missedCalls ? `${signals.missedCalls} missed call(s)` : 'No missed call flag'} · {student.next_appointment_date || 'No appointment date entered'}</small>
             </div>;
           })}
@@ -4592,7 +4652,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
                 {selected.next_call_prep.split('\n').map((line, i) => {
                   if (!line.trim()) return <div key={i} style={{ height: 4 }} />;
                   const isGrow = /^[GROW] —/.test(line);
-                  const isSection = line === 'GROW questions:';
+                  const isSection = line === 'GROW questions:' || /^[A-Z][A-Z '’\-—]+:$/.test(line.trim());
                   const isOpen = line.startsWith('📌');
                   const isDate = line.startsWith('📅');
                   const isMomentum = line.startsWith('⚡');
@@ -4678,7 +4738,15 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
                       <p style={touchpoint.touchpoint_type === 'Email thread' ? { whiteSpace: 'pre-wrap', background: 'var(--surface-1)', padding: 10, borderRadius: 6 } : undefined}>{touchpoint.note}</p>
                       <details>
                         <summary>Next-call prep and follow-up drafts</summary>
-                        <div className="brief-item"><strong>Next call:</strong> {touchpoint.next_call_prep}</div>
+                        <div className="brief-item"><strong>Next call:</strong>
+                          <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+                            {(touchpoint.next_call_prep || '').split('\n').map((line, i) => (
+                              <div key={i} style={/^[A-Z][A-Z '’\-—]+:$/.test(line.trim()) ? { fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)', marginTop: i === 0 ? 0 : 8 } : { fontSize: 13 }}>
+                                {line || '\u00A0'}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                         <div className="brief-item"><strong>Kaylee coaching:</strong> {touchpoint.constructive_note}</div>
                         <textarea readOnly value={touchpoint.follow_up_email || ''} />
                         <button className="btn primary" onClick={() => copyText(touchpoint.follow_up_email || '', touchpoint.id, 'student_touchpoints')}><Copy size={15} /> Copy Email Draft</button>
