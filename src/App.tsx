@@ -774,58 +774,71 @@ function App() {
 
     const firstName = (student?.display_name || '').trim().split(/\s+/)[0] || 'there';
 
-    // ===== Opening + last week's goal check (SAY lines are literal, ready to speak) =====
-    const openingSection: string[] = [];
+    // ===== GOAL — opener + what today's call is for =====
+    const goalSection: string[] = [];
     if (hasGhost) {
-      openingSection.push(`"Hey ${firstName}, I've been trying to reach you — I just want you to know I'm not chasing you down, I genuinely want to check in on how you're doing."`);
+      goalSection.push(`"Hey ${firstName}, I've been trying to reach you — I just want you to know I'm not chasing you down, I genuinely want to check in on how you're doing."`);
     } else {
-      openingSection.push(`"Hi ${firstName}! Good to connect again."`);
+      goalSection.push(`"Hi ${firstName}! Good to connect again."`);
     }
+    goalSection.push(`"What would you like to walk away from our call today with?"`);
+
+    // ===== REALITY — where things actually stand, grounded in what was said last time =====
+    const realitySection: string[] = [];
     if (lastGoal) {
       const spokenGoal = lastGoal.replace(/^the student\s+/i, '').replace(/^will\s+/i, 'plans to ');
-      openingSection.push(`"Last time, here's what we talked about you working on: '${spokenGoal}' — how did that go this week?"`);
-      openingSection.push(`If they made progress: "That's great — what worked well, so we can keep doing more of that?"`);
-      openingSection.push(`If they didn't get to it: "No worries at all — what got in the way this week?"`);
+      realitySection.push(`"Last time, here's what we talked about you working on: '${spokenGoal}' — how did that go this week?"`);
+      realitySection.push(`If they made progress: "That's great — what worked well, so we can keep doing more of that?"`);
+      realitySection.push(`If they didn't get to it: "No worries at all — what got in the way this week?"`);
     } else if (recent[0]) {
-      openingSection.push(`"How have things been going in ${courseText} since we last talked${lastRecap ? `? Last time we touched on ${lastRecap.charAt(0).toLowerCase()}${lastRecap.slice(1)}` : ''}"`);
+      realitySection.push(`"How have things been going in ${courseText} since we last talked${lastRecap ? `? Last time we touched on ${lastRecap.charAt(0).toLowerCase()}${lastRecap.slice(1)}` : ''}"`);
     } else {
-      openingSection.push(`"I'd love to hear how things are going in ${courseText} so far."`);
+      realitySection.push(`"I'd love to hear how things are going in ${courseText} so far."`);
     }
 
-    // ===== OA/PA/assessment status — grounded in exactly what was said =====
+    // OA/PA/assessment status — grounded in exactly what was said
     const assessmentMentions = [
       ...extractAssessmentMentions(note),
       ...extractAssessmentMentions(recent[0]?.note),
     ].filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 2);
-    const assessmentSection: string[] = [];
     if (assessmentMentions.length) {
-      assessmentSection.push(`"Last time you mentioned: '${assessmentMentions[0]}' — has that happened yet, or is it still coming up?"`);
-      assessmentSection.push(`If it's not scheduled yet: "Let's go ahead and pick a specific date right now, while we're on the phone."`);
-      assessmentSection.push(`If it's already happened: "How did it go? If it wasn't a pass, what's the plan for the retake?"`);
+      realitySection.push(`"Last time you mentioned: '${assessmentMentions[0]}' — has that happened yet, or is it still coming up?"`);
+      realitySection.push(`If it's already happened: "How did it go? If it wasn't a pass, what's the plan for the retake?"`);
     } else {
-      assessmentSection.push(`"Do you have an assessment or exam coming up for ${courseText}? I want to make sure we're planning ahead for it${courseEnd ? ` before your course ends ${courseEnd}` : ''}."`);
+      realitySection.push(`"Do you have an assessment or exam coming up for ${courseText}? I want to make sure we're planning ahead for it${courseEnd ? ` before your course ends ${courseEnd}` : ''}."`);
     }
+    if (hasZyBooks) realitySection.push(`"How's it going with ZyBooks — which module or lab are you on right now?"`);
+    if (hasBlocked) realitySection.push(`"Is there anything specific that's been slowing you down lately?"`);
+    if (hasLife) realitySection.push(`"How are things going outside of school right now — is that affecting your study time this week?"`);
+    if (isHighMomentum) realitySection.push(`"You've had really strong momentum lately — what's been working so well for you?"`);
+    realitySection.push(`"On a scale of 1 to 10, where do you feel you are with ${courseText} right now?"`);
 
-    // ===== Other things worth bringing up, only if they're actually relevant =====
-    const otherSection: string[] = [];
-    if (hasZyBooks) otherSection.push(`"How's it going with ZyBooks — which module or lab are you on right now?"`);
-    if (hasBlocked) otherSection.push(`"Is there anything specific that's been slowing you down lately?"`);
-    if (hasLife) otherSection.push(`"How are things going outside of school right now — is that affecting your study time this week?"`);
-    if (isHighMomentum) otherSection.push(`"You've had really strong momentum lately — what's been working so well for you?"`);
-    if (isLowMomentum) otherSection.push(`"What would one small, doable win look like for you this week? Let's not stack too much on your plate."`);
+    // ===== OPTIONS — brainstorm the actual path forward, out loud, together =====
+    const optionsSection: string[] = [];
+    if (assessmentMentions.length) {
+      optionsSection.push(`"Would it help to go ahead and pick a specific date right now, while we're on the phone?"`);
+    }
+    if (hasBlocked || isLowMomentum) {
+      optionsSection.push(`"What have you already tried for this, and what's one thing you haven't tried yet?"`);
+      optionsSection.push(`"What would one small, doable win look like for you this week? Let's not stack too much on your plate."`);
+    } else {
+      optionsSection.push(`"What are a couple different ways you could get to your next milestone this week?"`);
+    }
+    if (hasLife) optionsSection.push(`"Is there a way we could adjust your plan to work better around what's going on right now?"`);
+    optionsSection.push(`"Which of these feels the most doable to you?"`);
 
-    // ===== Wrapping up: pace check + one dated commitment =====
-    const closingSection: string[] = [];
-    if (courseEnd) closingSection.push(`"Your course wraps up ${courseEnd} — let's count the weeks together out loud and make sure the pace still makes sense."`);
-    if (gradGoal) closingSection.push(`"Thinking about your graduation goal of ${gradGoal} — how does this week's plan move you toward that?"`);
-    closingSection.push(`"On a scale of 1 to 10, where do you feel you are with ${courseText} right now?"`);
-    closingSection.push(`"Before we hang up — what's the ONE thing you'll get done before we talk again, and what day will you do it by?"`);
+    // ===== WILL — the actual dated commitment =====
+    const willSection: string[] = [];
+    if (courseEnd) willSection.push(`"Your course wraps up ${courseEnd} — let's count the weeks together out loud and make sure the pace still makes sense."`);
+    if (gradGoal) willSection.push(`"Thinking about your graduation goal of ${gradGoal} — how does this week's plan move you toward that?"`);
+    willSection.push(`"Before we hang up — what's the ONE thing you'll get done before we talk again, and what day will you do it by?"`);
+    willSection.push(`"What could get in the way of that, and what's your plan if it does?"`);
 
     const next_call_prep =
-      `OPENING & LAST WEEK'S GOAL:\n• ${openingSection.join('\n• ')}\n\n` +
-      `ASSESSMENT CHECK:\n• ${assessmentSection.join('\n• ')}\n\n` +
-      (otherSection.length ? `OTHER THINGS TO BRING UP:\n• ${otherSection.join('\n• ')}\n\n` : '') +
-      `WRAPPING UP:\n• ${closingSection.join('\n• ')}`;
+      `GOAL — what today's call is for:\n• ${goalSection.join('\n• ')}\n\n` +
+      `REALITY — where things actually stand:\n• ${realitySection.join('\n• ')}\n\n` +
+      `OPTIONS — brainstorm the path forward together:\n• ${optionsSection.join('\n• ')}\n\n` +
+      `WILL — lock in one dated commitment:\n• ${willSection.join('\n• ')}`;
 
     // ===== Coaching questions for Kaylee (specific, GROW-aligned) =====
     const coachQuestions: string[] = [];
@@ -4671,7 +4684,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
                 {selected.next_call_prep.split('\n').map((line, i) => {
                   if (!line.trim()) return <div key={i} style={{ height: 4 }} />;
                   const isGrow = /^[GROW] —/.test(line);
-                  const isSection = line === 'GROW questions:' || /^[A-Z][A-Z \/'’\-—]+:$/.test(line.trim());
+                  const isSection = line === 'GROW questions:' || /^(GOAL|REALITY|OPTIONS|WILL)\s+—/.test(line.trim()) || /^[A-Z][A-Z \/'’\-—]+:$/.test(line.trim());
                   const isOpen = line.startsWith('📌');
                   const isDate = line.startsWith('📅');
                   const isMomentum = line.startsWith('⚡');
@@ -4760,7 +4773,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
                         <div className="brief-item"><strong>Next call:</strong>
                           <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
                             {(touchpoint.next_call_prep || '').split('\n').map((line, i) => (
-                              <div key={i} style={/^[A-Z][A-Z \/'’\-—]+:$/.test(line.trim()) ? { fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)', marginTop: i === 0 ? 0 : 8 } : { fontSize: 13 }}>
+                              <div key={i} style={(/^(GOAL|REALITY|OPTIONS|WILL)\s+—/.test(line.trim()) || /^[A-Z][A-Z \/'’\-—]+:$/.test(line.trim())) ? { fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)', marginTop: i === 0 ? 0 : 8 } : { fontSize: 13 }}>
                                 {line || '\u00A0'}
                               </div>
                             ))}
