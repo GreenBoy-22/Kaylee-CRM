@@ -53,6 +53,39 @@ const CATEGORIES = [
   'Snacks', 'Baking', 'Canned Goods', 'Condiments', 'Other',
 ];
 
+// Which categories actually make sense to offer per room — keeps the
+// dropdown from showing "Refrigerator" as an option when adding a
+// bathroom item, for example. Every room still includes 'Other' as a
+// catch-all. Categories themselves are unchanged (existing items keep
+// matching fine), this only changes which ones are offered per room.
+const LOCATION_CATEGORIES: Record<string, string[]> = {
+  'Kitchen': ['Pantry', 'Refrigerator', 'Freezer', 'Baking', 'Canned Goods', 'Condiments', 'Beverages', 'Snacks', 'Paper Products', 'Other'],
+  'Cabinet': ['Pantry', 'Canned Goods', 'Baking', 'Cleaning', 'Paper Products', 'Other'],
+  'Bathroom': ['Personal Care', 'Medicine', 'Paper Products', 'Cleaning', 'Other'],
+  'Laundry Room': ['Cleaning', 'Paper Products', 'Other'],
+  'Garage': ['Cleaning', 'Garden', 'Pet Supplies', 'Other'],
+  'Storage': ['Pet Supplies', 'Garden', 'Paper Products', 'Cleaning', 'Medicine', 'Other'],
+};
+
+// Categories that are inherently perishable get auto-checked as
+// perishable, with a suggested expiration date offset (in days) from the
+// import/scan date — e.g. medications typically get roughly a year,
+// refrigerated items a couple weeks. This applies whether the item was
+// added manually or came in through a barcode scan, since both paths
+// route through the same category field. It's a starting suggestion, not
+// locked in — always editable before saving.
+const CATEGORY_EXPIRY_DAYS: Record<string, number> = {
+  'Medicine': 365,
+  'Refrigerator': 14,
+  'Freezer': 180,
+  'Pantry': 180,
+  'Canned Goods': 545,
+  'Condiments': 180,
+  'Baking': 270,
+  'Beverages': 180,
+  'Snacks': 120,
+};
+
 const UNITS = ['each', 'oz', 'lbs', 'gal', 'qt', 'pint', 'fl oz', 'cups', 'count', 'pkg', 'box', 'can', 'jar', 'bottle'];
 
 const LOCATIONS = ['Kitchen', 'Cabinet', 'Bathroom', 'Laundry Room', 'Garage', 'Storage'];
@@ -136,6 +169,34 @@ export default function Inventory() {
       scanRef.current.focus();
     }
   }, [tab]);
+
+  function handleLocationChange(loc: string) {
+    setFLoc(loc);
+    const validCats = LOCATION_CATEGORIES[loc] || CATEGORIES;
+    if (!validCats.includes(fCat)) {
+      const nextCat = validCats[0];
+      setFCat(nextCat);
+      applyPerishableDefault(nextCat);
+    }
+  }
+
+  function applyPerishableDefault(cat: string) {
+    const offsetDays = CATEGORY_EXPIRY_DAYS[cat];
+    if (offsetDays == null) return;
+    setFPerishable(true);
+    // Don't clobber a date that's already been entered — only suggest one
+    // when the field is still blank.
+    setFExpires((current) => {
+      if (current) return current;
+      const base = fImport ? new Date(fImport + 'T00:00:00') : new Date();
+      return toKey(new Date(base.getTime() + offsetDays * 86400000));
+    });
+  }
+
+  function handleCategoryChange(cat: string) {
+    setFCat(cat);
+    applyPerishableDefault(cat);
+  }
 
   function resetForm() {
     setFName(''); setFBrand(''); setFCat('Pantry'); setFLoc('Kitchen');
@@ -438,7 +499,7 @@ Quick tip: [1-sentence cooking note]`;
               />
               <select value={filterCat} onChange={e => setFilterCat(e.target.value)} style={{ fontSize: 12 }}>
                 <option value="all">All categories</option>
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                {(filterLoc === 'all' ? CATEGORIES : (LOCATION_CATEGORIES[filterLoc] || CATEGORIES)).map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
 
@@ -447,7 +508,11 @@ Quick tip: [1-sentence cooking note]`;
               {['all', ...LOCATIONS].map(loc => (
                 <button
                   key={loc}
-                  onClick={() => setFilterLoc(loc)}
+                  onClick={() => {
+                    setFilterLoc(loc);
+                    const validCats = loc === 'all' ? CATEGORIES : (LOCATION_CATEGORIES[loc] || CATEGORIES);
+                    if (filterCat !== 'all' && !validCats.includes(filterCat)) setFilterCat('all');
+                  }}
                   style={{
                     padding: '6px 14px', borderRadius: 999, fontSize: 12, fontWeight: filterLoc === loc ? 700 : 500,
                     border: `1.5px solid ${filterLoc === loc ? 'var(--green)' : 'var(--border)'}`,
@@ -729,8 +794,8 @@ Quick tip: [1-sentence cooking note]`;
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
               Category
-              <select value={fCat} onChange={e => setFCat(e.target.value)}>
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              <select value={fCat} onChange={e => handleCategoryChange(e.target.value)}>
+                {(LOCATION_CATEGORIES[fLoc] || CATEGORIES).map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
@@ -753,6 +818,9 @@ Quick tip: [1-sentence cooking note]`;
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
               Expiration date<input type="date" value={fExpires} onChange={e => setFExpires(e.target.value)} />
+              {CATEGORY_EXPIRY_DAYS[fCat] != null && (
+                <span style={{ fontSize: 10.5 }}>Auto-suggested for {fCat} — adjust anytime</span>
+              )}
             </label>
           </div>
 
@@ -763,7 +831,7 @@ Quick tip: [1-sentence cooking note]`;
                 <button
                   key={loc}
                   type="button"
-                  onClick={() => setFLoc(loc)}
+                  onClick={() => handleLocationChange(loc)}
                   style={{
                     padding: '7px 16px', borderRadius: 999, fontSize: 13, fontWeight: fLoc === loc ? 700 : 500,
                     border: `1.5px solid ${fLoc === loc ? 'var(--green)' : 'var(--border)'}`,

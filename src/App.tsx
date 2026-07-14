@@ -2016,7 +2016,20 @@ function fmtDateShort(dateValue?: string | null, includeYear = false): string {
 function soonestAppointment(student: Student): string | null {
   const candidates = [student.next_appointment_date, student.next_call_at].filter(Boolean) as string[];
   if (!candidates.length) return null;
-  return candidates.slice().sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
+  const sorted = candidates.slice().sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+  // If the two soonest candidates fall on the same calendar day, prefer
+  // whichever one actually carries a specific time (e.g. a real weekly
+  // appointment slot) over a bare date placeholder that just implies
+  // midnight — that's more useful to see than an untimed date.
+  if (sorted.length === 2) {
+    const d0 = new Date(sorted[0]);
+    const d1 = new Date(sorted[1]);
+    if (d0.toDateString() === d1.toDateString()) {
+      const hasTime = (d: Date) => d.getHours() !== 0 || d.getMinutes() !== 0;
+      if (!hasTime(d0) && hasTime(d1)) return sorted[1];
+    }
+  }
+  return sorted[0];
 }
 
 function riskPenalty(student: Student, touchpoints: Touchpoint[]) {
@@ -4663,7 +4676,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
       note: touchForm.note
     });
     if (touchForm.next_call_at) {
-      const iso = new Date(touchForm.next_call_at).toISOString();
+      const iso = new Date(`${touchForm.next_call_at}T00:00`).toISOString();
       updateStudent(selected.id, { next_call_at: iso } as Partial<Student>);
     }
     // A touchpoint flagged as the weekly appointment or a missed call also
