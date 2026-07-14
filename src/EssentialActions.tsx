@@ -50,6 +50,7 @@ interface EaLogRow {
   snippet_used: string | null;
   notes: string | null;
   created_at: string;
+  closed_at: string | null;
 }
 
 // ── EA reference table — matched to Kaylee's real Text Blaze shortcuts ──
