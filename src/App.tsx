@@ -805,7 +805,7 @@ function App() {
       realitySection.push(`"Last time you mentioned: '${assessmentMentions[0]}' — has that happened yet, or is it still coming up?"`);
       realitySection.push(`If it's already happened: "How did it go? If it wasn't a pass, what's the plan for the retake?"`);
     } else {
-      realitySection.push(`"Do you have an assessment or exam coming up for ${courseText}? I want to make sure we're planning ahead for it${courseEnd ? ` before your course ends ${courseEnd}` : ''}."`);
+      realitySection.push(`"Do you have an assessment or exam coming up for ${courseText}? I want to make sure we're planning ahead for it${courseEnd ? ` before your course ends ${fmtDateShort(courseEnd)}` : ''}."`);
     }
     if (hasZyBooks) realitySection.push(`"How's it going with ZyBooks — which module or lab are you on right now?"`);
     if (hasBlocked) realitySection.push(`"Is there anything specific that's been slowing you down lately?"`);
@@ -829,8 +829,8 @@ function App() {
 
     // ===== WILL — the actual dated commitment =====
     const willSection: string[] = [];
-    if (courseEnd) willSection.push(`"Your course wraps up ${courseEnd} — let's count the weeks together out loud and make sure the pace still makes sense."`);
-    if (gradGoal) willSection.push(`"Thinking about your graduation goal of ${gradGoal} — how does this week's plan move you toward that?"`);
+    if (courseEnd) willSection.push(`"Your course wraps up ${fmtDateShort(courseEnd)} — let's count the weeks together out loud and make sure the pace still makes sense."`);
+    if (gradGoal) willSection.push(`"Thinking about your graduation goal of ${fmtDateShort(gradGoal)} — how does this week's plan move you toward that?"`);
     willSection.push(`"Before we hang up — what's the ONE thing you'll get done before we talk again, and what day will you do it by?"`);
     willSection.push(`"What could get in the way of that, and what's your plan if it does?"`);
 
@@ -1990,6 +1990,33 @@ function daysUntil(dateValue?: string | null) {
   const value = new Date(dateValue).getTime();
   if (Number.isNaN(value)) return null;
   return Math.ceil((value - Date.now()) / 86400000);
+}
+
+// "July 13" by default (no year — the current year is assumed). Pass
+// includeYear=true for longer-horizon dates like term start/end, where
+// knowing the year actually matters. If the raw value is a full timestamp
+// (not just a bare date) and carries a real local time other than
+// midnight, that time is appended in 12-hour AM/PM form.
+function fmtDateShort(dateValue?: string | null, includeYear = false): string {
+  if (!dateValue) return '—';
+  const d = new Date(dateValue.length <= 10 ? `${dateValue}T00:00:00` : dateValue);
+  if (Number.isNaN(d.getTime())) return dateValue;
+  const opts: Intl.DateTimeFormatOptions = includeYear
+    ? { month: 'long', day: 'numeric', year: 'numeric' }
+    : { month: 'long', day: 'numeric' };
+  let out = d.toLocaleDateString('en-US', opts);
+  if (dateValue.length > 10 && (d.getHours() !== 0 || d.getMinutes() !== 0)) {
+    out += ` at ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  }
+  return out;
+}
+
+// Whichever of the student's next one-off call/appointment or their
+// recurring weekly appointment slot comes first, chronologically.
+function soonestAppointment(student: Student): string | null {
+  const candidates = [student.next_appointment_date, student.next_call_at].filter(Boolean) as string[];
+  if (!candidates.length) return null;
+  return candidates.slice().sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
 }
 
 function riskPenalty(student: Student, touchpoints: Touchpoint[]) {
@@ -4644,9 +4671,10 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
     // missed-appointment tracking in Work Performance keep working without
     // a separate Log Appointment step.
     if (touchForm.is_weekly || touchForm.missed) {
+      const weeklyTime = touchForm.is_weekly && selected.weekly_appointment_time ? selected.weekly_appointment_time : '00:00';
       createAppointment({
         student_id: selected.id,
-        appointment_at: new Date(`${touchForm.touchpoint_date}T00:00`).toISOString(),
+        appointment_at: new Date(`${touchForm.touchpoint_date}T${weeklyTime}`).toISOString(),
         is_weekly: touchForm.is_weekly,
         missed: touchForm.missed,
         missed_email_sent: touchForm.missed ? touchForm.missed_email_sent : false,
@@ -4809,7 +4837,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
         {/* TWO-COLUMN ZONE: scrollable history on left, sticky touchpoint form on right */}
         <div className="student-work-area">
           <div className="student-work-main">
-            <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{selected.last_contact_date || '—'}</p></div><div><strong>Next appointment</strong><p>{selected.next_appointment_date || '—'}</p></div><div><strong>Graduation goal</strong><p>{selected.graduation_goal_date || '—'}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Last academic activity</strong><p>{selected.last_academic_activity_date || '—'}</p></div><div><strong>Term #</strong><p><input type="number" value={selected.contact_term ?? ''} onChange={(e) => updateStudent(selected.id, { contact_term: e.target.value ? Number(e.target.value) : null } as Partial<Student>)} style={{ width: 60, padding: '2px 6px' }} />{selected.graduated ? ' · 🎓 Graduated' : ''}</p></div><div><strong>Term start</strong><p>{selected.term_start_date || '—'}</p></div><div><strong>Term end</strong><p>{selected.term_end_date || '—'}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
+            <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{fmtDateShort(selected.last_contact_date)}</p></div><div><strong>Next appointment</strong><p>{fmtDateShort(soonestAppointment(selected))}</p></div><div><strong>Graduation goal</strong><p>{fmtDateShort(selected.graduation_goal_date)}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Last academic activity</strong><p>{fmtDateShort(selected.last_academic_activity_date)}</p></div><div><strong>Term #</strong><p><input type="number" value={selected.contact_term ?? ''} onChange={(e) => updateStudent(selected.id, { contact_term: e.target.value ? Number(e.target.value) : null } as Partial<Student>)} style={{ width: 60, padding: '2px 6px' }} />{selected.graduated ? ' · 🎓 Graduated' : ''}</p></div><div><strong>Term start</strong><p>{fmtDateShort(selected.term_start_date, true)}</p></div><div><strong>Term end</strong><p>{fmtDateShort(selected.term_end_date, true)}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
             <section className="panel">
               <div className="panel-head">
                 <h2>History Log</h2>
