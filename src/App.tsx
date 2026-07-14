@@ -5,7 +5,7 @@ import {
   Activity, Cloud, Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Gamepad2, Film, Plane, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Check, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope, TrendingUp
+  CheckCircle2, Check, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope, TrendingUp, NotebookText
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
@@ -21,6 +21,8 @@ import WorkPerformance from './WorkPerformance';
 import EssentialActions from './EssentialActions';
 import FTOTracker from './FTOTracker';
 import CourseNotes from './CourseNotes';
+import TeamChatAssistant from './TeamChatAssistant';
+import TeamNotes from './TeamNotes';
 import MoodTracker from './MoodTracker';
 import PlantCatalog from './PlantCatalog';
 import WeatherWidget from './WeatherWidget';
@@ -33,7 +35,7 @@ import Appointments from './Appointments';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'mood' | 'weather' | 'plants' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'essential_actions' | 'settings';
+type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'team_chat' | 'team_notes' | 'mood' | 'weather' | 'plants' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'essential_actions' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -291,6 +293,8 @@ const workNav: readonly NavEntry[] = [
   ['briefing', 'Daily Briefing', Sparkles],
   ['fto', 'FTO Tracker', Clock],
   ['outreach', 'Outreach Drafts', Mail],
+  ['team_chat', 'Team Chat Assistant', MessageSquare],
+  ['team_notes', 'Team Notes', NotebookText],
   ['students', 'Students', Users],
   ['work_performance', 'Work Performance', TrendingUp],
   ['essential_actions', 'Essential Actions', ClipboardCheck],
@@ -311,6 +315,8 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'books', module_name: 'books', label: 'Library', default_access: 'view' },
   { page: 'students', module_name: 'students', label: 'Students', default_access: 'hidden' },
   { page: 'outreach', module_name: 'outreach', label: 'Outreach Drafts', default_access: 'hidden' },
+  { page: 'team_chat', module_name: 'team_chat', label: 'Team Chat Assistant', default_access: 'hidden' },
+  { page: 'team_notes', module_name: 'team_notes', label: 'Team Notes', default_access: 'hidden' },
   { page: 'work_performance', module_name: 'work_performance', label: 'Work Performance', default_access: 'hidden' },
   { page: 'essential_actions', module_name: 'essential_actions', label: 'Essential Actions', default_access: 'hidden' }
 ];
@@ -1988,6 +1994,8 @@ Kaylee`;
           {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} appointments={appointments} eaLog={eaLog} createEaLog={createEaLog} closeEaLog={closeEaLog} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} updateTouchpoint={updateTouchpoint} deleteTouchpoint={deleteTouchpoint} createAppointment={createAppointment} updateAppointment={updateAppointment} deleteAppointment={deleteAppointment} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} setMessage={setMessage} />}
           {page === 'fto' && activeRole === 'admin' && <FTOTracker />}
           {page === 'course_notes' && activeRole === 'admin' && <CourseNotes />}
+          {page === 'team_chat' && activeRole === 'admin' && <TeamChatAssistant />}
+          {page === 'team_notes' && activeRole === 'admin' && <TeamNotes />}
           {page === 'mood' && <MoodTracker />}
           {page === 'plants' && <PlantCatalog />}
           {page === 'packages' && session && <PackageTracking userId={session.user.id} />}
