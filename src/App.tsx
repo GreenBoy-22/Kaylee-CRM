@@ -734,13 +734,52 @@ function App() {
   // ask a specific, grounded follow-up instead of a generic one. Sentences
   // that also carry a date/scheduling detail (postponed, this week, a
   // weekday, etc.) are prioritized, since those are the most actionable.
-  function extractAssessmentMentions(text: string | null | undefined): string[] {
+  // Shared sentence-extraction helper: strips section headers so they can't
+  // get glued onto adjacent sentences, then returns sentences matching the
+  // given keyword pattern, optionally sorted to prioritize ones that also
+  // carry a timing/date detail.
+  function extractSentencesMatching(text: string | null | undefined, kw: RegExp, timingKw?: RegExp): string[] {
     if (!text) return [];
     const cleaned = text.replace(/^\**\s*(call summary|goal for (?:the )?next week)\s*:?\**\s*$/gim, '');
+    const sentences = cleaned.split(/(?<=[.!?])\s+/).map((s) => s.replace(/\n+/g, ' ').trim()).filter((s) => kw.test(s) && s.length < 300);
+    if (timingKw) return sentences.sort((a, b) => Number(timingKw.test(b)) - Number(timingKw.test(a)));
+    return sentences;
+  }
+
+  function extractAssessmentMentions(text: string | null | undefined): string[] {
     const kw = /\b(objective assessment|performance assessment|\bOA\b|\bPA\b|certification exam|the exam\b|proctored|voucher|assessment date)/i;
     const timing = /\b(scheduled|reschedul|postpon|this week|next week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|by [A-Z][a-z]+ \d|on [A-Z][a-z]+ \d|\d{1,2}\/\d{1,2})/i;
-    const sentences = cleaned.split(/(?<=[.!?])\s+/).map((s) => s.replace(/\n+/g, ' ').trim()).filter((s) => kw.test(s) && s.length < 300);
-    return sentences.sort((a, b) => Number(timing.test(b)) - Number(timing.test(a))).slice(0, 2);
+    return extractSentencesMatching(text, kw, timing).slice(0, 2);
+  }
+
+  // A practice-exam score or percentage mentioned — genuinely specific,
+  // worth checking whether it's moved since last time.
+  function extractScoreMentions(text: string | null | undefined): string[] {
+    const kw = /\d{1,3}\s?%|scored|practice (exam|test)|score of/i;
+    return extractSentencesMatching(text, kw).slice(0, 2);
+  }
+
+  // A named struggle or specific weak spot — not just "they seemed stuck,"
+  // but whatever they or Kaylee actually described.
+  function extractStruggleMentions(text: string | null | undefined): string[] {
+    const kw = /\b(struggl\w*|difficult\w*|challeng\w*|errors?|mistakes?|weak (spot|area)s?|rushing|confus\w*|overwhelm\w*|stuck)\b/i;
+    return extractSentencesMatching(text, kw).slice(0, 2);
+  }
+
+  // Advice Kaylee actually gave last time — first-person, past-tense
+  // coaching language. Worth following up on whether it landed.
+  function extractAdviceGiven(text: string | null | undefined): string[] {
+    const kw = /\bI (encouraged|emphasized|reinforced|recommended|suggested|reminded|advised|explained|walked (the student|them))\b/i;
+    return extractSentencesMatching(text, kw).slice(0, 2);
+  }
+
+  // Personal/life mentions — only ever used to build a warm, specific
+  // check-in when a student has actually shared something personal.
+  // Never forced or generic; this section simply doesn't appear if
+  // nothing real was said.
+  function extractPersonalMentions(text: string | null | undefined): string[] {
+    const kw = /\b(family|spouse|husband|wife|kids?|children|son|daughter|parent|mom|dad|sick|illness|hospital|surger\w*|injur\w*|mov(e|ing|ed)|relocat\w*|funeral|passed away|died|childcare|daycare|wedding|marri\w*|engage\w*|birthday|vacation|travel\w*|financ\w*|laid off|promotion|new job|stress\w*|overwhelm\w*|exhaust\w*|baby|pregnan\w*|newborn|deploy\w*|military|divorce|breakup)\b/i;
+    return extractSentencesMatching(text, kw).slice(0, 2);
   }
 
   function generateStudentSupport(
@@ -783,6 +822,19 @@ function App() {
     }
     goalSection.push(`"What would you like to walk away from our call today with?"`);
 
+    // ===== PERSONAL CHECK-IN — only appears when a student has actually
+    // shared something personal in a recent note. Never forced, never
+    // generic — this is specifically for the softer, caring opening that
+    // shows you remembered something real about their life, not just
+    // their coursework.
+    const personalMentions = [
+      ...extractPersonalMentions(note),
+      ...extractPersonalMentions(recent[0]?.note),
+    ].filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 2);
+    const personalSection: string[] = personalMentions.map((mention) =>
+      `"Before we dive into coursework — last time you mentioned: '${mention}' — how are things going with that now?"`
+    );
+
     // ===== REALITY — where things actually stand, grounded in what was said last time =====
     const realitySection: string[] = [];
     if (lastGoal) {
@@ -807,9 +859,38 @@ function App() {
     } else {
       realitySection.push(`"Do you have an assessment or exam coming up for ${courseText}? I want to make sure we're planning ahead for it${courseEnd ? ` before your course ends ${fmtDateShort(courseEnd)}` : ''}."`);
     }
+
+    // A practice score/percentage mentioned last time — worth checking whether it's moved
+    const scoreMentions = [
+      ...extractScoreMentions(note),
+      ...extractScoreMentions(recent[0]?.note),
+    ].filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 1);
+    if (scoreMentions.length) {
+      realitySection.push(`"Last time you mentioned: '${scoreMentions[0]}' — how are your practice scores looking now?"`);
+    }
+
     if (hasZyBooks) realitySection.push(`"How's it going with ZyBooks — which module or lab are you on right now?"`);
-    if (hasBlocked) realitySection.push(`"Is there anything specific that's been slowing you down lately?"`);
-    if (hasLife) realitySection.push(`"How are things going outside of school right now — is that affecting your study time this week?"`);
+
+    // Named struggle/weak spot — quote it specifically instead of a generic "anything slowing you down"
+    const struggleMentions = [
+      ...extractStruggleMentions(note),
+      ...extractStruggleMentions(recent[0]?.note),
+    ].filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 1);
+    if (struggleMentions.length) {
+      realitySection.push(`"Last time you mentioned: '${struggleMentions[0]}' — is that still giving you trouble, or has it gotten easier?"`);
+    } else if (hasBlocked) {
+      realitySection.push(`"Is there anything specific that's been slowing you down lately?"`);
+    }
+
+    // Advice Kaylee actually gave last time — follow up on whether it landed
+    const adviceMentions = [
+      ...extractAdviceGiven(note),
+      ...extractAdviceGiven(recent[0]?.note),
+    ].filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 1);
+    if (adviceMentions.length) {
+      realitySection.push(`"Last time I mentioned: '${adviceMentions[0]}' — were you able to try that? Did it help?"`);
+    }
+
     if (isHighMomentum) realitySection.push(`"You've had really strong momentum lately — what's been working so well for you?"`);
     realitySection.push(`"On a scale of 1 to 10, where do you feel you are with ${courseText} right now?"`);
 
@@ -818,13 +899,13 @@ function App() {
     if (assessmentMentions.length) {
       optionsSection.push(`"Would it help to go ahead and pick a specific date right now, while we're on the phone?"`);
     }
-    if (hasBlocked || isLowMomentum) {
+    if (struggleMentions.length || hasBlocked || isLowMomentum) {
       optionsSection.push(`"What have you already tried for this, and what's one thing you haven't tried yet?"`);
       optionsSection.push(`"What would one small, doable win look like for you this week? Let's not stack too much on your plate."`);
     } else {
       optionsSection.push(`"What are a couple different ways you could get to your next milestone this week?"`);
     }
-    if (hasLife) optionsSection.push(`"Is there a way we could adjust your plan to work better around what's going on right now?"`);
+    if (hasLife || personalMentions.length) optionsSection.push(`"Is there a way we could adjust your plan to work better around what's going on right now?"`);
     optionsSection.push(`"Which of these feels the most doable to you?"`);
 
     // ===== WILL — the actual dated commitment =====
@@ -836,6 +917,7 @@ function App() {
 
     const next_call_prep =
       `GOAL — what today's call is for:\n• ${goalSection.join('\n• ')}\n\n` +
+      (personalSection.length ? `PERSONAL CHECK-IN — a softer opening, before the coursework:\n• ${personalSection.join('\n• ')}\n\n` : '') +
       `REALITY — where things actually stand:\n• ${realitySection.join('\n• ')}\n\n` +
       `OPTIONS — brainstorm the path forward together:\n• ${optionsSection.join('\n• ')}\n\n` +
       `WILL — lock in one dated commitment:\n• ${willSection.join('\n• ')}`;
@@ -4820,7 +4902,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
                 {selected.next_call_prep.split('\n').map((line, i) => {
                   if (!line.trim()) return <div key={i} style={{ height: 4 }} />;
                   const isGrow = /^[GROW] —/.test(line);
-                  const isSection = line === 'GROW questions:' || /^(GOAL|REALITY|OPTIONS|WILL)\s+—/.test(line.trim()) || /^[A-Z][A-Z \/'’\-—]+:$/.test(line.trim());
+                  const isSection = line === 'GROW questions:' || /^(GOAL|REALITY|OPTIONS|WILL|PERSONAL CHECK-IN)\s+—/.test(line.trim()) || /^[A-Z][A-Z \/'’\-—]+:$/.test(line.trim());
                   const isOpen = line.startsWith('📌');
                   const isDate = line.startsWith('📅');
                   const isMomentum = line.startsWith('⚡');
@@ -4906,7 +4988,7 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
                         <div className="brief-item"><strong>Next call:</strong>
                           <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
                             {(touchpoint.next_call_prep || '').split('\n').map((line, i) => (
-                              <div key={i} style={(/^(GOAL|REALITY|OPTIONS|WILL)\s+—/.test(line.trim()) || /^[A-Z][A-Z \/'’\-—]+:$/.test(line.trim())) ? { fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)', marginTop: i === 0 ? 0 : 8 } : { fontSize: 13 }}>
+                              <div key={i} style={(/^(GOAL|REALITY|OPTIONS|WILL|PERSONAL CHECK-IN)\s+—/.test(line.trim()) || /^[A-Z][A-Z \/'’\-—]+:$/.test(line.trim())) ? { fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)', marginTop: i === 0 ? 0 : 8 } : { fontSize: 13 }}>
                                 {line || '\u00A0'}
                               </div>
                             ))}
