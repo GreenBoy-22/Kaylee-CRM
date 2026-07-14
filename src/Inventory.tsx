@@ -86,6 +86,16 @@ const CATEGORY_EXPIRY_DAYS: Record<string, number> = {
   'Snacks': 120,
 };
 
+// When a UPC lookup returns a category, use this to also pick a sensible
+// default room — so scanning a bottle of Tylenol doesn't leave "Kitchen"
+// selected just because that's where the form happened to be left.
+const CATEGORY_TO_LOCATION: Record<string, string> = {
+  'Pantry': 'Kitchen', 'Refrigerator': 'Kitchen', 'Freezer': 'Kitchen', 'Baking': 'Kitchen',
+  'Canned Goods': 'Kitchen', 'Condiments': 'Kitchen', 'Beverages': 'Kitchen', 'Snacks': 'Kitchen',
+  'Paper Products': 'Kitchen', 'Cleaning': 'Cabinet', 'Medicine': 'Bathroom',
+  'Personal Care': 'Bathroom', 'Pet Supplies': 'Garage', 'Garden': 'Garage',
+};
+
 const UNITS = ['each', 'oz', 'lbs', 'gal', 'qt', 'pint', 'fl oz', 'cups', 'count', 'pkg', 'box', 'can', 'jar', 'bottle'];
 
 const LOCATIONS = ['Kitchen', 'Cabinet', 'Bathroom', 'Laundry Room', 'Garage', 'Storage'];
@@ -143,6 +153,10 @@ export default function Inventory() {
   const [aiRecipes, setAiRecipes]       = useState('');
   const [aiLoading, setAiLoading]       = useState(false);
 
+  // UPC lookup state
+  const [upcLoading, setUpcLoading]     = useState(false);
+  const [upcStatus, setUpcStatus]       = useState('');
+
   const today = toKey(new Date());
 
   const load = useCallback(async () => {
@@ -198,11 +212,52 @@ export default function Inventory() {
     applyPerishableDefault(cat);
   }
 
+  // Calls the existing ai-proxy backend's UPC lookup — it already tries
+  // Open Food Facts, UPCitemdb, OpenLibrary (for books/ISBNs), and an AI
+  // web-search fallback, with a much more specific shelf-life estimator
+  // than the flat per-category one above (e.g. milk ~10 days, eggs ~35,
+  // canned goods ~2 years). This is preferred when it succeeds; the local
+  // CATEGORY_EXPIRY_DAYS estimate above is only the fallback for when a
+  // barcode isn't found anywhere, or when adding an item with no barcode.
+  async function lookupUpc(barcode: string): Promise<{ name: string; brand: string; category: string; is_perishable: boolean; expires: string | null; avg_cost: number | null } | null> {
+    if (!supabase || !barcode.trim()) return null;
+    try {
+      const { data, error } = await supabase.functions.invoke('ai-proxy', {
+        body: { _upc_lookup: true, barcode: barcode.trim(), use_ai: true },
+      });
+      if (error) return null;
+      return data?.product ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function applyUpcLookup(barcode: string) {
+    setUpcLoading(true);
+    setUpcStatus('Looking up barcode...');
+    const product = await lookupUpc(barcode);
+    setUpcLoading(false);
+    if (!product) {
+      setUpcStatus('No match found — fill in the details manually.');
+      return;
+    }
+    setFName(product.name);
+    if (product.brand) setFBrand(product.brand);
+    setFCat(product.category);
+    const room = CATEGORY_TO_LOCATION[product.category];
+    if (room) setFLoc(room);
+    setFPerishable(product.is_perishable);
+    if (product.expires) setFExpires(product.expires);
+    if (product.avg_cost != null) setFCost(String(product.avg_cost));
+    setUpcStatus(`✅ Found: ${product.name}${product.brand ? ` (${product.brand})` : ''} — check the details below before saving.`);
+  }
+
   function resetForm() {
     setFName(''); setFBrand(''); setFCat('Pantry'); setFLoc('Kitchen');
     setFQty(1); setFUnit('each'); setFExpires(''); setFImport(toKey(new Date()));
     setFCost(''); setFBarcode(''); setFNotes(''); setFPerishable(false);
     setEditingItem(null);
+    setUpcStatus('');
   }
 
   function startEdit(item: InventoryItem) {
@@ -329,10 +384,11 @@ export default function Inventory() {
         time: new Date().toLocaleTimeString(),
       }, ...prev.slice(0, 29)]);
     } else {
-      // Unknown barcode — prompt to add
-      setScanStatus(`⚠️ Unknown barcode: ${code} — fill in the form below and save.`);
+      // Unknown barcode — prompt to add, and try to auto-fill via UPC lookup
+      setScanStatus(`⚠️ Unknown barcode: ${code} — looking it up...`);
       setFBarcode(code);
       setTab('add');
+      applyUpcLookup(code);
       return;
     }
 
@@ -808,7 +864,14 @@ Quick tip: [1-sentence cooking note]`;
               </select>
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
-              Barcode (scan or type)<input value={fBarcode} onChange={e => setFBarcode(e.target.value)} placeholder="UPC / EAN" />
+              Barcode (scan or type)
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input value={fBarcode} onChange={e => setFBarcode(e.target.value)} placeholder="UPC / EAN" style={{ flex: 1 }} />
+                <button type="button" className="btn ghost" disabled={upcLoading || !fBarcode.trim()} onClick={() => applyUpcLookup(fBarcode)} style={{ fontSize: 12, padding: '0 10px', whiteSpace: 'nowrap' }}>
+                  {upcLoading ? 'Looking up...' : '🔍 Look up'}
+                </button>
+              </div>
+              {upcStatus && <span style={{ fontSize: 11, marginTop: 2 }}>{upcStatus}</span>}
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
               Avg. cost (Canton, GA)<input type="number" step="0.01" value={fCost} onChange={e => setFCost(e.target.value)} placeholder="e.g. 2.49" />
