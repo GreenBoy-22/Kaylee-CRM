@@ -5,7 +5,7 @@ import {
   Activity, Cloud, Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Gamepad2, Film, Plane, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope, TrendingUp
+  CheckCircle2, Check, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope, TrendingUp
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
@@ -140,6 +140,20 @@ type StudentAppointment = {
   missed_email_sent: boolean;
   voicemail_left: boolean;
   notes: string | null;
+};
+
+type EaLogEntry = {
+  id: string;
+  student_id: string;
+  ea_type: string;
+  momentum_at_fire: string | null;
+  fired_at: string;
+  sla_hours: number | null;
+  status: string;
+  snippet_used: string | null;
+  notes: string | null;
+  created_at: string;
+  closed_at: string | null;
 };
 
 type Touchpoint = {
@@ -557,6 +571,7 @@ function App() {
   const [students, setStudents] = useState<Student[]>(seedStudents);
   const [touchpoints, setTouchpoints] = useState<Touchpoint[]>(seedTouchpoints);
   const [appointments, setAppointments] = useState<StudentAppointment[]>([]);
+  const [eaLog, setEaLog] = useState<EaLogEntry[]>([]);
   const [tasks, setTasks] = useState<TaskItem[]>(seedTasks);
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
   const [choreTasks, setChoreTasks] = useState<ChoreTask[]>([]);
@@ -634,7 +649,7 @@ function App() {
     try {
       const [
         invResult, studentResult, touchpointResult, appointmentResult, taskResult,
-        permissionResult, draftResult, choreResult, suggestionResult, syncStateResult, userResult
+        permissionResult, draftResult, choreResult, suggestionResult, syncStateResult, userResult, eaLogResult
       ] = await Promise.all([
         supabase.from('inventory_items').select('*').order('created_at', { ascending: false }),
         supabase.from('students').select('*').order('created_at', { ascending: false }),
@@ -646,13 +661,15 @@ function App() {
         supabase.from('chore_tasks').select('*').eq('deleted_in_todoist', false).order('priority', { ascending: false }),
         supabase.from('chore_suggestions').select('*').order('category', { ascending: true }),
         supabase.from('todoist_sync_state').select('*').eq('id', 1).maybeSingle(),
-        supabase.from('users').select('*')
+        supabase.from('users').select('*'),
+        supabase.from('work_ea_log').select('*').order('created_at', { ascending: false })
       ]);
 
       if (!invResult.error && invResult.data) setInventory(invResult.data as InventoryItem[]);
       if (!studentResult.error && studentResult.data) setStudents(normalizeStudents(studentResult.data as Student[]));
       if (!touchpointResult.error && touchpointResult.data) setTouchpoints(touchpointResult.data as Touchpoint[]);
       if (!appointmentResult.error && appointmentResult.data) setAppointments(appointmentResult.data as StudentAppointment[]);
+      if (!eaLogResult.error && eaLogResult.data) setEaLog(eaLogResult.data as EaLogEntry[]);
       if (!taskResult.error && taskResult.data) setTasks(taskResult.data as TaskItem[]);
       if (!draftResult.error && draftResult.data) setDrafts(draftResult.data as EmailDraft[]);
       if (!choreResult.error && choreResult.data) setChoreTasks(choreResult.data as ChoreTask[]);
@@ -1390,6 +1407,36 @@ Kaylee`;
     if (error) { setAppointments(prev); setMessage(`Delete failed: ${error.message}`); }
   }
 
+  // Logs an Essential Action for a student, either freshly open (manually
+  // tracked EAs that don't auto-detect) or immediately closed (used for
+  // marking an auto-detected EA handled — creates a real record and keeps
+  // it from resurfacing for a day even if the underlying date hasn't
+  // updated yet).
+  async function createEaLog(input: { student_id: string; ea_type: string; momentum_at_fire: string | null; fired_at: string; sla_hours: number; status: 'open' | 'closed'; snippet_used?: string | null }) {
+    if (!isAdmin()) return setMessage('Student records are admin-only.');
+    const local: EaLogEntry = {
+      id: crypto.randomUUID(), student_id: input.student_id, ea_type: input.ea_type,
+      momentum_at_fire: input.momentum_at_fire, fired_at: input.fired_at, sla_hours: input.sla_hours,
+      status: input.status, snippet_used: input.snippet_used || null, notes: null,
+      created_at: new Date().toISOString(), closed_at: input.status === 'closed' ? new Date().toISOString() : null,
+    };
+    setEaLog((current) => [local, ...current]);
+    if (!supabase) return setMessage('Essential Action logged locally.');
+    const { data, error } = await supabase.from('work_ea_log').insert({
+      student_id: input.student_id, ea_type: input.ea_type, momentum_at_fire: input.momentum_at_fire,
+      fired_at: input.fired_at, sla_hours: input.sla_hours, status: input.status,
+      snippet_used: input.snippet_used || null, closed_at: local.closed_at,
+    }).select().single();
+    if (error) return setMessage(`EA log failed: ${error.message}`);
+    setEaLog((current) => [data as EaLogEntry, ...current.filter((e) => e.id !== local.id)]);
+  }
+
+  async function closeEaLog(id: string, snippetUsed: string | null) {
+    setEaLog((current) => current.map((e) => e.id === id ? { ...e, status: 'closed', closed_at: new Date().toISOString(), snippet_used: snippetUsed } : e));
+    if (!supabase) return;
+    await supabase.from('work_ea_log').update({ status: 'closed', closed_at: new Date().toISOString(), snippet_used: snippetUsed }).eq('id', id);
+  }
+
   function buildDraftForStudent(student: Student, kind: string, cohortLabel: string): { subject: string; body: string } {
     const name = student.display_name || 'there';
     const course = student.course || 'your current course';
@@ -1899,7 +1946,7 @@ Kaylee`;
           {page === 'work_performance' && <WorkPerformance />}
           {page === 'essential_actions' && <EssentialActions />}
           {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
-          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} appointments={appointments} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} updateTouchpoint={updateTouchpoint} deleteTouchpoint={deleteTouchpoint} createAppointment={createAppointment} updateAppointment={updateAppointment} deleteAppointment={deleteAppointment} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} setMessage={setMessage} />}
+          {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} appointments={appointments} eaLog={eaLog} createEaLog={createEaLog} closeEaLog={closeEaLog} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} updateTouchpoint={updateTouchpoint} deleteTouchpoint={deleteTouchpoint} createAppointment={createAppointment} updateAppointment={updateAppointment} deleteAppointment={deleteAppointment} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} setMessage={setMessage} />}
           {page === 'fto' && activeRole === 'admin' && <FTOTracker />}
           {page === 'course_notes' && activeRole === 'admin' && <CourseNotes />}
           {page === 'mood' && <MoodTracker />}
@@ -4562,10 +4609,51 @@ const touchpointTypes = [
 const riskLevels = ['Low', 'Medium', 'High', 'High Risk'];
 const studentStatuses = ['Active', 'Support', 'Ghost', 'Portal-only', 'Archived'];
 
-function Students({ students, touchpoints, appointments, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, unarchiveStudent, createTouchpoint, updateTouchpoint, deleteTouchpoint, createAppointment, updateAppointment, deleteAppointment, copyText, ferpaWarnings, generateSingleDraft, drafts, setPage, setMessage }: {
+// Essential Actions reference — kept in sync with EssentialActions.tsx by
+// hand, since page components in this app are self-contained rather than
+// sharing modules. This is a lighter version scoped to a single student,
+// for quick action right from their profile; the full tracker with the
+// complete reference table lives on the Essential Actions page.
+type EaDef = { label: string; snippets: { shortcut: string; name: string }[]; slaHours: number | { low: number; high: number } };
+const EA_DEFS: Record<string, EaDef> = {
+  no_contact: { label: 'No PM Contact (16/21 Days)', snippets: [{ shortcut: '/oops', name: 'No Mentor Contact in 16 Days' }], slaHours: 72 },
+  not_engaged: { label: 'Not Academically Engaged (10/15 Days)', snippets: [{ shortcut: '/789', name: 'NO AA Notice' }, { shortcut: '/NOAA1', name: 'No AA — First Try' }, { shortcut: '/NOAA2', name: 'No AA — 2nd Try' }], slaHours: 24 },
+  passed_oa: { label: 'Passed Objective Assessment', snippets: [{ shortcut: '/poa', name: 'Passed OA' }], slaHours: { low: 24, high: 72 } },
+  passed_pa: { label: 'Passed Performance Task', snippets: [{ shortcut: '/ppa', name: 'Passed PA' }], slaHours: { low: 24, high: 72 } },
+  passed_preoa: { label: 'Passed Preassessment', snippets: [{ shortcut: '/ppoa', name: 'Passed Pre-OA' }], slaHours: 24 },
+  failed_oa: { label: 'Failed Objective Assessment', snippets: [{ shortcut: '/FOA', name: 'Failed OA' }], slaHours: 24 },
+  failed_preoa: { label: 'Failed Preassessment', snippets: [{ shortcut: '/fpoa', name: 'Failed Pre-OA' }], slaHours: 24 },
+  task_returned: { label: 'Performance Task Returned', snippets: [{ shortcut: '/TASKRETURN', name: 'PA Task Returned' }], slaHours: 24 },
+  no_cus_45: { label: 'No CUs Completed at 45 Days', snippets: [{ shortcut: '/45', name: '45 Critical Action - No CUs' }], slaHours: 72 },
+  hundred_days: { label: '100 Days, Less Than 2 Courses', snippets: [{ shortcut: '/100', name: '100 Days With Less Than 2 Courses' }], slaHours: 72 },
+  new_student: { label: 'New Student Added to Caseload', snippets: [{ shortcut: '/welcome', name: 'New Student' }, { shortcut: '/recap', name: 'Welcome Call recap' }, { shortcut: '/readmit', name: 'Readmission Student' }], slaHours: 48 },
+  term_reg_not_set: { label: 'Term Registration Not Set', snippets: [{ shortcut: '/start', name: 'New Term' }, { shortcut: '/NoAppt', name: 'New Term, No Appt' }], slaHours: 24 },
+  first_term_critical_30: { label: 'First-Term Critical Action: Day 30', snippets: [{ shortcut: '/missed', name: 'Missed Welcome Call' }], slaHours: 72 },
+  first_term_critical_40: { label: 'First-Term Critical Action: Day 40', snippets: [{ shortcut: '/missed', name: 'Missed Welcome Call' }], slaHours: 24 },
+  pacing_2m: { label: '2-Month Pacing Check-In', snippets: [{ shortcut: '/2mpace', name: '2-Month Pacing Check-In' }], slaHours: 72 },
+  pacing_4m: { label: '4-Month Pacing Check-In', snippets: [{ shortcut: '/4mpace', name: '4-Month Pacing Check-In' }], slaHours: 72 },
+};
+const MANUAL_EA_TYPES = Object.keys(EA_DEFS).filter((k) => k !== 'no_contact' && k !== 'not_engaged');
+
+function eaMomentumTier(m: string | null | undefined): 'low' | 'high' {
+  return (m || '').toLowerCase().includes('high') ? 'high' : 'low';
+}
+function eaSlaHoursFor(def: EaDef, tier: 'low' | 'high'): number {
+  return typeof def.slaHours === 'number' ? def.slaHours : def.slaHours[tier];
+}
+function eaDaysSince(dateStr: string | null | undefined): number {
+  if (!dateStr) return 9999;
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
+}
+function eaHoursSince(dateStr: string): number {
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 3600000);
+}
+
+function Students({ students, touchpoints, appointments, eaLog, createEaLog, closeEaLog, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, unarchiveStudent, createTouchpoint, updateTouchpoint, deleteTouchpoint, createAppointment, updateAppointment, deleteAppointment, copyText, ferpaWarnings, generateSingleDraft, drafts, setPage, setMessage }: {
   students: Student[];
   touchpoints: Touchpoint[];
   appointments: StudentAppointment[];
+  eaLog: EaLogEntry[];
   importStudentsFromCsv: (text: string) => Promise<void>;
   createStudent: (student: Omit<Student, 'id' | 'copied' | 'archived'>) => void;
   updateStudent: (id: string, patch: Partial<Student>) => void;
@@ -4577,6 +4665,8 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
   createAppointment: (appointment: Omit<StudentAppointment, 'id'>) => void;
   updateAppointment: (id: string, patch: Partial<StudentAppointment>) => void;
   deleteAppointment: (id: string) => void;
+  createEaLog: (input: { student_id: string; ea_type: string; momentum_at_fire: string | null; fired_at: string; sla_hours: number; status: 'open' | 'closed'; snippet_used?: string | null }) => void;
+  closeEaLog: (id: string, snippetUsed: string | null) => void;
   copyText: (text: string, id?: string, table?: 'students' | 'student_touchpoints') => void;
   ferpaWarnings: (text: string) => string[];
   generateSingleDraft: (studentId: string, kind: string) => void;
@@ -4611,6 +4701,34 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
   const selected = students.find((student) => student.id === selectedId) || visibleStudents[0] || students[0];
   const selectedTouchpoints = selected ? touchpoints.filter((touchpoint) => touchpoint.student_id === selected.id) : [];
   const selectedAppointments = selected ? appointments.filter((a) => a.student_id === selected.id).sort((a, b) => b.appointment_at.localeCompare(a.appointment_at)) : [];
+
+  type ActiveEa = { key: string; eaType: string; firedAt: string; slaHours: number; logRow?: EaLogEntry };
+  const selectedActiveEAs: ActiveEa[] = useMemo(() => {
+    if (!selected) return [];
+    const list: ActiveEa[] = [];
+    const recentlyHandled = new Set(
+      eaLog.filter((e) => e.student_id === selected.id && e.status === 'closed' && e.closed_at && eaHoursSince(e.closed_at) < 24)
+        .map((e) => e.ea_type)
+    );
+    if (!selected.on_term_break) {
+      const tier = eaMomentumTier(selected.momentum);
+      const contactDays = eaDaysSince(selected.last_contact_date);
+      const contactThreshold = tier === 'high' ? 21 : 16;
+      if (contactDays >= contactThreshold && !recentlyHandled.has('no_contact')) {
+        list.push({ key: 'auto-no_contact', eaType: 'no_contact', firedAt: selected.last_contact_date || '', slaHours: eaSlaHoursFor(EA_DEFS.no_contact, tier) });
+      }
+      const engagedDays = eaDaysSince(selected.last_academic_activity_date);
+      const engagedThreshold = tier === 'high' ? 15 : 10;
+      if (engagedDays >= engagedThreshold && !recentlyHandled.has('not_engaged')) {
+        list.push({ key: 'auto-not_engaged', eaType: 'not_engaged', firedAt: selected.last_academic_activity_date || '', slaHours: eaSlaHoursFor(EA_DEFS.not_engaged, tier) });
+      }
+    }
+    for (const row of eaLog.filter((e) => e.student_id === selected.id && e.status === 'open')) {
+      list.push({ key: `manual-${row.id}`, eaType: row.ea_type, firedAt: row.fired_at, slaHours: row.sla_hours || 24, logRow: row });
+    }
+    return list.sort((a, b) => (a.slaHours - eaHoursSince(a.firedAt || new Date().toISOString())) - (b.slaHours - eaHoursSince(b.firedAt || new Date().toISOString())));
+  }, [selected, eaLog]);
+
   const touchpointDates = new Set(selectedTouchpoints.map((t) => t.touchpoint_date).filter(Boolean));
   const [addingStudent, setAddingStudent] = useState(false);
   const [importingCsv, setImportingCsv] = useState(false);
@@ -4626,6 +4744,9 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
   });
   const [listCollapsed, setListCollapsed] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [eaFormOpen, setEaFormOpen] = useState(false);
+  const [eaFormType, setEaFormType] = useState(MANUAL_EA_TYPES[0]);
+  const [eaSnippetChoice, setEaSnippetChoice] = useState<Record<string, string>>({});
   const [weeklyForm, setWeeklyForm] = useState({ is_weekly_appointment: false, weekly_appointment_day_of_week: '1', weekly_appointment_time: '' });
   const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
   const [editApptForm, setEditApptForm] = useState({ appointment_date: '', appointment_time: '', missed: false, missed_email_sent: false, voicemail_left: false, is_weekly: false, notes: '' });
@@ -4892,6 +5013,81 @@ function Students({ students, touchpoints, appointments, importStudentsFromCsv, 
           </div>
           {activeWarnings.length > 0 && <FerpaWarning warnings={activeWarnings} />}
           <StudentHealthPanel student={selected} touchpoints={touchpoints} />
+
+          <section className="panel" style={{ marginBottom: 12 }}>
+            <div className="panel-head">
+              <h2>Essential Actions {selectedActiveEAs.length > 0 ? `(${selectedActiveEAs.length})` : ''}</h2>
+              <button className="btn ghost tiny" onClick={() => setEaFormOpen((v) => !v)}><Plus size={13} /> Log EA</button>
+            </div>
+
+            {eaFormOpen && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <select value={eaFormType} onChange={(e) => setEaFormType(e.target.value)} style={{ fontSize: 12 }}>
+                  {MANUAL_EA_TYPES.map((key) => <option key={key} value={key}>{EA_DEFS[key].label}</option>)}
+                </select>
+                <button
+                  className="btn primary tiny"
+                  onClick={() => {
+                    const tier = eaMomentumTier(selected.momentum);
+                    createEaLog({
+                      student_id: selected.id, ea_type: eaFormType, momentum_at_fire: selected.momentum || null,
+                      fired_at: new Date().toISOString().slice(0, 10), sla_hours: eaSlaHoursFor(EA_DEFS[eaFormType], tier), status: 'open',
+                    });
+                    setEaFormOpen(false);
+                  }}
+                >
+                  <Check size={13} /> Log It
+                </button>
+              </div>
+            )}
+
+            {selectedActiveEAs.length === 0 && <div className="brief-item">Nothing active for {selected.display_name} right now.</div>}
+
+            {selectedActiveEAs.map((ea) => {
+              const def = EA_DEFS[ea.eaType];
+              if (!def) return null;
+              const remaining = ea.slaHours - eaHoursSince(ea.firedAt || new Date().toISOString());
+              const overdue = remaining < 0;
+              return (
+                <div key={ea.key} className="touchpoint-card" style={{ borderLeft: `3px solid ${overdue ? 'var(--red)' : remaining < 12 ? 'var(--amber)' : 'var(--border)'}` }}>
+                  <div className="panel-head">
+                    <div>
+                      <strong>{def.label}</strong>
+                      <p style={{ fontSize: 11, color: overdue ? 'var(--red)' : 'var(--muted)' }}>
+                        {overdue ? `⚠️ SLA passed ${Math.abs(remaining)}h ago` : `⏱ ${remaining}h left on SLA`}
+                      </p>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                    {def.snippets.map((sn) => {
+                      const isChosen = eaSnippetChoice[ea.key] === sn.shortcut;
+                      return (
+                        <div
+                          key={sn.shortcut}
+                          onClick={() => setEaSnippetChoice((prev) => ({ ...prev, [ea.key]: sn.shortcut }))}
+                          style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer', padding: '3px 8px', borderRadius: 6, background: isChosen ? 'var(--purple-bg)' : 'var(--surface-1)', border: isChosen ? '1px solid var(--purple)' : '1px solid transparent' }}
+                        >
+                          <code style={{ color: 'var(--purple)', fontSize: 11.5, fontWeight: 700 }}>{sn.shortcut}</code>
+                          <span style={{ fontSize: 11.5 }}>{sn.name}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button
+                    className="btn primary tiny"
+                    onClick={() => {
+                      const snippet = eaSnippetChoice[ea.key] || null;
+                      if (ea.logRow) closeEaLog(ea.logRow.id, snippet);
+                      else createEaLog({ student_id: selected.id, ea_type: ea.eaType, momentum_at_fire: selected.momentum || null, fired_at: new Date().toISOString().slice(0, 10), sla_hours: ea.slaHours, status: 'closed', snippet_used: snippet });
+                    }}
+                  >
+                    <Check size={13} /> Mark Handled
+                  </button>
+                </div>
+              );
+            })}
+          </section>
+
           <div className="quick-facts">
             <div><span>Student ID</span><strong>{selected.student_id || '—'}</strong></div>
             <div><span>Course</span><strong>{selected.course || '—'}</strong></div>

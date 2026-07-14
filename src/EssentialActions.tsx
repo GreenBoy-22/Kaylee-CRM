@@ -252,6 +252,8 @@ export default function EssentialActions() {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [touchpoints, setTouchpoints] = useState<TouchpointRow[]>([]);
   const [eaLog, setEaLog] = useState<EaLogRow[]>([]);
+  const [recentlyClosed, setRecentlyClosed] = useState<EaLogRow[]>([]);
+  const [selectedSnippet, setSelectedSnippet] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showLogForm, setShowLogForm] = useState(false);
@@ -264,14 +266,17 @@ export default function EssentialActions() {
   async function load() {
     if (!supabase) { setLoading(false); return; }
     setLoading(true);
-    const [s, tp, log] = await Promise.all([
+    const sinceYesterday = new Date(Date.now() - 24 * 3600000).toISOString();
+    const [s, tp, log, recentClosed] = await Promise.all([
       supabase.from('students').select('id, display_name, momentum, last_contact_date, last_academic_activity_date, course, risk, on_term_break, missed_call_count').eq('archived', false),
       supabase.from('student_touchpoints').select('id, student_id, touchpoint_date, touchpoint_type, note').order('touchpoint_date', { ascending: false }),
       supabase.from('work_ea_log').select('*').eq('status', 'open').order('created_at', { ascending: false }),
+      supabase.from('work_ea_log').select('*').eq('status', 'closed').gte('closed_at', sinceYesterday),
     ]);
     setStudents(((s.data as StudentRow[]) ?? []).filter((st) => !st.on_term_break));
     setTouchpoints((tp.data as TouchpointRow[]) ?? []);
     setEaLog((log.data as EaLogRow[]) ?? []);
+    setRecentlyClosed((recentClosed.data as EaLogRow[]) ?? []);
     setLoading(false);
   }
 
@@ -291,12 +296,13 @@ export default function EssentialActions() {
   // in the Hub. These aren't stored anywhere — they naturally disappear once
   // last_contact_date / last_academic_activity_date update via a new touchpoint.
   const autoEAs: ActiveEa[] = useMemo(() => {
+    const recentlyHandled = new Set(recentlyClosed.map((r) => `${r.student_id}::${r.ea_type}`));
     const results: ActiveEa[] = [];
     for (const s of students) {
       const tier = momentumTier(s.momentum);
       const contactDays = daysSince(s.last_contact_date);
       const contactThreshold = tier === 'high' ? 21 : 16;
-      if (contactDays >= contactThreshold) {
+      if (contactDays >= contactThreshold && !recentlyHandled.has(`${s.id}::no_contact`)) {
         results.push({
           key: `auto-no_contact-${s.id}`, student: s, eaType: 'no_contact',
           firedAt: s.last_contact_date || '', slaHours: slaHoursFor(EA_DEFS.no_contact, tier),
@@ -304,7 +310,7 @@ export default function EssentialActions() {
       }
       const engagedDays = daysSince(s.last_academic_activity_date);
       const engagedThreshold = tier === 'high' ? 15 : 10;
-      if (engagedDays >= engagedThreshold) {
+      if (engagedDays >= engagedThreshold && !recentlyHandled.has(`${s.id}::not_engaged`)) {
         results.push({
           key: `auto-not_engaged-${s.id}`, student: s, eaType: 'not_engaged',
           firedAt: s.last_academic_activity_date || '', slaHours: slaHoursFor(EA_DEFS.not_engaged, tier),
@@ -312,7 +318,7 @@ export default function EssentialActions() {
       }
     }
     return results;
-  }, [students]);
+  }, [students, recentlyClosed]);
 
   const manualEAs: ActiveEa[] = useMemo(() => {
     return eaLog.map((row) => {
@@ -367,9 +373,30 @@ export default function EssentialActions() {
     }
   }
 
-  async function markHandled(row: EaLogRow, snippetUsed?: string) {
+  async function markManualHandled(row: EaLogRow, snippetUsed: string | null) {
     if (!supabase) return;
-    await supabase.from('work_ea_log').update({ status: 'closed', closed_at: new Date().toISOString(), snippet_used: snippetUsed || null }).eq('id', row.id);
+    await supabase.from('work_ea_log').update({ status: 'closed', closed_at: new Date().toISOString(), snippet_used: snippetUsed }).eq('id', row.id);
+    await load();
+  }
+
+  // Auto-detected EAs don't have a DB row of their own — marking one handled
+  // creates a new closed log entry, both as a real record of what you did
+  // and to suppress it from resurfacing for a day even if the underlying
+  // date hasn't technically changed yet.
+  async function markAutoHandled(ea: ActiveEa, snippetUsed: string | null) {
+    if (!supabase) return;
+    const { data: userData } = await supabase.auth.getUser();
+    await supabase.from('work_ea_log').insert({
+      user_id: userData?.user?.id,
+      student_id: ea.student.id,
+      ea_type: ea.eaType,
+      momentum_at_fire: ea.student.momentum || null,
+      fired_at: new Date().toISOString().slice(0, 10),
+      sla_hours: ea.slaHours,
+      status: 'closed',
+      closed_at: new Date().toISOString(),
+      snippet_used: snippetUsed,
+    });
     await load();
   }
 
@@ -460,13 +487,23 @@ export default function EssentialActions() {
                   <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>{def.description}</p>
 
                   <div style={{ background: 'var(--surface-1)', borderRadius: 8, padding: 10, marginBottom: 10 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>Matched snippet{def.snippets.length > 1 ? 's' : ''}</div>
-                    {def.snippets.map((sn) => (
-                      <div key={sn.shortcut} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
-                        <code style={{ background: 'var(--purple-bg)', color: 'var(--purple)', padding: '2px 8px', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>{sn.shortcut}</code>
-                        <span style={{ fontSize: 12.5 }}>{sn.name}</span>
-                      </div>
-                    ))}
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>
+                      Matched snippet{def.snippets.length > 1 ? 's' : ''}{def.snippets.length > 1 ? ' — click the one you used' : ''}
+                    </div>
+                    {def.snippets.map((sn) => {
+                      const isChosen = selectedSnippet[ea.key] === sn.shortcut;
+                      return (
+                        <div
+                          key={sn.shortcut}
+                          onClick={() => setSelectedSnippet((prev) => ({ ...prev, [ea.key]: sn.shortcut }))}
+                          style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4, cursor: 'pointer', padding: 4, borderRadius: 6, background: isChosen ? 'var(--purple-bg)' : 'transparent', border: isChosen ? '1px solid var(--purple)' : '1px solid transparent' }}
+                        >
+                          <code style={{ background: 'var(--purple-bg)', color: 'var(--purple)', padding: '2px 8px', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>{sn.shortcut}</code>
+                          <span style={{ fontSize: 12.5 }}>{sn.name}</span>
+                          {isChosen && <Check size={13} color="var(--purple)" style={{ marginLeft: 'auto' }} />}
+                        </div>
+                      );
+                    })}
                   </div>
 
                   <div style={{ background: 'var(--surface-1)', borderRadius: 8, padding: 10, marginBottom: 10 }}>
@@ -484,17 +521,21 @@ export default function EssentialActions() {
                     )}
                   </div>
 
-                  {ea.logRow && (
-                    <div className="form-actions">
-                      <button className="btn primary" onClick={() => markHandled(ea.logRow!, def.snippets[0]?.shortcut)}><Check size={14} /> Mark Handled</button>
-                    </div>
-                  )}
+                  <div className="form-actions">
+                    <button
+                      className="btn primary"
+                      onClick={() => ea.logRow ? markManualHandled(ea.logRow, selectedSnippet[ea.key] || null) : markAutoHandled(ea, selectedSnippet[ea.key] || null)}
+                    >
+                      <Check size={14} /> Mark Handled
+                    </button>
+                  </div>
                   {!ea.logRow && (
-                    <p style={{ fontSize: 11, color: 'var(--muted)' }}>This one's auto-detected — it'll clear on its own once you log a new touchpoint for {ea.student.display_name}.</p>
+                    <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>Auto-detected — marking this handled logs a real record and keeps it off this list for a day, even if the underlying date hasn't updated yet.</p>
                   )}
                 </div>
               )}
             </div>
+
           );
         })}
       </section>
