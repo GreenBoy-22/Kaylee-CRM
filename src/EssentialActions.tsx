@@ -28,6 +28,7 @@ interface StudentRow {
   risk: string | null;
   on_term_break?: boolean | null;
   missed_call_count: number | null;
+  term_start_date?: string | null;
 }
 
 interface TouchpointRow {
@@ -173,17 +174,17 @@ const EA_DEFS: Record<string, EaDef> = {
   },
   pacing_2m: {
     label: '2-Month Pacing Check-In',
-    snippets: [{ shortcut: '/2mpace', name: '2-Month Pacing Check-In (new — add to Text Blaze)' }],
+    snippets: [{ shortcut: '/2mpace', name: '2-Month Pacing Check-In' }],
     slaHours: 72,
-    autoDetect: false,
-    description: "Student is at the 2-month mark of their term — no official EA for this, tracked here since it matters for pacing.",
+    autoDetect: true,
+    description: "Student is at the 2-month mark of their term — no official EA for this, tracked here since it matters for pacing. Auto-creates a draft check-in email once per term.",
   },
   pacing_4m: {
     label: '4-Month Pacing Check-In',
-    snippets: [{ shortcut: '/4mpace', name: '4-Month Pacing Check-In (new — add to Text Blaze)' }],
+    snippets: [{ shortcut: '/4mpace', name: '4-Month Pacing Check-In' }],
     slaHours: 72,
-    autoDetect: false,
-    description: "Student is at the 4-month mark of their term — no official EA for this, tracked here since it matters for pacing.",
+    autoDetect: true,
+    description: "Student is at the 4-month mark of their term — no official EA for this, tracked here since it matters for pacing. Auto-creates a draft check-in email once per term.",
   },
 };
 
@@ -253,6 +254,7 @@ export default function EssentialActions() {
   const [touchpoints, setTouchpoints] = useState<TouchpointRow[]>([]);
   const [eaLog, setEaLog] = useState<EaLogRow[]>([]);
   const [recentlyClosed, setRecentlyClosed] = useState<EaLogRow[]>([]);
+  const [allClosedLog, setAllClosedLog] = useState<EaLogRow[]>([]);
   const [selectedSnippet, setSelectedSnippet] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -266,17 +268,20 @@ export default function EssentialActions() {
   async function load() {
     if (!supabase) { setLoading(false); return; }
     setLoading(true);
-    const sinceYesterday = new Date(Date.now() - 24 * 3600000).toISOString();
-    const [s, tp, log, recentClosed] = await Promise.all([
-      supabase.from('students').select('id, display_name, momentum, last_contact_date, last_academic_activity_date, course, risk, on_term_break, missed_call_count').eq('archived', false),
+    const [s, tp, log, allLog] = await Promise.all([
+      supabase.from('students').select('id, display_name, momentum, last_contact_date, last_academic_activity_date, course, risk, on_term_break, missed_call_count, term_start_date').eq('archived', false),
       supabase.from('student_touchpoints').select('id, student_id, touchpoint_date, touchpoint_type, note').order('touchpoint_date', { ascending: false }),
       supabase.from('work_ea_log').select('*').eq('status', 'open').order('created_at', { ascending: false }),
-      supabase.from('work_ea_log').select('*').eq('status', 'closed').gte('closed_at', sinceYesterday),
+      // Full history, not just a short window — pacing checkpoints need to
+      // check "was this logged at all since the term started," which can
+      // mean looking back months, not just the last day.
+      supabase.from('work_ea_log').select('*').eq('status', 'closed'),
     ]);
     setStudents(((s.data as StudentRow[]) ?? []).filter((st) => !st.on_term_break));
     setTouchpoints((tp.data as TouchpointRow[]) ?? []);
     setEaLog((log.data as EaLogRow[]) ?? []);
-    setRecentlyClosed((recentClosed.data as EaLogRow[]) ?? []);
+    setAllClosedLog((allLog.data as EaLogRow[]) ?? []);
+    setRecentlyClosed(((allLog.data as EaLogRow[]) ?? []).filter((r) => r.closed_at && hoursSince(r.closed_at) < 24));
     setLoading(false);
   }
 
@@ -316,9 +321,30 @@ export default function EssentialActions() {
           firedAt: s.last_academic_activity_date || '', slaHours: slaHoursFor(EA_DEFS.not_engaged, tier),
         });
       }
+      // Pacing checkpoints fire once per term, not daily — suppressed by
+      // checking the full closed-log history since this term started,
+      // not just the last 24 hours.
+      if (s.term_start_date) {
+        const loggedThisTerm = (eaType: string) => allClosedLog.some((r) =>
+          r.student_id === s.id && r.ea_type === eaType && new Date(r.created_at) >= new Date(s.term_start_date as string)
+        );
+        const daysIntoTerm = daysSince(s.term_start_date);
+        if (daysIntoTerm >= 60 && !loggedThisTerm('pacing_2m')) {
+          results.push({
+            key: `auto-pacing_2m-${s.id}`, student: s, eaType: 'pacing_2m',
+            firedAt: new Date(new Date(s.term_start_date).getTime() + 60 * 86400000).toISOString(), slaHours: slaHoursFor(EA_DEFS.pacing_2m, tier),
+          });
+        }
+        if (daysIntoTerm >= 120 && !loggedThisTerm('pacing_4m')) {
+          results.push({
+            key: `auto-pacing_4m-${s.id}`, student: s, eaType: 'pacing_4m',
+            firedAt: new Date(new Date(s.term_start_date).getTime() + 120 * 86400000).toISOString(), slaHours: slaHoursFor(EA_DEFS.pacing_4m, tier),
+          });
+        }
+      }
     }
     return results;
-  }, [students, recentlyClosed]);
+  }, [students, recentlyClosed, allClosedLog]);
 
   const manualEAs: ActiveEa[] = useMemo(() => {
     return eaLog.map((row) => {

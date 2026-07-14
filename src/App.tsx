@@ -612,6 +612,33 @@ function App() {
     }
   }, [profile, mode]);
 
+  // Auto-creates a 2-month / 4-month pacing check-in draft for every active
+  // student who's crossed that mark in their current term, once per term —
+  // checked against whether a draft of that kind already exists since this
+  // term's start date, so it never spams duplicates. Runs for the whole
+  // caseload on every data load, not just whichever student happens to be
+  // open. Note: the first time this runs after being added, if many
+  // students are already past 60/120 days into their term, it may create a
+  // real batch of drafts at once — that's correct, not a bug, just worth
+  // knowing before the first load.
+  useEffect(() => {
+    if (!students.length) return;
+    const now = Date.now();
+    for (const student of students) {
+      if (student.archived || student.on_term_break || !student.term_start_date) continue;
+      const daysIntoTerm = Math.floor((now - new Date(student.term_start_date).getTime()) / 86400000);
+      const checkpoints: [number, string][] = [[60, 'pacing_2m'], [120, 'pacing_4m']];
+      for (const [threshold, kind] of checkpoints) {
+        if (daysIntoTerm < threshold) continue;
+        const alreadyDrafted = drafts.some((d) =>
+          d.student_id === student.id && d.template_kind === kind &&
+          new Date(d.created_at) >= new Date(student.term_start_date as string)
+        );
+        if (!alreadyDrafted) generateSingleDraft(student.id, kind);
+      }
+    }
+  }, [students, drafts]);
+
   async function bootUser(activeSession: Session) {
     await ensureProfile(activeSession);
     await loadData();
@@ -1474,6 +1501,18 @@ Kaylee`;
       return {
         subject: `Nice work on ${course}!`,
         body: `Hi ${name},\n\nI saw your recent progress in ${course} and wanted to send a quick note: well done. The consistency you're showing matters, and it's what gets students across the finish line at WGU.\n\nKeep the momentum going — let me know what you're tackling next so I can be ready to support.${sigBlock}`
+      };
+    }
+    if (kind === 'pacing_2m') {
+      return {
+        subject: `2-month pacing check-in`,
+        body: `Hi ${name},\n\nI hope you're doing well! I wanted to check in because we're coming up on the 2-month mark in your term, and I like to touch base with all my students around this point to see how pacing is going.\n\nAt WGU, hitting your 2-month pacing goal is a strong early indicator that you're on track for a successful term — and it's completely fixable if things have felt a little slower than you hoped so far.\n\nA few things that tend to help students get back on pace quickly:\n\t* Picking one specific course to focus on this week (rather than spreading attention across several)\n\t* Blocking out 2-3 dedicated study sessions before we talk next\n\t* Scheduling your next assessment attempt now, even if it's a couple weeks out — having it on the calendar creates momentum\n\t* Letting me know if anything outside of school has been getting in the way, so we can plan around it together\n\nYou're not behind in a way that can't be turned around — a strong next few weeks can make a real difference. Let's talk through a plan that fits your schedule.\n\nReply and let me know how things have been going, and we'll go from there! 💪${sigBlock}`
+      };
+    }
+    if (kind === 'pacing_4m') {
+      return {
+        subject: `4-month pacing check-in`,
+        body: `Hi ${name},\n\nI wanted to check in because we're at the 4-month mark in your term, which is an important pacing checkpoint I like to review with all my students.\n\nWhere you are at 4 months tends to be a pretty strong signal for how the rest of the term will go — so I want to make sure we catch anything early and build a plan together if pacing has been a challenge.\n\nA few things that tend to help students who are behind at this point get back on track:\n\t* Identifying the ONE course that's the biggest bottleneck right now, and putting full focus there\n\t* Setting a specific, dated goal for your next assessment attempt\n\t* Breaking remaining coursework into weekly targets instead of thinking about the whole term at once\n\t* Reaching out anytime you hit a wall — I'd rather help early than have you stuck for weeks\n\nThere's still real time left in this term to make meaningful progress. Let's talk through where things stand and build a plan for the weeks ahead.\n\nReply and let me know how things have been going, and we'll go from there! 💪${sigBlock}`
       };
     }
     // generic check-in
@@ -4633,7 +4672,8 @@ const EA_DEFS: Record<string, EaDef> = {
   pacing_2m: { label: '2-Month Pacing Check-In', snippets: [{ shortcut: '/2mpace', name: '2-Month Pacing Check-In' }], slaHours: 72 },
   pacing_4m: { label: '4-Month Pacing Check-In', snippets: [{ shortcut: '/4mpace', name: '4-Month Pacing Check-In' }], slaHours: 72 },
 };
-const MANUAL_EA_TYPES = Object.keys(EA_DEFS).filter((k) => k !== 'no_contact' && k !== 'not_engaged');
+const AUTO_EA_TYPES = ['no_contact', 'not_engaged', 'pacing_2m', 'pacing_4m'];
+const MANUAL_EA_TYPES = Object.keys(EA_DEFS).filter((k) => !AUTO_EA_TYPES.includes(k));
 
 function eaMomentumTier(m: string | null | undefined): 'low' | 'high' {
   return (m || '').toLowerCase().includes('high') ? 'high' : 'low';
@@ -4721,6 +4761,26 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
       const engagedThreshold = tier === 'high' ? 15 : 10;
       if (engagedDays >= engagedThreshold && !recentlyHandled.has('not_engaged')) {
         list.push({ key: 'auto-not_engaged', eaType: 'not_engaged', firedAt: selected.last_academic_activity_date || '', slaHours: eaSlaHoursFor(EA_DEFS.not_engaged, tier) });
+      }
+      // Pacing checkpoints are one-time-per-term, not daily-recurring like
+      // the two above — suppress based on whether it's been logged at all
+      // since THIS term started, not just in the last 24 hours. Once the
+      // term rolls over (term_start_date advances), the old log entry no
+      // longer counts and the checkpoint becomes eligible again.
+      if (selected.term_start_date) {
+        const loggedThisTerm = (eaType: string) => eaLog.some((e) =>
+          e.student_id === selected.id && e.ea_type === eaType &&
+          new Date(e.created_at) >= new Date(selected.term_start_date as string)
+        );
+        const daysIntoTerm = eaDaysSince(selected.term_start_date);
+        if (daysIntoTerm >= 60 && !loggedThisTerm('pacing_2m')) {
+          const firedAt = new Date(new Date(selected.term_start_date).getTime() + 60 * 86400000).toISOString();
+          list.push({ key: 'auto-pacing_2m', eaType: 'pacing_2m', firedAt, slaHours: eaSlaHoursFor(EA_DEFS.pacing_2m, tier) });
+        }
+        if (daysIntoTerm >= 120 && !loggedThisTerm('pacing_4m')) {
+          const firedAt = new Date(new Date(selected.term_start_date).getTime() + 120 * 86400000).toISOString();
+          list.push({ key: 'auto-pacing_4m', eaType: 'pacing_4m', firedAt, slaHours: eaSlaHoursFor(EA_DEFS.pacing_4m, tier) });
+        }
       }
     }
     for (const row of eaLog.filter((e) => e.student_id === selected.id && e.status === 'open')) {
