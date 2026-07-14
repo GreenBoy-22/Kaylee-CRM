@@ -18,6 +18,7 @@ import MigraineTracker from './MigraineTracker';
 import Contacts from './Contacts';
 import Books from './Books';
 import WorkPerformance from './WorkPerformance';
+import EssentialActions from './EssentialActions';
 import FTOTracker from './FTOTracker';
 import CourseNotes from './CourseNotes';
 import MoodTracker from './MoodTracker';
@@ -32,7 +33,7 @@ import Appointments from './Appointments';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'mood' | 'weather' | 'plants' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'settings';
+type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'mood' | 'weather' | 'plants' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'essential_actions' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -278,6 +279,7 @@ const workNav: readonly NavEntry[] = [
   ['outreach', 'Outreach Drafts', Mail],
   ['students', 'Students', Users],
   ['work_performance', 'Work Performance', TrendingUp],
+  ['essential_actions', 'Essential Actions', ClipboardCheck],
 ];
 
 const moduleMeta: { page: Page; module_name: string; label: string; default_access: AccessLevel }[] = [
@@ -295,7 +297,8 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'books', module_name: 'books', label: 'Library', default_access: 'view' },
   { page: 'students', module_name: 'students', label: 'Students', default_access: 'hidden' },
   { page: 'outreach', module_name: 'outreach', label: 'Outreach Drafts', default_access: 'hidden' },
-  { page: 'work_performance', module_name: 'work_performance', label: 'Work Performance', default_access: 'hidden' }
+  { page: 'work_performance', module_name: 'work_performance', label: 'Work Performance', default_access: 'hidden' },
+  { page: 'essential_actions', module_name: 'essential_actions', label: 'Essential Actions', default_access: 'hidden' }
 ];
 
 const pageToModule = Object.fromEntries(moduleMeta.map((item) => [item.page, item.module_name])) as Record<string, string>;
@@ -1894,6 +1897,7 @@ Kaylee`;
           {page === 'contacts' && <Contacts />}
           {page === 'books' && <Books />}
           {page === 'work_performance' && <WorkPerformance />}
+          {page === 'essential_actions' && <EssentialActions />}
           {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
           {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} appointments={appointments} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} updateTouchpoint={updateTouchpoint} deleteTouchpoint={deleteTouchpoint} createAppointment={createAppointment} updateAppointment={updateAppointment} deleteAppointment={deleteAppointment} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} setMessage={setMessage} />}
           {page === 'fto' && activeRole === 'admin' && <FTOTracker />}
