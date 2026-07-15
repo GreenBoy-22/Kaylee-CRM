@@ -2307,6 +2307,102 @@ function healthClass(score: number) {
   return 'high-risk';
 }
 
+function CallShowRateCard() {
+  const [termStart, setTermStart] = useState<string>('');
+  const [made, setMade] = useState(0);
+  const [missed, setMissed] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    loadAll();
+  }, []);
+
+  async function loadAll() {
+    if (!supabase) return;
+    setLoading(true);
+    let start = termStart;
+    if (!start) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const uid = sessionData?.session?.user?.id;
+      const { data: pref } = await supabase
+        .from('user_preferences')
+        .select('value')
+        .eq('key', 'call_metrics_term_start')
+        .eq('user_id', uid)
+        .maybeSingle();
+      start = pref?.value || new Date(new Date().setDate(new Date().getDate() - 90)).toISOString().slice(0, 10);
+      setTermStart(start);
+    }
+    await loadCounts(start);
+    setLoading(false);
+  }
+
+  async function loadCounts(start: string) {
+    if (!supabase) return;
+    const { data } = await supabase
+      .from('student_appointments')
+      .select('missed')
+      .gte('appointment_at', start);
+    const total = data?.length || 0;
+    const missedCount = data?.filter((a) => a.missed).length || 0;
+    setMade(total - missedCount);
+    setMissed(missedCount);
+  }
+
+  async function saveTermStart(newStart: string) {
+    if (!supabase) return;
+    setTermStart(newStart);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const uid = sessionData?.session?.user?.id;
+    if (uid) {
+      await supabase
+        .from('user_preferences')
+        .upsert({ user_id: uid, key: 'call_metrics_term_start', value: newStart }, { onConflict: 'user_id,key' });
+    }
+    loadCounts(newStart);
+    setEditing(false);
+  }
+
+  const total = made + missed;
+  const missedPct = total > 0 ? Math.round((missed / total) * 100) : 0;
+
+  return (
+    <section className="panel">
+      <div className="panel-head"><h2>Call Show Rate This Term</h2><Phone size={17} /></div>
+      {loading && <div className="brief-item">Loading...</div>}
+      {!loading && (
+        <>
+          <div className="brief-item">
+            <strong>{missedPct}% missed</strong> · {missed} missed / {total} total calls scheduled
+            {total === 0 && ' (no appointments logged in this window yet)'}
+          </div>
+          <div className="brief-item">
+            {editing ? (
+              <>
+                Term start:{' '}
+                <input
+                  type="date"
+                  defaultValue={termStart}
+                  onBlur={(e) => e.target.value && saveTermStart(e.target.value)}
+                  style={{ padding: '2px 6px' }}
+                />
+              </>
+            ) : (
+              <>
+                Since {termStart || '—'}{' '}
+                <button className="btn" style={{ marginLeft: 8 }} onClick={() => setEditing(true)}>
+                  Change term start
+                </button>
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, householdUsers, role, setPage }: { mode: Mode; inventory: InventoryItem[]; students: Student[]; touchpoints: Touchpoint[]; tasks: TaskItem[]; choreTasks: ChoreTask[]; householdUsers: HouseholdUser[]; role: Role; setPage: (page: Page) => void }) {
   const expiring = inventory.filter((item) => item.expires).length;
   const pending = tasks.filter((task) => task.status === 'pending_approval').length;
@@ -2405,6 +2501,7 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, 
       <div className="grid two">
         <section className="panel"><h2>Risk Buckets</h2><div className="brief-item urgent"><strong>High risk:</strong> {highRiskStudents.map((s) => s.display_name).join(', ') || 'None'}</div><div className="brief-item"><strong>Ghost risk:</strong> {ghostRiskStudents.map((s) => s.display_name).join(', ') || 'None'}</div><div className="brief-item good"><strong>Support:</strong> {supportStudents.map((s) => s.display_name).join(', ') || 'None'}</div></section>
         <section className="panel"><h2>Mentor Metrics</h2><div className="brief-item"><strong>Active students:</strong> {activeStudents.length}</div><div className="brief-item"><strong>Touchpoints logged:</strong> {touchpoints.length}</div><div className="brief-item"><strong>Salesforce copy pending:</strong> {activeStudents.filter((s) => !s.copied).length}</div><div className="brief-item"><strong>FERPA mode:</strong> First name/nickname only · clipboard only</div></section>
+        <CallShowRateCard />
       </div>
     </>;
   }
@@ -5200,7 +5297,7 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
         {/* TWO-COLUMN ZONE: scrollable history on left, sticky touchpoint form on right */}
         <div className="student-work-area">
           <div className="student-work-main">
-            <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{fmtDateShort(selected.last_contact_date)}</p></div><div><strong>Next appointment</strong><p>{fmtDateShort(soonestAppointment(selected))}</p></div><div><strong>Graduation goal</strong><p>{fmtDateShort(selected.graduation_goal_date)}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Last academic activity</strong><p>{fmtDateShort(selected.last_academic_activity_date)}</p></div><div><strong>Term #</strong><p><input type="number" value={selected.contact_term ?? ''} onChange={(e) => updateStudent(selected.id, { contact_term: e.target.value ? Number(e.target.value) : null } as Partial<Student>)} style={{ width: 60, padding: '2px 6px' }} />{selected.graduated ? ' · 🎓 Graduated' : ''}</p></div><div><strong>Term start</strong><p>{fmtDateShort(selected.term_start_date, true)}</p></div><div><strong>Term end</strong><p>{fmtDateShort(selected.term_end_date, true)}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
+            <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{fmtDateShort(selected.last_contact_date)}</p></div><div><strong>Next appointment</strong><p>{fmtDateShort(soonestAppointment(selected))}</p></div><div><strong>Graduation goal</strong><p>{fmtDateShort(selected.graduation_goal_date)}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Term #</strong><p><input type="number" value={selected.contact_term ?? ''} onChange={(e) => updateStudent(selected.id, { contact_term: e.target.value ? Number(e.target.value) : null } as Partial<Student>)} style={{ width: 60, padding: '2px 6px' }} />{selected.graduated ? ' · 🎓 Graduated' : ''}</p></div><div><strong>Term start</strong><p>{fmtDateShort(selected.term_start_date, true)}</p></div><div><strong>Term end</strong><p>{fmtDateShort(selected.term_end_date, true)}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
             <section className="panel">
               <div className="panel-head">
                 <h2>History Log</h2>
