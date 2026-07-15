@@ -627,6 +627,7 @@ function App() {
   // students are already past 60/120 days into their term, it may create a
   // real batch of drafts at once — that's correct, not a bug, just worth
   // knowing before the first load.
+  const pacingDraftLock = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!students.length) return;
     const now = Date.now();
@@ -636,11 +637,16 @@ function App() {
       const checkpoints: [number, string][] = [[60, 'pacing_2m'], [120, 'pacing_4m']];
       for (const [threshold, kind] of checkpoints) {
         if (daysIntoTerm < threshold) continue;
+        const lockKey = `${student.id}::${kind}`;
+        if (pacingDraftLock.current.has(lockKey)) continue;
         const alreadyDrafted = drafts.some((d) =>
           d.student_id === student.id && d.template_kind === kind &&
           new Date(d.created_at) >= new Date(student.term_start_date as string)
         );
-        if (!alreadyDrafted) generateSingleDraft(student.id, kind);
+        if (!alreadyDrafted) {
+          pacingDraftLock.current.add(lockKey);
+          generateSingleDraft(student.id, kind);
+        }
       }
     }
   }, [students, drafts]);
