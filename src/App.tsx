@@ -1461,8 +1461,11 @@ Kaylee`;
     };
     setEaLog((current) => [local, ...current]);
     if (!supabase) return setMessage('Essential Action logged locally.');
+    const { data: sessionData } = await supabase.auth.getSession();
+    const uid = sessionData?.session?.user?.id;
+    if (!uid) return setMessage('Could not confirm your login — refresh the page and try again.');
     const { data, error } = await supabase.from('work_ea_log').insert({
-      student_id: input.student_id, ea_type: input.ea_type, momentum_at_fire: input.momentum_at_fire,
+      user_id: uid, student_id: input.student_id, ea_type: input.ea_type, momentum_at_fire: input.momentum_at_fire,
       fired_at: input.fired_at, sla_hours: input.sla_hours, status: input.status,
       snippet_used: input.snippet_used || null, closed_at: local.closed_at,
     }).select().single();
@@ -1473,7 +1476,8 @@ Kaylee`;
   async function closeEaLog(id: string, snippetUsed: string | null) {
     setEaLog((current) => current.map((e) => e.id === id ? { ...e, status: 'closed', closed_at: new Date().toISOString(), snippet_used: snippetUsed } : e));
     if (!supabase) return;
-    await supabase.from('work_ea_log').update({ status: 'closed', closed_at: new Date().toISOString(), snippet_used: snippetUsed }).eq('id', id);
+    const { error } = await supabase.from('work_ea_log').update({ status: 'closed', closed_at: new Date().toISOString(), snippet_used: snippetUsed }).eq('id', id);
+    if (error) setMessage(`EA update failed: ${error.message}`);
   }
 
   function buildDraftForStudent(student: Student, kind: string, cohortLabel: string): { subject: string; body: string } {
