@@ -382,9 +382,11 @@ export default function EssentialActions() {
     const student = students.find((s) => s.id === formStudentId);
     const tier = momentumTier(student?.momentum);
     const def = EA_DEFS[formEaType];
-    const { data: userData } = await supabase.auth.getUser();
+    const { data: sessionData } = await supabase.auth.getSession();
+    const uid = sessionData?.session?.user?.id;
+    if (!uid) { alert('Could not confirm your login — try refreshing the page and logging this again.'); return; }
     const { error } = await supabase.from('work_ea_log').insert({
-      user_id: userData?.user?.id,
+      user_id: uid,
       student_id: formStudentId,
       ea_type: formEaType,
       momentum_at_fire: student?.momentum || null,
@@ -392,17 +394,17 @@ export default function EssentialActions() {
       sla_hours: slaHoursFor(def, tier),
       status: 'open',
     });
-    if (!error) {
-      setShowLogForm(false);
-      setFormStudentId('');
-      setStudentSearch('');
-      await load();
-    }
+    if (error) { alert(`EA log failed: ${error.message}`); return; }
+    setShowLogForm(false);
+    setFormStudentId('');
+    setStudentSearch('');
+    await load();
   }
 
   async function markManualHandled(row: EaLogRow, snippetUsed: string | null) {
     if (!supabase) return;
-    await supabase.from('work_ea_log').update({ status: 'closed', closed_at: new Date().toISOString(), snippet_used: snippetUsed }).eq('id', row.id);
+    const { error } = await supabase.from('work_ea_log').update({ status: 'closed', closed_at: new Date().toISOString(), snippet_used: snippetUsed }).eq('id', row.id);
+    if (error) { alert(`EA update failed: ${error.message}`); return; }
     await load();
   }
 
@@ -412,9 +414,11 @@ export default function EssentialActions() {
   // date hasn't technically changed yet.
   async function markAutoHandled(ea: ActiveEa, snippetUsed: string | null) {
     if (!supabase) return;
-    const { data: userData } = await supabase.auth.getUser();
-    await supabase.from('work_ea_log').insert({
-      user_id: userData?.user?.id,
+    const { data: sessionData } = await supabase.auth.getSession();
+    const uid = sessionData?.session?.user?.id;
+    if (!uid) { alert('Could not confirm your login — try refreshing the page and marking this handled again.'); return; }
+    const { error } = await supabase.from('work_ea_log').insert({
+      user_id: uid,
       student_id: ea.student.id,
       ea_type: ea.eaType,
       momentum_at_fire: ea.student.momentum || null,
@@ -424,6 +428,7 @@ export default function EssentialActions() {
       closed_at: new Date().toISOString(),
       snippet_used: snippetUsed,
     });
+    if (error) { alert(`EA log failed: ${error.message}`); return; }
     await load();
   }
 
