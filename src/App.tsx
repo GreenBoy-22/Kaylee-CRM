@@ -2351,12 +2351,13 @@ function CallShowRateCard() {
   async function loadCounts(start: string) {
     if (!supabase) return;
     const { data } = await supabase
-      .from('student_appointments')
-      .select('missed')
-      .gte('appointment_at', start);
-    const total = data?.length || 0;
-    const missedCount = data?.filter((a) => a.missed).length || 0;
-    setMade(total - missedCount);
+      .from('student_touchpoints')
+      .select('touchpoint_type')
+      .gte('touchpoint_date', start)
+      .in('touchpoint_type', ['Call from student', 'Call to student', 'No-show / missed call']);
+    const missedCount = data?.filter((t) => t.touchpoint_type === 'No-show / missed call').length || 0;
+    const madeCount = (data?.length || 0) - missedCount;
+    setMade(madeCount);
     setMissed(missedCount);
   }
 
@@ -2384,8 +2385,8 @@ function CallShowRateCard() {
       {!loading && (
         <>
           <div className="brief-item">
-            <strong>{missedPct}% missed</strong> · {missed} missed / {total} total calls scheduled
-            {total === 0 && ' (no appointments logged in this window yet)'}
+            <strong>{missedPct}% missed</strong> · {missed} missed / {total} total calls logged
+            {total === 0 && ' (no call touchpoints logged in this window yet)'}
           </div>
           <div className="brief-item">
             {editing ? (
