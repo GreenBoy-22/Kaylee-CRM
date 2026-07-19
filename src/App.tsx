@@ -297,15 +297,14 @@ const workNav: readonly NavEntry[] = [
   ['dashboard', 'Dashboard', LayoutDashboard],
   ['calendar', 'Calendar', CalendarDays],
   ['course_notes', 'Course Notes', BookOpen],
-  ['briefing', 'Daily Briefing', Sparkles],
+  ['essential_actions', 'Essential Actions', ClipboardCheck],
   ['fto', 'FTO Tracker', Clock],
   ['outreach', 'Outreach Drafts', Mail],
+  ['students', 'Students', Users],
   ['team_chat', 'Team Chat Assistant', MessageSquare],
   ['team_notes', 'Team Notes', NotebookText],
   ['term_enrollment', 'Term Enrollment', ClipboardCheck],
-  ['students', 'Students', Users],
   ['work_performance', 'Work Performance', TrendingUp],
-  ['essential_actions', 'Essential Actions', ClipboardCheck],
 ];
 
 const moduleMeta: { page: Page; module_name: string; label: string; default_access: AccessLevel }[] = [
@@ -2677,7 +2676,11 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, 
   const expiring = inventory.filter((item) => item.expires && item.quantity > 0).length;
   const pending = tasks.filter((task) => task.status === 'pending_approval').length;
   const activeStudents = students.filter((student) => !student.archived && !student.on_term_break);
-  const highRiskStudents = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).isHighRisk);
+  // Matches the Students tab's definition exactly (risk === 'High Risk',
+  // excluding archived/term-break students) — the dashboard previously used
+  // a looser substring check that also matched "Med High" and ghost/portal
+  // students, which is why this number and the Students tab disagreed.
+  const highRiskStudents = activeStudents.filter((student) => student.risk === 'High Risk');
   const ghostRiskStudents = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).isGhost);
   const supportStudents = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).isSupport);
   const followUpsDue = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).needsFollowUp);
@@ -2700,79 +2703,49 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, 
     })
     .sort((a, b) => new Date(a.next_call_at!).getTime() - new Date(b.next_call_at!).getTime());
   const priorityQueue = [...activeStudents].sort((a, b) => priorityScore(b, touchpoints) - priorityScore(a, touchpoints)).slice(0, 6);
+  const todayDow = new Date().getDay();
+  const todaysCallsRanked = activeStudents
+    .filter((student) =>
+      (student.is_weekly_appointment && student.weekly_appointment_day_of_week === todayDow) ||
+      isSameDay(student.next_call_at, today) || student.next_appointment_date === today
+    )
+    .sort((a, b) => priorityScore(b, touchpoints) - priorityScore(a, touchpoints))
+    .slice(0, 5);
 
   if (mode === 'work' && role === 'admin') {
     return <>
-      <Header title="Mentor Success Dashboard" sub="Daily command center for student risk, call prep, follow-ups, and mentor readiness.">
+      <Header title="Mentor Success Dashboard" sub="A quick daily glance — open Students or Work Performance for the full detail.">
         <button className="btn primary" onClick={() => setPage('students')}><Users size={15} /> Open Students</button>
       </Header>
       <Stats items={[
         ['High risk', String(highRiskStudents.length), 'needs strategy'],
         ['Ghost risk', String(ghostRiskStudents.length), '3+ missed/no contact'],
-        ['Calls today', String(callsToday.length), 'manual now · Outlook later'],
+        ['Calls today', String(todaysCallsRanked.length), 'weekly appts + scheduled'],
         ['Follow-ups due', String(followUpsDue.length), 'copy/draft needed']
       ]} />
       <section className="panel">
-        <div className="panel-head"><h2>Today’s Scheduled Calls</h2><Phone size={17} /></div>
-        {callsToday.length === 0 && <div className="brief-item">No calls scheduled for today. Add a "Next call" datetime when logging a touchpoint to populate this list.</div>}
-        {callsToday.map((student) => {
-          const timeText = student.next_call_at
-            ? new Date(student.next_call_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-            : 'All day';
-          return <button className="mentor-queue-row" key={student.id} onClick={() => setPage('students')}>
-            <span className="queue-rank">{timeText}</span>
-            <div>
-              <strong>{student.display_name}</strong>
-              <p>{student.student_id ? `ID ${student.student_id} · ` : ''}{student.course || 'No course'} · {student.status}</p>
-            </div>
-            <span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span>
-          </button>;
-        })}
-        {callsThisWeek.length > 0 && <details style={{ marginTop: 12 }}><summary><strong>Upcoming this week ({callsThisWeek.length})</strong></summary>
-          {callsThisWeek.map((student) => <div className="brief-item" key={student.id}>
-            <strong>{new Date(student.next_call_at!).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</strong> · {student.display_name} · {student.course || 'No course'}
-          </div>)}
-        </details>}
-      </section>
-      <div className="mentor-grid">
-        <section className="panel mentor-action-panel">
-          <div className="panel-head"><h2>Today’s Priority Queue</h2><span className="readonly-pill"><AlertTriangle size={14} /> Risk ordered</span></div>
-          {priorityQueue.length === 0 && <div className="brief-item">No active students yet. Add students to begin building your call-prep queue.</div>}
-          {priorityQueue.map((student, index) => {
-            const signals = studentStatusSignals(student, touchpoints);
-            const score = priorityScore(student, touchpoints);
-            const health = studentHealth(student, touchpoints);
-            return <button className="mentor-queue-row" key={student.id} onClick={() => setPage('students')}>
-              <span className="queue-rank">{index + 1}</span>
+        <div className="panel-head"><h2>Who to talk to today</h2><Phone size={17} /></div>
+        {todaysCallsRanked.length === 0 && (
+          <div className="brief-item">No weekly appointments or scheduled calls land today.</div>
+        )}
+        {todaysCallsRanked.map((student) => {
+          const timeText = student.is_weekly_appointment && student.weekly_appointment_day_of_week === todayDow && student.weekly_appointment_time
+            ? student.weekly_appointment_time
+            : student.next_call_at
+              ? new Date(student.next_call_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+              : 'Today';
+          return (
+            <button className="mentor-queue-row" key={student.id} onClick={() => setPage('students')}>
+              <span className="queue-rank">{timeText}</span>
               <div>
                 <strong>{student.display_name}</strong>
-                <p>{student.course || 'No course'} · {student.status} · Last: {student.last_contact_date || signals.lastTouchpoint?.touchpoint_date || '—'}</p>
+                <p>{student.course || 'No course'}</p>
               </div>
               <span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span>
-              <span className={`health-pill ${healthClass(health.overall)}`}>Health {health.overall}</span><small>{signals.isGhost ? 'Ghost risk' : signals.isSupport ? 'Support' : score >= 35 ? 'Watch closely' : 'Prep ready'}</small>
-            </button>;
-          })}
-        </section>
-        <section className="panel mentor-action-panel">
-          <div className="panel-head"><h2>Call Prep Focus</h2><FileText size={17} /></div>
-          {priorityQueue.slice(0, 3).map((student) => {
-            const signals = studentStatusSignals(student, touchpoints);
-            const prep = student.next_call_prep || signals.lastTouchpoint?.next_call_prep || 'Review course momentum, confirm the next measurable action, and end with one clear commitment.';
-            const goalLine = prep.split('\n').find((l) => l.trim().startsWith('Last week\u2019s stated goal') || l.trim().startsWith('Last week\'s stated goal'));
-            const prepPreview = goalLine || prep.split('\n').find((l) => l.trim() && !/^[A-Z][A-Z '’\-—]+:$/.test(l.trim())) || prep;
-            return <div className="call-prep-card" key={student.id}>
-              <strong>{student.display_name}</strong>
-              <p>{prepPreview}</p>
-              <small>{signals.missedCalls ? `${signals.missedCalls} missed call(s)` : 'No missed call flag'} · {student.next_appointment_date || 'No appointment date entered'}</small>
-            </div>;
-          })}
-        </section>
-      </div>
-      <div className="grid two">
-        <section className="panel"><h2>Risk Buckets</h2><div className="brief-item urgent"><strong>High risk:</strong> {highRiskStudents.map((s) => s.display_name).join(', ') || 'None'}</div><div className="brief-item"><strong>Ghost risk:</strong> {ghostRiskStudents.map((s) => s.display_name).join(', ') || 'None'}</div><div className="brief-item good"><strong>Support:</strong> {supportStudents.map((s) => s.display_name).join(', ') || 'None'}</div></section>
-        <section className="panel"><h2>Mentor Metrics</h2><div className="brief-item"><strong>Active students:</strong> {activeStudents.length}</div><div className="brief-item"><strong>Touchpoints logged:</strong> {touchpoints.length}</div><div className="brief-item"><strong>Salesforce copy pending:</strong> {activeStudents.filter((s) => !s.copied).length}</div><div className="brief-item"><strong>FERPA mode:</strong> First name/nickname only · clipboard only</div></section>
-        <CallShowRateCard />
-      </div>
+            </button>
+          );
+        })}
+      </section>
     </>;
   }
 
