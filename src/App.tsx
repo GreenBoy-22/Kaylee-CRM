@@ -860,7 +860,7 @@ function App() {
 
       const courseText = course || student?.course || 'their current course';
       const firstName = (student?.display_name || '').trim().split(/\s+/)[0] || 'there';
-      const recent = (pastTouchpoints || []).slice(0, 5);
+      const recent = (pastTouchpoints || []).slice(0, 3);
       const history = recent.length
         ? recent.map((t) => `[${t.touchpoint_date}, ${t.touchpoint_type}]: ${t.note}`).join('\n\n')
         : '(no prior touchpoints logged)';
