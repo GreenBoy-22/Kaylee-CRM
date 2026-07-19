@@ -67,7 +67,7 @@ export default function RecipeBook({ initialRecipeId }: { initialRecipeId?: stri
   useEffect(() => {
     if (selected) {
       loadFeedback(selected.id);
-      setTextMessage(`Hey! I made ${selected.title} tonight \u{1F37D}\uFE0F Would love to know what you thought — rate it 1-5 and let me know any feedback whenever you get a sec!`);
+      setTextMessage(`Hey! I made ${selected.title} tonight \u{1F37D}\uFE0F Would love to know what you thought — rate it here: https://kaylee-crm.vercel.app/rate/${selected.id}`);
       setShowTextComposer(false);
       setFbName(''); setFbRating(0); setFbComment('');
     } else {
