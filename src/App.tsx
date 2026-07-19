@@ -1740,12 +1740,24 @@ Kaylee`;
 
   async function deleteDraft(id: string) {
     const draft = drafts.find((d) => d.id === id);
-    // If this is a pacing check-in draft, lock its student+kind combo first
-    // so the auto-regeneration effect treats it as already handled and
-    // doesn't immediately recreate what was just deleted on purpose.
-    if (draft && (draft.template_kind === 'pacing_2m' || draft.template_kind === 'pacing_4m') && draft.student_id) {
-      pacingDraftLock.current.add(`${draft.student_id}::${draft.template_kind}`);
+    const isPacing = draft && (draft.template_kind === 'pacing_2m' || draft.template_kind === 'pacing_4m');
+
+    if (isPacing) {
+      // Pacing drafts can't be hard-deleted — the auto-regeneration effect
+      // uses "does a draft row exist for this student+checkpoint since
+      // term start" as its only signal that it's already been handled.
+      // Deleting the row erases that signal, so it just gets recreated on
+      // your next visit (this was happening every time). Marking it
+      // "dismissed" instead keeps the row on record permanently — it
+      // still counts as handled, but drops out of your visible inbox.
+      if (draft.student_id) pacingDraftLock.current.add(`${draft.student_id}::${draft.template_kind}`);
+      if (!supabase) { setDrafts((current) => current.filter((d) => d.id !== id)); return; }
+      const { error } = await supabase.from('email_drafts').update({ status: 'dismissed' }).eq('id', id);
+      if (error) { setMessage(`Delete failed: ${error.message}`); return; }
+      setDrafts((current) => current.filter((d) => d.id !== id));
+      return;
     }
+
     if (!supabase) { setDrafts((current) => current.filter((d) => d.id !== id)); return; }
     const { error } = await supabase.from('email_drafts').delete().eq('id', id);
     if (error) { setMessage(`Delete failed: ${error.message}`); return; }
