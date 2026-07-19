@@ -210,6 +210,25 @@ function hoursSince(dateStr: string): number {
   return Math.floor((Date.now() - new Date(dateStr).getTime()) / 3600000);
 }
 
+// Counts weekdays (Mon-Fri) between a date and now, not counting the
+// start date itself. Used to cap how far back an auto-detected EA can
+// reach — a trigger point older than ~7 business days is more likely a
+// Salesforce-logged contact that just hasn't been entered in the Hub yet
+// than a genuine miss, so it's suppressed rather than surfaced as overdue.
+function businessDaysSince(date: Date): number {
+  let count = 0;
+  const cursor = new Date(date);
+  cursor.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  while (cursor < today) {
+    cursor.setDate(cursor.getDate() + 1);
+    const day = cursor.getDay();
+    if (day !== 0 && day !== 6) count++;
+  }
+  return count;
+}
+
 // ── Personalization extraction (lightweight, mirrors the Students page) ──
 function extractStatedGoal(note: string | null | undefined): string | null {
   if (!note) return null;
@@ -303,12 +322,23 @@ export default function EssentialActions() {
   // last_contact_date / last_academic_activity_date update via a new touchpoint.
   const autoEAs: ActiveEa[] = useMemo(() => {
     const recentlyHandled = new Set(recentlyClosed.map((r) => `${r.student_id}::${r.ea_type}`));
+    // Cohort cutoff: at Kaylee's request, auto-detected EAs (No Contact,
+    // Not Engaged, and pacing checkpoints) only fire for students whose
+    // term started on or after this date. Older cohorts are considered
+    // already handled/out of scope for this tracking system going forward.
+    const EA_COHORT_CUTOFF = new Date('2026-07-01');
     const results: ActiveEa[] = [];
     for (const s of students) {
+      if (!s.term_start_date || new Date(s.term_start_date) < EA_COHORT_CUTOFF) continue;
       const tier = momentumTier(s.momentum);
       const contactDays = daysSince(s.last_contact_date);
       const contactThreshold = tier === 'high' ? 21 : 16;
-      if (contactDays >= contactThreshold && !recentlyHandled.has(`${s.id}::no_contact`)) {
+      const contactTriggerDate = s.last_contact_date ? new Date(new Date(s.last_contact_date).getTime() + contactThreshold * 86400000) : null;
+      if (
+        contactDays >= contactThreshold &&
+        contactTriggerDate && businessDaysSince(contactTriggerDate) <= 7 &&
+        !recentlyHandled.has(`${s.id}::no_contact`)
+      ) {
         results.push({
           key: `auto-no_contact-${s.id}`, student: s, eaType: 'no_contact',
           firedAt: s.last_contact_date || '', slaHours: slaHoursFor(EA_DEFS.no_contact, tier),
@@ -316,7 +346,12 @@ export default function EssentialActions() {
       }
       const engagedDays = daysSince(s.last_academic_activity_date);
       const engagedThreshold = tier === 'high' ? 15 : 10;
-      if (engagedDays >= engagedThreshold && !recentlyHandled.has(`${s.id}::not_engaged`)) {
+      const engagedTriggerDate = s.last_academic_activity_date ? new Date(new Date(s.last_academic_activity_date).getTime() + engagedThreshold * 86400000) : null;
+      if (
+        engagedDays >= engagedThreshold &&
+        engagedTriggerDate && businessDaysSince(engagedTriggerDate) <= 7 &&
+        !recentlyHandled.has(`${s.id}::not_engaged`)
+      ) {
         results.push({
           key: `auto-not_engaged-${s.id}`, student: s, eaType: 'not_engaged',
           firedAt: s.last_academic_activity_date || '', slaHours: slaHoursFor(EA_DEFS.not_engaged, tier),
@@ -330,16 +365,18 @@ export default function EssentialActions() {
           r.student_id === s.id && r.ea_type === eaType && new Date(r.created_at) >= new Date(s.term_start_date as string)
         );
         const daysIntoTerm = daysSince(s.term_start_date);
-        if (daysIntoTerm >= 60 && !loggedThisTerm('pacing_2m')) {
+        const pacing2Trigger = new Date(new Date(s.term_start_date).getTime() + 60 * 86400000);
+        if (daysIntoTerm >= 60 && businessDaysSince(pacing2Trigger) <= 7 && !loggedThisTerm('pacing_2m')) {
           results.push({
             key: `auto-pacing_2m-${s.id}`, student: s, eaType: 'pacing_2m',
-            firedAt: new Date(new Date(s.term_start_date).getTime() + 60 * 86400000).toISOString(), slaHours: slaHoursFor(EA_DEFS.pacing_2m, tier),
+            firedAt: pacing2Trigger.toISOString(), slaHours: slaHoursFor(EA_DEFS.pacing_2m, tier),
           });
         }
-        if (daysIntoTerm >= 120 && !loggedThisTerm('pacing_4m')) {
+        const pacing4Trigger = new Date(new Date(s.term_start_date).getTime() + 120 * 86400000);
+        if (daysIntoTerm >= 120 && businessDaysSince(pacing4Trigger) <= 7 && !loggedThisTerm('pacing_4m')) {
           results.push({
             key: `auto-pacing_4m-${s.id}`, student: s, eaType: 'pacing_4m',
-            firedAt: new Date(new Date(s.term_start_date).getTime() + 120 * 86400000).toISOString(), slaHours: slaHoursFor(EA_DEFS.pacing_4m, tier),
+            firedAt: pacing4Trigger.toISOString(), slaHours: slaHoursFor(EA_DEFS.pacing_4m, tier),
           });
         }
       }
