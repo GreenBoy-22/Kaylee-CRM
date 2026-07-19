@@ -581,7 +581,22 @@ function App() {
     document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
     try { localStorage.setItem('kh-dark-mode', String(darkMode)); } catch {}
   }, [darkMode]);
-  const [page, setPage] = useState<Page>('dashboard');
+  const [page, setPage] = useState<Page>(() => {
+    // Deep-link support: a push notification can link to /?recipe=<id>,
+    // which should open straight to Recipe Book instead of the dashboard.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('recipe')) return 'recipes';
+    } catch {}
+    return 'dashboard';
+  });
+  const deepLinkRecipeId = useMemo(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('recipe');
+    } catch {
+      return null;
+    }
+  }, []);
   const [inventory, setInventory] = useState<InventoryItem[]>(seedInventory);
   const [students, setStudents] = useState<Student[]>(seedStudents);
   const [touchpoints, setTouchpoints] = useState<Touchpoint[]>(seedTouchpoints);
@@ -2108,7 +2123,7 @@ Kaylee`;
           {page === 'term_enrollment' && activeRole === 'admin' && <TermEnrollment />}
           {page === 'mood' && <MoodTracker />}
           {page === 'plants' && <PlantCatalog />}
-          {page === 'recipes' && <RecipeBook />}
+          {page === 'recipes' && <RecipeBook initialRecipeId={deepLinkRecipeId} />}
           {page === 'packages' && session && <PackageTracking userId={session.user.id} />}
           {page === 'games' && <Games />}
           {page === 'media' && <Media />}

@@ -44,7 +44,7 @@ function humanDuration(iso: string | null): string {
   return h > 0 ? `${h}h ${m > 0 ? `${m}m` : ''}`.trim() : `${m} min`;
 }
 
-export default function RecipeBook() {
+export default function RecipeBook({ initialRecipeId }: { initialRecipeId?: string | null }) {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -57,6 +57,8 @@ export default function RecipeBook() {
   const [fbName, setFbName] = useState('');
   const [fbRating, setFbRating] = useState(0);
   const [fbComment, setFbComment] = useState('');
+  const [pushSending, setPushSending] = useState(false);
+  const [pushResult, setPushResult] = useState('');
 
   useEffect(() => {
     load();
@@ -95,12 +97,54 @@ export default function RecipeBook() {
     setFbName(''); setFbRating(0); setFbComment('');
   }
 
+  async function sendPushRequest(recipe: Recipe) {
+    if (!supabase) return;
+    setPushSending(true);
+    setPushResult('');
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const myId = sessionData?.session?.user?.id;
+      const { data: otherUsers } = await supabase.from('users').select('id, name').neq('id', myId || '');
+      if (!otherUsers || otherUsers.length === 0) {
+        setPushResult('No other Hub users to notify.');
+        setPushSending(false);
+        return;
+      }
+      const deepLink = `/?recipe=${recipe.id}`;
+      let totalSent = 0;
+      for (const u of otherUsers) {
+        const { data: result, error } = await supabase.functions.invoke('send-push-notifications', {
+          body: {
+            user_id: u.id,
+            title: `Rate ${recipe.title}!`,
+            body: 'Kaylee made this and wants to know what you thought — tap to rate it.',
+            url: deepLink,
+          },
+        });
+        if (!error && result?.sent) totalSent += result.sent;
+      }
+      setPushResult(
+        totalSent > 0
+          ? `Notification sent to ${totalSent} device${totalSent > 1 ? 's' : ''}.`
+          : "Nobody has notifications turned on yet — they'll need to enable push notifications in the Hub first."
+      );
+    } catch {
+      setPushResult('Could not send — try again in a moment.');
+    }
+    setPushSending(false);
+  }
+
   async function load() {
     if (!supabase) return;
     setLoading(true);
     const { data } = await supabase.from('recipes').select('*').order('title', { ascending: true });
-    setRecipes((data as Recipe[]) || []);
+    const loaded = (data as Recipe[]) || [];
+    setRecipes(loaded);
     setLoading(false);
+    if (initialRecipeId) {
+      const match = loaded.find((r) => r.id === initialRecipeId);
+      if (match) setSelected(match);
+    }
   }
 
   async function toggleFavorite(recipe: Recipe) {
@@ -267,13 +311,28 @@ export default function RecipeBook() {
                   return `— avg ${avg.toFixed(1)}/5 (${rated.length})`;
                 })()}
               </h3>
-              <button
-                onClick={() => setShowTextComposer((v) => !v)}
-                style={{ fontSize: '0.8rem', background: ARMY_GREEN, color: 'white', border: 'none', borderRadius: 6, padding: '0.4rem 0.75rem', cursor: 'pointer' }}
-              >
-                Ask for feedback
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => sendPushRequest(selected)}
+                  disabled={pushSending}
+                  style={{ fontSize: '0.8rem', background: '#534AB7', color: 'white', border: 'none', borderRadius: 6, padding: '0.4rem 0.75rem', cursor: 'pointer' }}
+                >
+                  {pushSending ? 'Sending...' : 'Send push notification'}
+                </button>
+                <button
+                  onClick={() => setShowTextComposer((v) => !v)}
+                  style={{ fontSize: '0.8rem', background: ARMY_GREEN, color: 'white', border: 'none', borderRadius: 6, padding: '0.4rem 0.75rem', cursor: 'pointer' }}
+                >
+                  Ask for feedback
+                </button>
+              </div>
             </div>
+
+            {pushResult && (
+              <p style={{ fontSize: '0.78rem', color: pushResult.startsWith('Notification sent') ? ARMY_GREEN : '#c0392b', margin: '0 0 10px' }}>
+                {pushResult}
+              </p>
+            )}
 
             {showTextComposer && (
               <div style={{ background: '#f4f5f0', borderRadius: 8, padding: '0.75rem', marginBottom: 12 }}>
