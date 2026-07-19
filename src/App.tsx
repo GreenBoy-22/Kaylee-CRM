@@ -2287,6 +2287,13 @@ function fmtDateShort(dateValue?: string | null, includeYear = false): string {
   return out;
 }
 
+function fmtMonthYear(dateValue?: string | null): string {
+  if (!dateValue) return '—';
+  const d = new Date(dateValue.length <= 10 ? `${dateValue}T00:00:00` : dateValue);
+  if (Number.isNaN(d.getTime())) return dateValue;
+  return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
 // Whichever of the student's next one-off call/appointment or their
 // recurring weekly appointment slot comes first, chronologically.
 function soonestAppointment(student: Student): string | null {
@@ -5413,7 +5420,7 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
         {/* TWO-COLUMN ZONE: scrollable history on left, sticky touchpoint form on right */}
         <div className="student-work-area">
           <div className="student-work-main">
-            <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{fmtDateShort(selected.last_contact_date)}</p></div><div><strong>Next appointment</strong><p>{fmtDateShort(soonestAppointment(selected))}</p></div><div><strong>Graduation goal</strong><p>{fmtDateShort(selected.graduation_goal_date)}</p></div><div><strong>Missed calls this term</strong><p>{(() => {
+            <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{fmtDateShort(selected.last_contact_date)}</p></div><div><strong>Next appointment</strong><p>{fmtDateShort(soonestAppointment(selected))}</p></div><div><strong>Graduation goal</strong><p>{fmtMonthYear(selected.graduation_goal_date)}</p></div><div><strong>Missed calls this term</strong><p>{(() => {
               const callTypes = ['Call from student', 'Call to student', 'No-show / missed call'];
               const termStart = selected.term_start_date ? new Date(selected.term_start_date) : null;
               const termCalls = touchpoints.filter((t) =>
