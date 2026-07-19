@@ -1444,8 +1444,17 @@ Kaylee`;
     if (!isAdmin()) return setMessage('Touchpoint logs are admin-only.');
     const student = students.find((s) => s.id === input.student_id);
     const pastForStudent = touchpoints.filter((t) => t.student_id === input.student_id);
-    setMessage('Generating a personalized call prep script...');
-    const aiGenerated = await generateStudentSupportAI(input.note, input.course, input.momentum, student, pastForStudent);
+    // Only spend on an AI call when the student was actually reached — a
+    // missed call, no-show, or voicemail-only entry has no real
+    // conversation to ground a script in, so skip straight to the free
+    // fallback rather than pay for a generation with nothing to work with.
+    const hadRealConversation = !input.missed &&
+      input.touchpoint_type !== 'No-show / missed call' &&
+      !input.touchpoint_type.toLowerCase().includes('voicemail');
+    if (hadRealConversation) setMessage('Generating a personalized call prep script...');
+    const aiGenerated = hadRealConversation
+      ? await generateStudentSupportAI(input.note, input.course, input.momentum, student, pastForStudent)
+      : null;
     const generated = aiGenerated || generateStudentSupport(input.note, input.course, input.momentum, student, pastForStudent);
     const touchpoint: Touchpoint = { ...input, ...generated, copied: false, id: crypto.randomUUID() };
     setTouchpoints((current) => [touchpoint, ...current]);
