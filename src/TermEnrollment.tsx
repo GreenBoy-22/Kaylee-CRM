@@ -10,7 +10,7 @@ const STATUS_COLORS: Record<string, string> = {
   none: 'transparent',
   degree_plan_made: '#a8d5ba',
   term_break: '#f4a6a6',
-  registered: '#8fbc8f',
+  registered: '#f5d76e',
 };
 const STATUS_LABELS: Record<string, string> = {
   none: '—',
