@@ -6,7 +6,7 @@
 // Not required for normal updates — stale-while-revalidate below already
 // self-heals within one extra page load — but bumping it guarantees an
 // immediate full refresh instead of a one-visit lag.
-const CACHE_NAME = 'kaylees-hub-v2';
+const CACHE_NAME = 'kaylees-hub-v3';
 
 const PRECACHE_URLS = [
   '/',
