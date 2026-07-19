@@ -1,4 +1,7 @@
 {
+  "rewrites": [
+    { "source": "/rate/(.*)", "destination": "/index.html" }
+  ],
   "headers": [
     {
       "source": "/",
