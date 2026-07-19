@@ -65,21 +65,56 @@ function parseSourceNote(sourceNote: string | null): { person: string; date: str
 function AnnotationBody({ text }: { text: string }) {
   const lines = text.split('\n').filter((l) => l.trim());
   const isBulleted = lines.length > 1 && lines.some((l) => l.trim().startsWith('\u2022'));
-  if (!isBulleted) {
-    return <p style={{ margin: 0, fontSize: '0.87rem', color: '#333' }}>{text}</p>;
+  const isNumbered = lines.length > 1 && lines.filter((l) => /^\d+\.\s/.test(l.trim())).length >= 2;
+
+  if (isNumbered) {
+    const intro = /^\d+\.\s/.test(lines[0].trim()) ? null : lines[0];
+    const steps = lines.filter((l) => /^\d+\.\s/.test(l.trim()));
+    return (
+      <>
+        {intro && <p style={{ margin: '0 0 4px', fontSize: '0.85rem', color: '#555' }}>{intro}</p>}
+        <ol style={{ margin: 0, paddingLeft: 18, fontSize: '0.87rem', color: '#333' }}>
+          {steps.map((s, i) => (
+            <li key={i} style={{ marginBottom: 3 }}>{s.replace(/^\d+\.\s*/, '')}</li>
+          ))}
+        </ol>
+      </>
+    );
   }
-  const intro = lines[0].trim().startsWith('\u2022') ? null : lines[0];
-  const bullets = lines.filter((l) => l.trim().startsWith('\u2022'));
-  return (
-    <>
-      {intro && <p style={{ margin: '0 0 4px', fontSize: '0.85rem', color: '#555' }}>{intro}</p>}
+
+  if (isBulleted) {
+    const intro = lines[0].trim().startsWith('\u2022') ? null : lines[0];
+    const bullets = lines.filter((l) => l.trim().startsWith('\u2022'));
+    return (
+      <>
+        {intro && <p style={{ margin: '0 0 4px', fontSize: '0.85rem', color: '#555' }}>{intro}</p>}
+        <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.87rem', color: '#333' }}>
+          {bullets.map((b, i) => (
+            <li key={i} style={{ marginBottom: 3 }}>{b.replace(/^\u2022\s*/, '')}</li>
+          ))}
+        </ul>
+      </>
+    );
+  }
+
+  // No explicit bullets in the source text — for anything longer than a
+  // single quick fact, auto-break it into sentence-level bullets so dense
+  // paragraphs still read as a scannable list instead of a wall of text.
+  const sentences = (text.match(/[^.!?]+[.!?]+(\s+|$)/g) || [])
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (sentences.length > 1) {
+    return (
       <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.87rem', color: '#333' }}>
-        {bullets.map((b, i) => (
-          <li key={i} style={{ marginBottom: 3 }}>{b.replace(/^\u2022\s*/, '')}</li>
+        {sentences.map((s, i) => (
+          <li key={i} style={{ marginBottom: 3 }}>{s}</li>
         ))}
       </ul>
-    </>
-  );
+    );
+  }
+
+  return <p style={{ margin: 0, fontSize: '0.87rem', color: '#333' }}>{text}</p>;
 }
 
 export default function TeamNotes() {
