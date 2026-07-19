@@ -5,7 +5,7 @@ import {
   Activity, Cloud, Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Gamepad2, Film, Plane, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Check, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope, TrendingUp, NotebookText, ChefHat
+  CheckCircle2, Check, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope, TrendingUp, NotebookText, ChefHat, Bell
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
@@ -590,13 +590,13 @@ function App() {
     } catch {}
     return 'dashboard';
   });
-  const deepLinkRecipeId = useMemo(() => {
+  const [deepLinkRecipeId, setDeepLinkRecipeId] = useState<string | null>(() => {
     try {
       return new URLSearchParams(window.location.search).get('recipe');
     } catch {
       return null;
     }
-  }, []);
+  });
   const [inventory, setInventory] = useState<InventoryItem[]>(seedInventory);
   const [students, setStudents] = useState<Student[]>(seedStudents);
   const [touchpoints, setTouchpoints] = useState<Touchpoint[]>(seedTouchpoints);
@@ -2068,6 +2068,7 @@ Kaylee`;
             {darkMode ? <Sun size={15} /> : <Moon size={15} />}
           </button>
           <span className={`role-pill ${activeRole}`}>{activeName} · {activeRole === 'admin' ? 'Admin' : 'Limited'}</span>
+          <NotificationBell setPage={setPage} setDeepLinkOverride={setDeepLinkRecipeId} />
           <button className="btn ghost" onClick={signOut}><LogOut size={15} /> Sign out</button>
         </div>
       </header>
@@ -2123,7 +2124,7 @@ Kaylee`;
           {page === 'term_enrollment' && activeRole === 'admin' && <TermEnrollment />}
           {page === 'mood' && <MoodTracker />}
           {page === 'plants' && <PlantCatalog />}
-          {page === 'recipes' && <RecipeBook initialRecipeId={deepLinkRecipeId} />}
+          {page === 'recipes' && <RecipeBook key={deepLinkRecipeId || 'default'} initialRecipeId={deepLinkRecipeId} />}
           {page === 'packages' && session && <PackageTracking userId={session.user.id} />}
           {page === 'games' && <Games />}
           {page === 'media' && <Media />}
@@ -2539,6 +2540,124 @@ function CallShowRateCard() {
         </>
       )}
     </section>
+  );
+}
+
+interface NotificationRow {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  link_url: string | null;
+  is_read: boolean;
+  created_at: string;
+}
+
+function NotificationBell({ setPage, setDeepLinkOverride }: { setPage: (p: Page) => void; setDeepLinkOverride: (url: string | null) => void }) {
+  const [items, setItems] = useState<NotificationRow[]>([]);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    load();
+    if (!supabase) return;
+    const channel = supabase
+      .channel('notifications-live')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, () => load())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  async function load() {
+    if (!supabase) return;
+    const { data } = await supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(30);
+    setItems((data as NotificationRow[]) || []);
+  }
+
+  async function markRead(id: string) {
+    setItems((current) => current.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
+    if (!supabase) return;
+    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+  }
+
+  async function markAllRead() {
+    setItems((current) => current.map((n) => ({ ...n, is_read: true })));
+    if (!supabase) return;
+    await supabase.from('notifications').update({ is_read: true }).eq('is_read', false);
+  }
+
+  function handleClick(n: NotificationRow) {
+    markRead(n.id);
+    setOpen(false);
+    if (n.link_url) {
+      try {
+        const url = new URL(n.link_url, window.location.origin);
+        const targetPage = url.searchParams.get('page') as Page | null;
+        const recipeId = url.searchParams.get('recipe');
+        if (targetPage) setPage(targetPage);
+        if (recipeId) setDeepLinkOverride(recipeId);
+      } catch {}
+    }
+  }
+
+  const unreadCount = items.filter((n) => !n.is_read).length;
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        className="btn ghost"
+        onClick={() => setOpen((v) => !v)}
+        style={{ padding: '7px 10px', position: 'relative' }}
+        title="Notifications"
+      >
+        <Bell size={15} />
+        {unreadCount > 0 && (
+          <span style={{
+            position: 'absolute', top: -2, right: -2, background: '#c0392b', color: 'white',
+            borderRadius: 999, fontSize: 10, fontWeight: 700, minWidth: 16, height: 16,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px',
+          }}>
+            {unreadCount > 9 ? '9+' : unreadCount}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 998 }} />
+          <div style={{
+            position: 'absolute', top: '110%', right: 0, width: 340, maxHeight: 440, overflowY: 'auto',
+            background: 'var(--surface-0, white)', border: '1px solid #ddd', borderRadius: 10,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.15)', zIndex: 999,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid #eee' }}>
+              <strong style={{ fontSize: 14 }}>Notifications</strong>
+              {unreadCount > 0 && (
+                <button onClick={markAllRead} style={{ fontSize: 12, background: 'none', border: 'none', color: '#4B5320', cursor: 'pointer' }}>
+                  Mark all read
+                </button>
+              )}
+            </div>
+            {items.length === 0 && (
+              <p style={{ padding: 16, color: '#999', fontSize: 13, textAlign: 'center' }}>Nothing yet.</p>
+            )}
+            {items.map((n) => (
+              <div
+                key={n.id}
+                onClick={() => handleClick(n)}
+                style={{
+                  padding: '10px 12px', borderBottom: '1px solid #f2f2f2', cursor: 'pointer',
+                  background: n.is_read ? 'transparent' : '#f4f5f0',
+                }}
+              >
+                <p style={{ margin: 0, fontSize: 13, fontWeight: n.is_read ? 400 : 700 }}>{n.title}</p>
+                {n.body && <p style={{ margin: '2px 0 0', fontSize: 12, color: '#777' }}>{n.body}</p>}
+                <p style={{ margin: '4px 0 0', fontSize: 11, color: '#aaa' }}>{new Date(n.created_at).toLocaleString()}</p>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
