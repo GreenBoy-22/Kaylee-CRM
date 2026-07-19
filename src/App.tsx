@@ -23,6 +23,7 @@ import FTOTracker from './FTOTracker';
 import CourseNotes from './CourseNotes';
 import TeamChatAssistant from './TeamChatAssistant';
 import TeamNotes from './TeamNotes';
+import TermEnrollment from './TermEnrollment';
 import MoodTracker from './MoodTracker';
 import PlantCatalog from './PlantCatalog';
 import WeatherWidget from './WeatherWidget';
@@ -35,7 +36,7 @@ import Appointments from './Appointments';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'team_chat' | 'team_notes' | 'mood' | 'weather' | 'plants' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'essential_actions' | 'settings';
+type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'team_chat' | 'team_notes' | 'term_enrollment' | 'mood' | 'weather' | 'plants' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'essential_actions' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -299,6 +300,7 @@ const workNav: readonly NavEntry[] = [
   ['outreach', 'Outreach Drafts', Mail],
   ['team_chat', 'Team Chat Assistant', MessageSquare],
   ['team_notes', 'Team Notes', NotebookText],
+  ['term_enrollment', 'Term Enrollment', ClipboardCheck],
   ['students', 'Students', Users],
   ['work_performance', 'Work Performance', TrendingUp],
   ['essential_actions', 'Essential Actions', ClipboardCheck],
@@ -321,6 +323,7 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'outreach', module_name: 'outreach', label: 'Outreach Drafts', default_access: 'hidden' },
   { page: 'team_chat', module_name: 'team_chat', label: 'Team Chat Assistant', default_access: 'hidden' },
   { page: 'team_notes', module_name: 'team_notes', label: 'Team Notes', default_access: 'hidden' },
+  { page: 'term_enrollment', module_name: 'term_enrollment', label: 'Term Enrollment', default_access: 'hidden' },
   { page: 'work_performance', module_name: 'work_performance', label: 'Work Performance', default_access: 'hidden' },
   { page: 'essential_actions', module_name: 'essential_actions', label: 'Essential Actions', default_access: 'hidden' }
 ];
@@ -2100,6 +2103,7 @@ Kaylee`;
           {page === 'course_notes' && activeRole === 'admin' && <CourseNotes />}
           {page === 'team_chat' && activeRole === 'admin' && <TeamChatAssistant />}
           {page === 'team_notes' && activeRole === 'admin' && <TeamNotes />}
+          {page === 'term_enrollment' && activeRole === 'admin' && <TermEnrollment />}
           {page === 'mood' && <MoodTracker />}
           {page === 'plants' && <PlantCatalog />}
           {page === 'packages' && session && <PackageTracking userId={session.user.id} />}

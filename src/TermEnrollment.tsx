@@ -1,0 +1,277 @@
+import { useState, useEffect } from 'react';
+import { Check, X, Mail, RefreshCw } from 'lucide-react';
+import { supabase } from './lib/supabase';
+
+const ARMY_GREEN = '#4B5320';
+const NAVY = '#1e3a5f';
+const GOLD = '#d4a017';
+
+const STATUS_COLORS: Record<string, string> = {
+  none: 'transparent',
+  degree_plan_made: '#a8d5ba',
+  term_break: '#f4a6a6',
+  registered: '#8fbc8f',
+};
+const STATUS_LABELS: Record<string, string> = {
+  none: '—',
+  degree_plan_made: 'Degree Plan Made',
+  term_break: 'Term Break',
+  registered: 'Registered',
+};
+
+interface EnrollmentList {
+  id: string;
+  label: string;
+  target_month: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+interface EnrollmentEntry {
+  id: string;
+  list_id: string;
+  student_id: string | null;
+  term_number: number | null;
+  student_name: string;
+  otp_met: boolean;
+  email_sent: boolean;
+  appt_email_sent: boolean;
+  appt_made: boolean;
+  row_status: string;
+  notes: string | null;
+}
+
+function monthLabel(dateStr: string): string {
+  const d = new Date(`${dateStr}T00:00:00`);
+  return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
+export default function TermEnrollment() {
+  const [activeList, setActiveList] = useState<EnrollmentList | null>(null);
+  const [entries, setEntries] = useState<EnrollmentEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [confirmGenerate, setConfirmGenerate] = useState(false);
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function load() {
+    if (!supabase) return;
+    setLoading(true);
+    const { data: lists } = await supabase
+      .from('term_enrollment_lists')
+      .select('*')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const list = (lists?.[0] as EnrollmentList) || null;
+    setActiveList(list);
+    if (list) {
+      const { data: entryData } = await supabase
+        .from('term_enrollment_entries')
+        .select('*')
+        .eq('list_id', list.id)
+        .order('student_name', { ascending: true });
+      setEntries((entryData as EnrollmentEntry[]) || []);
+    } else {
+      setEntries([]);
+    }
+    setLoading(false);
+  }
+
+  function nextMonthWindow(): { start: string; end: string; label: string } {
+    const now = new Date();
+    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const start = nextMonth.toISOString().slice(0, 10);
+    const endDate = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+    const end = endDate.toISOString().slice(0, 10);
+    return { start, end, label: nextMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) };
+  }
+
+  async function generateList() {
+    if (!supabase) return;
+    setGenerating(true);
+    setConfirmGenerate(false);
+
+    const { start, end, label } = nextMonthWindow();
+
+    // Retire the current active list, if any
+    if (activeList) {
+      await supabase.from('term_enrollment_lists').update({ is_active: false }).eq('id', activeList.id);
+    }
+
+    // Pull students whose new term starts within the target window
+    const { data: sessionData } = await supabase.auth.getSession();
+    const uid = sessionData?.session?.user?.id;
+    const { data: students } = await supabase
+      .from('students')
+      .select('id, display_name, contact_term, term_start_date')
+      .eq('archived', false)
+      .gte('term_start_date', start)
+      .lte('term_start_date', end);
+
+    const { data: newList, error: listError } = await supabase
+      .from('term_enrollment_lists')
+      .insert({ user_id: uid, label: `Term Enrollment: ${label}`, target_month: start, is_active: true })
+      .select()
+      .single();
+
+    if (listError || !newList) { setGenerating(false); return; }
+
+    if (students && students.length > 0) {
+      const rows = students.map((s) => ({
+        list_id: newList.id,
+        student_id: s.id,
+        student_name: s.display_name,
+        term_number: s.contact_term,
+      }));
+      await supabase.from('term_enrollment_entries').insert(rows);
+    }
+
+    await load();
+    setGenerating(false);
+  }
+
+  async function updateEntry(id: string, patch: Partial<EnrollmentEntry>) {
+    setEntries((current) => current.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    if (!supabase) return;
+    await supabase.from('term_enrollment_entries').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', id);
+  }
+
+  const otpCount = entries.filter((e) => e.otp_met).length;
+  const degreePlanCount = entries.filter((e) => e.row_status === 'degree_plan_made').length;
+  const registeredCount = entries.filter((e) => e.row_status === 'registered').length;
+  const termBreakCount = entries.filter((e) => e.row_status === 'term_break').length;
+
+  return (
+    <div style={{ maxWidth: 1000, margin: '0 auto', padding: '1.5rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 style={{ color: NAVY, fontSize: '1.5rem', margin: '0 0 0.25rem' }}>Term Enrollment Tracker</h1>
+          <p style={{ color: '#666', fontSize: '0.9rem', margin: 0 }}>
+            Digital version of your OTP / registration tracking sheet.
+          </p>
+        </div>
+        {!confirmGenerate ? (
+          <button
+            onClick={() => setConfirmGenerate(true)}
+            style={{ background: GOLD, color: '#1a1a1a', border: 'none', borderRadius: 8, padding: '0.6rem 1.1rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <RefreshCw size={15} /> Generate Next Month's List
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#fff3cd', padding: '0.5rem 0.75rem', borderRadius: 8 }}>
+            <span style={{ fontSize: 13 }}>This closes the current list and starts a new one. Sure?</span>
+            <button onClick={generateList} disabled={generating} style={{ background: ARMY_GREEN, color: 'white', border: 'none', borderRadius: 6, padding: '0.35rem 0.75rem', cursor: 'pointer' }}>
+              {generating ? 'Generating...' : 'Yes, generate'}
+            </button>
+            <button onClick={() => setConfirmGenerate(false)} style={{ background: 'white', border: '1px solid #ccc', borderRadius: 6, padding: '0.35rem 0.75rem', cursor: 'pointer' }}>
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
+
+      {loading && <p style={{ marginTop: 24 }}>Loading...</p>}
+
+      {!loading && !activeList && (
+        <div style={{ marginTop: 24, padding: '1.5rem', background: '#f4f5f0', borderRadius: 10, textAlign: 'center' }}>
+          <p style={{ margin: 0, color: '#555' }}>No list running yet. Click "Generate Next Month's List" to pull in students whose new term starts next month.</p>
+        </div>
+      )}
+
+      {!loading && activeList && (
+        <div style={{ marginTop: '1.25rem', display: 'grid', gridTemplateColumns: '1fr 260px', gap: '1.25rem' }}>
+          {/* Main table */}
+          <div style={{ border: `3px solid ${NAVY}`, borderRadius: 10, overflow: 'hidden' }}>
+            <div style={{ background: NAVY, color: GOLD, padding: '0.75rem 1rem', fontWeight: 800, fontSize: '1.1rem', textTransform: 'uppercase' }}>
+              Term Enrollment: {monthLabel(activeList.target_month)}
+              <span style={{ float: 'right', fontSize: '0.85rem', fontWeight: 600 }}># {entries.length}</span>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+              <thead>
+                <tr style={{ background: '#f4f5f0' }}>
+                  <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: `2px solid ${GOLD}`, width: 50 }}>Term</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: `2px solid ${GOLD}` }}>Student Name</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'center', borderBottom: `2px solid ${GOLD}`, width: 60 }}>OTP Met</th>
+                  <th title="Email sent" style={{ padding: '6px 8px', textAlign: 'center', borderBottom: `2px solid ${GOLD}`, width: 44 }}>*</th>
+                  <th title="Appt email sent" style={{ padding: '6px 8px', textAlign: 'center', borderBottom: `2px solid ${GOLD}`, width: 44 }}>✓</th>
+                  <th title="Appt made" style={{ padding: '6px 8px', textAlign: 'center', borderBottom: `2px solid ${GOLD}`, width: 44 }}>✗</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: `2px solid ${GOLD}`, width: 150 }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.length === 0 && (
+                  <tr><td colSpan={7} style={{ padding: '1rem', textAlign: 'center', color: '#999' }}>No students matched next month's term start window.</td></tr>
+                )}
+                {entries.map((e) => (
+                  <tr key={e.id} style={{ background: STATUS_COLORS[e.row_status], borderBottom: '1px solid #eee' }}>
+                    <td style={{ padding: '5px 8px' }}>{e.term_number ?? ''}</td>
+                    <td style={{ padding: '5px 8px', fontWeight: 600 }}>{e.student_name}</td>
+                    <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                      <input type="checkbox" checked={e.otp_met} onChange={(ev) => updateEntry(e.id, { otp_met: ev.target.checked })} />
+                    </td>
+                    <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                      <input type="checkbox" checked={e.email_sent} onChange={(ev) => updateEntry(e.id, { email_sent: ev.target.checked })} />
+                    </td>
+                    <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                      <input type="checkbox" checked={e.appt_email_sent} onChange={(ev) => updateEntry(e.id, { appt_email_sent: ev.target.checked })} />
+                    </td>
+                    <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                      <input type="checkbox" checked={e.appt_made} onChange={(ev) => updateEntry(e.id, { appt_made: ev.target.checked })} />
+                    </td>
+                    <td style={{ padding: '5px 8px' }}>
+                      <select
+                        value={e.row_status}
+                        onChange={(ev) => updateEntry(e.id, { row_status: ev.target.value })}
+                        style={{ width: '100%', fontSize: '0.8rem', padding: '2px 4px', background: 'transparent', border: '1px solid #ccc', borderRadius: 4 }}
+                      >
+                        {Object.entries(STATUS_LABELS).map(([val, label]) => (
+                          <option key={val} value={val}>{label}</option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Right sidebar */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+            <div style={{ border: `3px solid ${NAVY}`, borderRadius: 10, padding: '0.9rem', textAlign: 'center' }}>
+              <div style={{ color: GOLD, fontWeight: 800, fontSize: '0.85rem', textTransform: 'uppercase', writingMode: 'vertical-rl', display: 'inline-block', marginRight: 8 }}>OTP</div>
+              <div style={{ display: 'inline-block', verticalAlign: 'middle' }}>
+                <div style={{ fontSize: '1.6rem', fontWeight: 800, color: NAVY }}>{otpCount}/{entries.length}</div>
+                <div style={{ fontSize: '0.75rem', color: '#888' }}>OTP met</div>
+              </div>
+            </div>
+            <div style={{ border: `3px solid ${NAVY}`, borderRadius: 10, padding: '0.9rem' }}>
+              <div style={{ color: GOLD, fontWeight: 800, fontSize: '0.85rem', textTransform: 'uppercase', textDecoration: 'underline', marginBottom: 6 }}>Degree Plan Made</div>
+              <div style={{ fontSize: '1.4rem', fontWeight: 800, color: NAVY }}>{degreePlanCount}</div>
+            </div>
+            <div style={{ border: `3px solid ${NAVY}`, borderRadius: 10, padding: '0.9rem' }}>
+              <div style={{ color: GOLD, fontWeight: 800, fontSize: '0.85rem', textTransform: 'uppercase', textDecoration: 'underline', marginBottom: 6 }}>Registered</div>
+              <div style={{ fontSize: '1.4rem', fontWeight: 800, color: NAVY }}>{registeredCount}</div>
+              {termBreakCount > 0 && <div style={{ fontSize: '0.75rem', color: '#c0392b', marginTop: 4 }}>{termBreakCount} on term break</div>}
+            </div>
+            <div style={{ border: `3px solid ${NAVY}`, borderRadius: 10, padding: '0.9rem' }}>
+              <div style={{ color: GOLD, fontWeight: 800, fontSize: '0.9rem', textTransform: 'uppercase', textDecoration: 'underline', marginBottom: 8, textAlign: 'center' }}>Key</div>
+              <div style={{ fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div><strong>TBR</strong> – Term Break Requested</div>
+                <div><Mail size={12} style={{ verticalAlign: 'middle' }} /> * – Email Sent</div>
+                <div><Check size={12} style={{ verticalAlign: 'middle' }} /> ✓ – Appt Email Sent</div>
+                <div><X size={12} style={{ verticalAlign: 'middle' }} /> ✗ – Appt Made</div>
+                <div style={{ background: STATUS_COLORS.degree_plan_made, padding: '2px 6px', borderRadius: 4, marginTop: 4 }}>Degree Plan Made</div>
+                <div style={{ background: STATUS_COLORS.term_break, padding: '2px 6px', borderRadius: 4 }}>Term Break</div>
+                <div style={{ background: STATUS_COLORS.registered, padding: '2px 6px', borderRadius: 4 }}>Registered</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
