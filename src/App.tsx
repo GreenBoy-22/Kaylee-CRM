@@ -845,6 +845,71 @@ function App() {
     return extractSentencesMatching(text, kw).slice(0, 2);
   }
 
+  async function generateStudentSupportAI(
+    note: string,
+    course?: string | null,
+    momentum?: string | null,
+    student?: Student | null,
+    pastTouchpoints?: Touchpoint[]
+  ): Promise<{ next_call_prep: string; constructive_note: string; follow_up_email: string; follow_up_text: string } | null> {
+    if (!supabase) return null;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const authToken = sessionData?.session?.access_token;
+      if (!authToken) return null;
+
+      const courseText = course || student?.course || 'their current course';
+      const firstName = (student?.display_name || '').trim().split(/\s+/)[0] || 'there';
+      const recent = (pastTouchpoints || []).slice(0, 5);
+      const history = recent.length
+        ? recent.map((t) => `[${t.touchpoint_date}, ${t.touchpoint_type}]: ${t.note}`).join('\n\n')
+        : '(no prior touchpoints logged)';
+
+      const prompt = `You are Kaylee, a WGU Program Mentor, prepping for your NEXT call with a student, right after logging today's touchpoint note. Write a genuinely personal call-prep script grounded in the SPECIFIC things said in the note below and in recent touchpoint history — not generic template language. Quote or closely paraphrase real details (a specific worry, a specific course blocker, a specific personal life mention, a specific score or assessment) rather than vague placeholders. If nothing personal was actually shared, don't invent a personal check-in section — leave it out.
+
+STUDENT: ${firstName}, course: ${courseText}, momentum: ${momentum || student?.momentum || 'not set'}, missed calls: ${student?.missed_call_count || 0}, course end: ${student?.course_end_date || 'unknown'}, graduation goal: ${student?.graduation_goal_date || 'unknown'}
+
+TODAY'S TOUCHPOINT NOTE (just logged):
+${note}
+
+RECENT TOUCHPOINT HISTORY (most recent first):
+${history}
+
+Respond with ONLY a raw JSON object, no markdown fences, no preamble. Shape:
+{
+  "next_call_prep": "formatted script using this EXACT header style, only include PERSONAL CHECK-IN if something real was actually shared:\\n\\nGOAL — what today's call is for:\\n• \\\"...\\\"\\n\\nPERSONAL CHECK-IN — a softer opening, before the coursework:\\n• \\\"...\\\"\\n\\nREALITY — where things actually stand:\\n• \\\"...\\\"\\n\\nOPTIONS — brainstorm the path forward together:\\n• \\\"...\\\"\\n\\nWILL — lock in one dated commitment:\\n• \\\"...\\\"",
+  "constructive_note": "3-6 short GROW-aligned coaching reminders for Kaylee herself, one per line prefixed with '• ', grounded in this specific student's situation",
+  "follow_up_email": "a short follow-up email, use {first_name} as a placeholder, referencing the SPECIFIC thing discussed",
+  "follow_up_text": "a short follow-up text message, use {first_name} as a placeholder, referencing the SPECIFIC thing discussed"
+}`;
+
+      const response = await fetch(
+        'https://uccehajbwxzqdzvexzuc.supabase.co/functions/v1/ai-proxy',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 1500,
+            messages: [{ role: 'user', content: prompt }],
+          }),
+        }
+      );
+      const data = await response.json();
+      if (data.error) return null;
+      const raw = (data.content?.[0]?.text ?? '').trim();
+      if (!raw) return null;
+      const clean = raw.replace(/^```(?:json)?|```$/gm, '').trim();
+      const objStart = clean.indexOf('{');
+      const objEnd = clean.lastIndexOf('}');
+      const parsed = JSON.parse(clean.slice(objStart, objEnd + 1));
+      if (!parsed.next_call_prep) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
   function generateStudentSupport(
     note: string,
     course?: string | null,
@@ -1379,7 +1444,9 @@ Kaylee`;
     if (!isAdmin()) return setMessage('Touchpoint logs are admin-only.');
     const student = students.find((s) => s.id === input.student_id);
     const pastForStudent = touchpoints.filter((t) => t.student_id === input.student_id);
-    const generated = generateStudentSupport(input.note, input.course, input.momentum, student, pastForStudent);
+    setMessage('Generating a personalized call prep script...');
+    const aiGenerated = await generateStudentSupportAI(input.note, input.course, input.momentum, student, pastForStudent);
+    const generated = aiGenerated || generateStudentSupport(input.note, input.course, input.momentum, student, pastForStudent);
     const touchpoint: Touchpoint = { ...input, ...generated, copied: false, id: crypto.randomUUID() };
     setTouchpoints((current) => [touchpoint, ...current]);
 
@@ -4933,6 +5000,7 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
     course: '', momentum: '', note: '', next_call_at: addDays(new Date(), 7).toISOString().slice(0, 10),
     is_weekly: false, missed: false, missed_email_sent: false, voicemail_left: false
   });
+  const [savingTouchpoint, setSavingTouchpoint] = useState(false);
   const [listCollapsed, setListCollapsed] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [eaFormOpen, setEaFormOpen] = useState(false);
@@ -5061,11 +5129,12 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
     setEditingProfile(false);
   }
 
-  function submitTouchpoint() {
+  async function submitTouchpoint() {
     if (!selected) return;
     const warnings = ferpaWarnings(touchForm.note);
     if (warnings.length && !confirm(`FERPA warning:\n- ${warnings.join('\n- ')}\n\nSave touchpoint anyway?`)) return;
-    createTouchpoint({
+    setSavingTouchpoint(true);
+    await createTouchpoint({
       student_id: selected.id,
       touchpoint_type: touchForm.touchpoint_type,
       touchpoint_date: touchForm.touchpoint_date,
@@ -5077,6 +5146,7 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
       voicemail_left: touchForm.missed ? touchForm.voicemail_left : false,
       is_weekly: touchForm.is_weekly
     });
+    setSavingTouchpoint(false);
     if (touchForm.next_call_at) {
       const iso = new Date(`${touchForm.next_call_at}T00:00`).toISOString();
       updateStudent(selected.id, { next_call_at: iso } as Partial<Student>);
@@ -5473,7 +5543,7 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
               )}
               <textarea placeholder={touchForm.touchpoint_type === 'Email thread' ? 'Paste the full email thread here (all back-and-forth messages in one entry)...' : 'What happened? What did the student say? What is the next step?'} style={touchForm.touchpoint_type === 'Email thread' ? { minHeight: 200 } : undefined} value={touchForm.note} onChange={(e) => setTouchForm({ ...touchForm, note: e.target.value })} />
               {ferpaWarnings(touchForm.note).length > 0 && <FerpaWarning warnings={ferpaWarnings(touchForm.note)} />}
-              <div className="form-actions"><button className="btn primary" onClick={submitTouchpoint}><Save size={15} /> Save Touchpoint + Generate Prep</button></div>
+              <div className="form-actions"><button className="btn primary" onClick={submitTouchpoint} disabled={savingTouchpoint}><Save size={15} /> {savingTouchpoint ? 'Generating personalized prep...' : 'Save Touchpoint + Generate Prep'}</button></div>
             </section>
 
             <section className="panel">
