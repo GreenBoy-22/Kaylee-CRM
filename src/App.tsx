@@ -1719,9 +1719,17 @@ Kaylee`;
   }
 
   async function deleteDraft(id: string) {
+    const draft = drafts.find((d) => d.id === id);
+    // If this is a pacing check-in draft, lock its student+kind combo first
+    // so the auto-regeneration effect treats it as already handled and
+    // doesn't immediately recreate what was just deleted on purpose.
+    if (draft && (draft.template_kind === 'pacing_2m' || draft.template_kind === 'pacing_4m') && draft.student_id) {
+      pacingDraftLock.current.add(`${draft.student_id}::${draft.template_kind}`);
+    }
+    if (!supabase) { setDrafts((current) => current.filter((d) => d.id !== id)); return; }
+    const { error } = await supabase.from('email_drafts').delete().eq('id', id);
+    if (error) { setMessage(`Delete failed: ${error.message}`); return; }
     setDrafts((current) => current.filter((d) => d.id !== id));
-    if (!supabase) return;
-    await supabase.from('email_drafts').delete().eq('id', id);
   }
 
   async function copyStudentText(text: string, id?: string, table: 'students' | 'student_touchpoints' = 'students') {
