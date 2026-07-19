@@ -300,9 +300,9 @@ const workNav: readonly NavEntry[] = [
   ['essential_actions', 'Essential Actions', ClipboardCheck],
   ['fto', 'FTO Tracker', Clock],
   ['outreach', 'Outreach Drafts', Mail],
+  ['team_notes', 'SOP Guide', NotebookText],
   ['students', 'Students', Users],
   ['team_chat', 'Team Chat Assistant', MessageSquare],
-  ['team_notes', 'Team Notes', NotebookText],
   ['term_enrollment', 'Term Enrollment', ClipboardCheck],
   ['work_performance', 'Work Performance', TrendingUp],
 ];
@@ -323,7 +323,7 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'students', module_name: 'students', label: 'Students', default_access: 'hidden' },
   { page: 'outreach', module_name: 'outreach', label: 'Outreach Drafts', default_access: 'hidden' },
   { page: 'team_chat', module_name: 'team_chat', label: 'Team Chat Assistant', default_access: 'hidden' },
-  { page: 'team_notes', module_name: 'team_notes', label: 'Team Notes', default_access: 'hidden' },
+  { page: 'team_notes', module_name: 'team_notes', label: 'SOP Guide', default_access: 'hidden' },
   { page: 'term_enrollment', module_name: 'term_enrollment', label: 'Term Enrollment', default_access: 'hidden' },
   { page: 'work_performance', module_name: 'work_performance', label: 'Work Performance', default_access: 'hidden' },
   { page: 'essential_actions', module_name: 'essential_actions', label: 'Essential Actions', default_access: 'hidden' }
