@@ -5327,7 +5327,21 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
         {/* TWO-COLUMN ZONE: scrollable history on left, sticky touchpoint form on right */}
         <div className="student-work-area">
           <div className="student-work-main">
-            <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{fmtDateShort(selected.last_contact_date)}</p></div><div><strong>Next appointment</strong><p>{fmtDateShort(soonestAppointment(selected))}</p></div><div><strong>Graduation goal</strong><p>{fmtDateShort(selected.graduation_goal_date)}</p></div><div><strong>Missed calls</strong><p>{selected.missed_call_count || 0}{(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Term #</strong><p><input type="number" value={selected.contact_term ?? ''} onChange={(e) => updateStudent(selected.id, { contact_term: e.target.value ? Number(e.target.value) : null } as Partial<Student>)} style={{ width: 60, padding: '2px 6px' }} />{selected.graduated ? ' · 🎓 Graduated' : ''}</p></div><div><strong>Term start</strong><p>{fmtDateShort(selected.term_start_date, true)}</p></div><div><strong>Term end</strong><p>{fmtDateShort(selected.term_end_date, true)}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
+            <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{fmtDateShort(selected.last_contact_date)}</p></div><div><strong>Next appointment</strong><p>{fmtDateShort(soonestAppointment(selected))}</p></div><div><strong>Graduation goal</strong><p>{fmtDateShort(selected.graduation_goal_date)}</p></div><div><strong>Missed calls this term</strong><p>{(() => {
+              const callTypes = ['Call from student', 'Call to student', 'No-show / missed call'];
+              const termStart = selected.term_start_date ? new Date(selected.term_start_date) : null;
+              const termCalls = touchpoints.filter((t) =>
+                t.student_id === selected.id &&
+                (t.missed || callTypes.includes(t.touchpoint_type)) &&
+                (!termStart || new Date(t.touchpoint_date) >= termStart)
+              );
+              const termMissed = termCalls.filter((t) => t.missed || t.touchpoint_type === 'No-show / missed call').length;
+              const termTotal = termCalls.length;
+              const pct = termTotal > 0 ? Math.round((termMissed / termTotal) * 100) : 0;
+              return termTotal > 0
+                ? `${termMissed} missed / ${termTotal} calls (${pct}%)${(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}`
+                : `0 calls logged this term${(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}`;
+            })()}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Term #</strong><p><input type="number" value={selected.contact_term ?? ''} onChange={(e) => updateStudent(selected.id, { contact_term: e.target.value ? Number(e.target.value) : null } as Partial<Student>)} style={{ width: 60, padding: '2px 6px' }} />{selected.graduated ? ' · 🎓 Graduated' : ''}</p></div><div><strong>Term start</strong><p>{fmtDateShort(selected.term_start_date, true)}</p></div><div><strong>Term end</strong><p>{fmtDateShort(selected.term_end_date, true)}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
             <section className="panel">
               <div className="panel-head">
                 <h2>History Log</h2>
