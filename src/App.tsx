@@ -2506,7 +2506,7 @@ function CallShowRateCard() {
 }
 
 function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, householdUsers, role, setPage }: { mode: Mode; inventory: InventoryItem[]; students: Student[]; touchpoints: Touchpoint[]; tasks: TaskItem[]; choreTasks: ChoreTask[]; householdUsers: HouseholdUser[]; role: Role; setPage: (page: Page) => void }) {
-  const expiring = inventory.filter((item) => item.expires).length;
+  const expiring = inventory.filter((item) => item.expires && item.quantity > 0).length;
   const pending = tasks.filter((task) => task.status === 'pending_approval').length;
   const activeStudents = students.filter((student) => !student.archived && !student.on_term_break);
   const highRiskStudents = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).isHighRisk);
@@ -2862,7 +2862,7 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
         (async () => {
           const soon = new Date(); soon.setDate(soon.getDate() + 7);
           const soonStr = soon.toISOString().slice(0, 10);
-          const items = inventory.filter(i => i.expires && i.expires <= soonStr && i.expires >= today);
+          const items = inventory.filter(i => i.expires && i.expires <= soonStr && i.expires >= today && i.quantity > 0);
           setExpiringSoon(items.slice(0, 4).map(i => ({ name: i.name, expires: i.expires! })));
         })(),
 
@@ -4167,7 +4167,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     if(searchQ.trim()){const q=searchQ.toLowerCase();l=l.filter(i=>i.name.toLowerCase().includes(q)||(i.brand??'').toLowerCase().includes(q)||(i.barcode??'').includes(q));}return l;
   },[items,filterCat,filterLoc,searchQ,showOutOfStockOnly]);
 
-  const filteredExpiring = useMemo(()=>items.filter(i=>i.expires&&i.is_perishable).map(i=>({...i,_days:invDays(i.expires!)})).sort((a,b)=>(a._days??999)-(b._days??999)),[items]);
+  const filteredExpiring = useMemo(()=>items.filter(i=>i.expires&&i.is_perishable&&i.quantity>0).map(i=>({...i,_days:invDays(i.expires!)})).sort((a,b)=>(a._days??999)-(b._days??999)),[items]);
   const expiredCount=filteredExpiring.filter(i=>(i._days??0)<0).length;
 
   return <>
