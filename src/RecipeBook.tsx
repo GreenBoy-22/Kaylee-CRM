@@ -4,6 +4,16 @@ import { supabase } from './lib/supabase';
 
 const ARMY_GREEN = '#4B5320';
 
+interface RecipeFeedback {
+  id: string;
+  recipe_id: string;
+  reviewer_name: string;
+  rating: number | null;
+  comment: string | null;
+  cooked_date: string;
+  created_at: string;
+}
+
 interface Recipe {
   id: string;
   recipe_keeper_id: string | null;
@@ -41,10 +51,49 @@ export default function RecipeBook() {
   const [courseFilter, setCourseFilter] = useState('');
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [selected, setSelected] = useState<Recipe | null>(null);
+  const [feedback, setFeedback] = useState<RecipeFeedback[]>([]);
+  const [showTextComposer, setShowTextComposer] = useState(false);
+  const [textMessage, setTextMessage] = useState('');
+  const [fbName, setFbName] = useState('');
+  const [fbRating, setFbRating] = useState(0);
+  const [fbComment, setFbComment] = useState('');
 
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    if (selected) {
+      loadFeedback(selected.id);
+      setTextMessage(`Hey! I made ${selected.title} tonight \u{1F37D}\uFE0F Would love to know what you thought — rate it 1-5 and let me know any feedback whenever you get a sec!`);
+      setShowTextComposer(false);
+      setFbName(''); setFbRating(0); setFbComment('');
+    } else {
+      setFeedback([]);
+    }
+  }, [selected?.id]);
+
+  async function loadFeedback(recipeId: string) {
+    if (!supabase) return;
+    const { data } = await supabase
+      .from('recipe_feedback')
+      .select('*')
+      .eq('recipe_id', recipeId)
+      .order('created_at', { ascending: false });
+    setFeedback((data as RecipeFeedback[]) || []);
+  }
+
+  async function submitFeedback() {
+    if (!selected || !fbName.trim() || !supabase) return;
+    const { data, error } = await supabase
+      .from('recipe_feedback')
+      .insert({ recipe_id: selected.id, reviewer_name: fbName.trim(), rating: fbRating || null, comment: fbComment.trim() || null })
+      .select()
+      .single();
+    if (error || !data) return;
+    setFeedback((current) => [data as RecipeFeedback, ...current]);
+    setFbName(''); setFbRating(0); setFbComment('');
+  }
 
   async function load() {
     if (!supabase) return;
@@ -205,6 +254,99 @@ export default function RecipeBook() {
                 <h3 style={{ fontSize: '0.9rem', color: ARMY_GREEN, marginTop: '1rem', marginBottom: 6 }}>Notes</h3>
                 <p style={{ fontSize: '0.85rem', color: '#555' }}>{selected.notes}</p>
               </>
+            )}
+
+            <hr style={{ margin: '1.2rem 0', border: 'none', borderTop: '1px solid #eee' }} />
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <h3 style={{ fontSize: '0.95rem', color: ARMY_GREEN, margin: 0 }}>
+                Family Feedback {feedback.length > 0 && (() => {
+                  const rated = feedback.filter((f) => f.rating);
+                  if (!rated.length) return '';
+                  const avg = rated.reduce((s, f) => s + (f.rating || 0), 0) / rated.length;
+                  return `— avg ${avg.toFixed(1)}/5 (${rated.length})`;
+                })()}
+              </h3>
+              <button
+                onClick={() => setShowTextComposer((v) => !v)}
+                style={{ fontSize: '0.8rem', background: ARMY_GREEN, color: 'white', border: 'none', borderRadius: 6, padding: '0.4rem 0.75rem', cursor: 'pointer' }}
+              >
+                Ask for feedback
+              </button>
+            </div>
+
+            {showTextComposer && (
+              <div style={{ background: '#f4f5f0', borderRadius: 8, padding: '0.75rem', marginBottom: 12 }}>
+                <textarea
+                  value={textMessage}
+                  onChange={(e) => setTextMessage(e.target.value)}
+                  rows={3}
+                  style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: '0.85rem', fontFamily: 'inherit' }}
+                />
+                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                  <a
+                    href={`sms:?body=${encodeURIComponent(textMessage)}`}
+                    style={{ fontSize: '0.8rem', background: '#25D366', color: 'white', border: 'none', borderRadius: 6, padding: '0.4rem 0.75rem', textDecoration: 'none' }}
+                  >
+                    Open in Messages
+                  </a>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(textMessage)}
+                    style={{ fontSize: '0.8rem', background: 'white', border: '1px solid #ccc', borderRadius: 6, padding: '0.4rem 0.75rem', cursor: 'pointer' }}
+                  >
+                    Copy text
+                  </button>
+                </div>
+                <p style={{ fontSize: '0.72rem', color: '#888', margin: '6px 0 0' }}>
+                  "Open in Messages" pre-fills this text in your phone's messaging app — you'll still pick who to send it to.
+                </p>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input
+                placeholder="Name"
+                value={fbName}
+                onChange={(e) => setFbName(e.target.value)}
+                style={{ flex: '1 1 100px', padding: '0.4rem 0.5rem', borderRadius: 6, border: '1px solid #ccc', fontSize: '0.85rem' }}
+              />
+              <div style={{ display: 'flex', gap: 1 }}>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button key={n} onClick={() => setFbRating(n === fbRating ? 0 : n)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                    <Star size={16} fill={n <= fbRating ? '#d4a017' : 'none'} color="#d4a017" />
+                  </button>
+                ))}
+              </div>
+              <input
+                placeholder="Comment (optional)"
+                value={fbComment}
+                onChange={(e) => setFbComment(e.target.value)}
+                style={{ flex: '2 1 160px', padding: '0.4rem 0.5rem', borderRadius: 6, border: '1px solid #ccc', fontSize: '0.85rem' }}
+              />
+              <button
+                onClick={submitFeedback}
+                disabled={!fbName.trim()}
+                style={{ background: ARMY_GREEN, color: 'white', border: 'none', borderRadius: 6, padding: '0.4rem 0.75rem', fontSize: '0.8rem', cursor: 'pointer', opacity: fbName.trim() ? 1 : 0.5 }}
+              >
+                Log it
+              </button>
+            </div>
+
+            {feedback.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {feedback.map((f) => (
+                  <div key={f.id} style={{ fontSize: '0.85rem', padding: '6px 8px', background: '#fafafa', borderRadius: 6 }}>
+                    <strong>{f.reviewer_name}</strong>
+                    {f.rating ? (
+                      <span style={{ marginLeft: 6 }}>
+                        {[1, 2, 3, 4, 5].map((n) => <Star key={n} size={11} fill={n <= f.rating! ? '#d4a017' : 'none'} color="#d4a017" style={{ verticalAlign: -1 }} />)}
+                      </span>
+                    ) : null}
+                    <span style={{ color: '#999', fontSize: '0.72rem', marginLeft: 6 }}>{new Date(f.cooked_date).toLocaleDateString()}</span>
+                    {f.comment && <p style={{ margin: '2px 0 0', color: '#555' }}>{f.comment}</p>}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>
