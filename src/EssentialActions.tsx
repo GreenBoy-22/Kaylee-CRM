@@ -210,6 +210,15 @@ function hoursSince(dateStr: string): number {
   return Math.floor((Date.now() - new Date(dateStr).getTime()) / 3600000);
 }
 
+// Formats an hours value as "Xh" under 24 hours, or "Yd" (whole days) once
+// it crosses 24 — a stale item reads as "105d ago" instead of "2523h ago."
+function formatHoursOrDays(hours: number): string {
+  const abs = Math.abs(hours);
+  if (abs < 24) return `${hours}h`;
+  const days = Math.floor(abs / 24) * (hours < 0 ? -1 : 1);
+  return `${days}d`;
+}
+
 // Counts weekdays (Mon-Fri) between a date and now, not counting the
 // start date itself. Used to cap how far back an auto-detected EA can
 // reach — a trigger point older than ~7 business days is more likely a
@@ -522,7 +531,7 @@ export default function EssentialActions() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: overdue ? 'var(--red)' : remaining < 12 ? 'var(--amber)' : 'var(--muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
                     {overdue ? <AlertTriangle size={13} /> : <Clock size={13} />}
-                    {overdue ? `SLA passed ${Math.abs(remaining)}h ago` : `${remaining}h left`}
+                    {overdue ? `SLA passed ${formatHoursOrDays(Math.abs(remaining))} ago` : `${formatHoursOrDays(remaining)} left`}
                   </span>
                   {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                 </div>

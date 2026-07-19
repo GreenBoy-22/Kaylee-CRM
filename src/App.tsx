@@ -4896,6 +4896,13 @@ function eaHoursSince(dateStr: string): number {
   return Math.floor((Date.now() - new Date(dateStr).getTime()) / 3600000);
 }
 
+function eaFormatHoursOrDays(hours: number): string {
+  const abs = Math.abs(hours);
+  if (abs < 24) return `${hours}h`;
+  const days = Math.floor(abs / 24) * (hours < 0 ? -1 : 1);
+  return `${days}d`;
+}
+
 function Students({ students, touchpoints, appointments, eaLog, createEaLog, closeEaLog, importStudentsFromCsv, createStudent, updateStudent, archiveStudent, unarchiveStudent, createTouchpoint, updateTouchpoint, deleteTouchpoint, createAppointment, updateAppointment, deleteAppointment, copyText, ferpaWarnings, generateSingleDraft, drafts, setPage, setMessage }: {
   students: Student[];
   touchpoints: Touchpoint[];
@@ -5328,7 +5335,7 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
                     <div>
                       <strong>{def.label}</strong>
                       <p style={{ fontSize: 11, color: overdue ? 'var(--red)' : 'var(--muted)' }}>
-                        {overdue ? `⚠️ SLA passed ${Math.abs(remaining)}h ago` : `⏱ ${remaining}h left on SLA`}
+                        {overdue ? `⚠️ SLA passed ${eaFormatHoursOrDays(Math.abs(remaining))} ago` : `⏱ ${eaFormatHoursOrDays(remaining)} left on SLA`}
                       </p>
                     </div>
                   </div>
