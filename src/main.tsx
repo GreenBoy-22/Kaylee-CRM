@@ -15,7 +15,13 @@ function UpdateBanner() {
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
 
-    navigator.serviceWorker.register('/sw.js').then((reg) => {
+    // updateViaCache: 'none' forces the browser to bypass its own HTTP
+    // cache when checking sw.js for changes — without this, a caching
+    // header anywhere between the browser and Vercel can make the update
+    // check itself look at a stale copy of the service worker script,
+    // which is the classic cause of a PWA needing a full uninstall to
+    // ever see a new version.
+    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then((reg) => {
       // A worker may already be waiting from a previous visit — e.g. this
       // tab was open when the last deploy went out.
       if (reg.waiting && navigator.serviceWorker.controller) {
@@ -33,6 +39,20 @@ function UpdateBanner() {
           }
         });
       });
+
+      // An installed PWA that's just left sitting open won't necessarily
+      // re-check for updates on its own — browsers throttle background SW
+      // checks fairly aggressively. Actively ask it to check whenever the
+      // app regains focus (switching back to it, reopening it) and every
+      // 30 minutes while it's open, so a deploy gets picked up without
+      // needing to fully close and relaunch the app.
+      const checkForUpdate = () => reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') checkForUpdate();
+      });
+      window.addEventListener('focus', checkForUpdate);
+      const interval = setInterval(checkForUpdate, 30 * 60 * 1000);
+      return () => clearInterval(interval);
     }).catch(() => {});
 
     // Once the new worker takes over (after we tell it to skip waiting),
