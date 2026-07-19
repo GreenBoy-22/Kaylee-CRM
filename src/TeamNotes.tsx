@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { CSSProperties } from 'react';
-import { NotebookText, Search, ChevronDown, ChevronRight, Plus, Link2 } from 'lucide-react';
+import { NotebookText, Search, Folder, X, Plus, Link2 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
 const ARMY_GREEN = '#4B5320';
+const GOLD = '#d4a017';
 
 const CATEGORIES = [
   { value: 'policy', label: 'Policy' },
@@ -61,12 +62,32 @@ function parseSourceNote(sourceNote: string | null): { person: string; date: str
   return { person: namePart.trim(), date };
 }
 
+function AnnotationBody({ text }: { text: string }) {
+  const lines = text.split('\n').filter((l) => l.trim());
+  const isBulleted = lines.length > 1 && lines.some((l) => l.trim().startsWith('\u2022'));
+  if (!isBulleted) {
+    return <p style={{ margin: 0, fontSize: '0.87rem', color: '#333' }}>{text}</p>;
+  }
+  const intro = lines[0].trim().startsWith('\u2022') ? null : lines[0];
+  const bullets = lines.filter((l) => l.trim().startsWith('\u2022'));
+  return (
+    <>
+      {intro && <p style={{ margin: '0 0 4px', fontSize: '0.85rem', color: '#555' }}>{intro}</p>}
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.87rem', color: '#333' }}>
+        {bullets.map((b, i) => (
+          <li key={i} style={{ marginBottom: 3 }}>{b.replace(/^\u2022\s*/, '')}</li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
 export default function TeamNotes() {
   const [view, setView] = useState<'guide' | 'pending'>('guide');
   const [pending, setPending] = useState<PendingNote[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [annotations, setAnnotations] = useState<Record<string, Annotation[]>>({});
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [openTopic, setOpenTopic] = useState<Topic | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -76,7 +97,7 @@ export default function TeamNotes() {
   const [newTopicTitle, setNewTopicTitle] = useState('');
   const [courseNoteHits, setCourseNoteHits] = useState<CourseNoteHit[]>([]);
 
-  const [addingToTopic, setAddingToTopic] = useState<string | null>(null);
+  const [addingNote, setAddingNote] = useState(false);
   const [manualContent, setManualContent] = useState('');
   const [manualPerson, setManualPerson] = useState('');
   const [manualDate, setManualDate] = useState('');
@@ -182,15 +203,7 @@ export default function TeamNotes() {
     await supabase.from('sop_topics').update({ updated_at: new Date().toISOString() }).eq('id', topic.id);
     setAnnotations((cur) => ({ ...cur, [topic.id]: [...(cur[topic.id] || []), data as Annotation] }));
     setManualContent(''); setManualPerson(''); setManualDate('');
-    setAddingToTopic(null);
-  }
-
-  function toggleExpand(id: string) {
-    setExpanded((cur) => {
-      const next = new Set(cur);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+    setAddingNote(false);
   }
 
   const matchingTopics = useMemo(() => {
@@ -212,7 +225,7 @@ export default function TeamNotes() {
   }, [topics, search, categoryFilter, annotations]);
 
   return (
-    <div style={{ maxWidth: 850, margin: '0 auto', padding: '1.5rem' }}>
+    <div style={{ maxWidth: 900, margin: '0 auto', padding: '1.5rem' }}>
       <h1 style={{ color: ARMY_GREEN, fontSize: '1.5rem', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         <NotebookText size={22} /> Team SOP Guide
       </h1>
@@ -222,16 +235,10 @@ export default function TeamNotes() {
       </p>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: '1.25rem' }}>
-        <button
-          onClick={() => setView('guide')}
-          style={{ ...btnStyle(ARMY_GREEN, view === 'guide'), padding: '0.45rem 1rem' }}
-        >
+        <button onClick={() => setView('guide')} style={{ ...tabStyle(ARMY_GREEN, view === 'guide') }}>
           SOP Guide ({topics.length})
         </button>
-        <button
-          onClick={() => setView('pending')}
-          style={{ ...btnStyle(ARMY_GREEN, view === 'pending'), padding: '0.45rem 1rem' }}
-        >
+        <button onClick={() => setView('pending')} style={{ ...tabStyle(ARMY_GREEN, view === 'pending') }}>
           Pending Review {pending.length > 0 ? `(${pending.length})` : ''}
         </button>
       </div>
@@ -240,7 +247,7 @@ export default function TeamNotes() {
 
       {!loading && view === 'guide' && (
         <>
-          <div style={{ display: 'flex', gap: 8, marginBottom: '1rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: '1.25rem', flexWrap: 'wrap' }}>
             <div style={{ position: 'relative', flex: '1 1 220px' }}>
               <Search size={14} style={{ position: 'absolute', left: 9, top: 9, color: '#999' }} />
               <input
@@ -262,68 +269,35 @@ export default function TeamNotes() {
             </p>
           )}
 
-          {visibleTopics.map((topic) => {
-            const isOpen = expanded.has(topic.id);
-            const topicAnnotations = annotations[topic.id] || [];
-            return (
-              <div key={topic.id} style={{ border: '1px solid #eee', borderLeft: `4px solid ${ARMY_GREEN}`, borderRadius: 6, marginBottom: '0.75rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: '0.9rem' }}>
+            {visibleTopics.map((topic) => {
+              const count = (annotations[topic.id] || []).length;
+              return (
                 <button
-                  onClick={() => toggleExpand(topic.id)}
-                  style={{ width: '100%', textAlign: 'left', padding: '0.9rem 1rem', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}
+                  key={topic.id}
+                  onClick={() => setOpenTopic(topic)}
+                  style={{
+                    textAlign: 'left', border: '1px solid #e2ddd0', borderRadius: 10, padding: '1rem',
+                    background: '#fdfbf6', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
+                    transition: 'box-shadow 0.15s, transform 0.15s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'none'; }}
                 >
+                  <Folder size={26} color={GOLD} fill={GOLD} fillOpacity={0.15} />
                   <div>
-                    <span style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: ARMY_GREEN, fontWeight: 700 }}>
+                    <span style={{ fontSize: '0.66rem', textTransform: 'uppercase', color: ARMY_GREEN, fontWeight: 700, letterSpacing: 0.3 }}>
                       {CATEGORIES.find((c) => c.value === topic.category)?.label || topic.category}
                     </span>
-                    <h3 style={{ margin: '0.3rem 0 0.2rem', fontSize: '1rem' }}>{topic.title}</h3>
-                    <p style={{ margin: 0, fontSize: '0.85rem', color: '#555' }}>{topic.summary}</p>
-                    {topicAnnotations.length > 0 && (
-                      <p style={{ margin: '0.4rem 0 0', fontSize: '0.72rem', color: '#999' }}>
-                        {topicAnnotations.length} note{topicAnnotations.length > 1 ? 's' : ''} attached · last updated {new Date(topic.updated_at).toLocaleDateString()}
-                      </p>
-                    )}
+                    <h3 style={{ margin: '0.25rem 0 0', fontSize: '0.95rem', lineHeight: 1.3 }}>{topic.title}</h3>
                   </div>
-                  {isOpen ? <ChevronDown size={18} color="#999" /> : <ChevronRight size={18} color="#999" />}
+                  <span style={{ fontSize: '0.72rem', color: '#999', marginTop: 'auto' }}>
+                    {count} note{count !== 1 ? 's' : ''}
+                  </span>
                 </button>
-
-                {isOpen && (
-                  <div style={{ padding: '0 1rem 1rem' }}>
-                    {topicAnnotations.map((a) => (
-                      <div key={a.id} style={{ borderLeft: '2px solid #ddd', paddingLeft: 10, marginBottom: 8 }}>
-                        <p style={{ margin: 0, fontSize: '0.85rem' }}>{a.content}</p>
-                        <p style={{ margin: '2px 0 0', fontSize: '0.72rem', color: '#999' }}>
-                          {a.source_person || (a.added_manually ? 'Added manually' : 'Unknown source')}
-                          {a.source_date ? ` · ${new Date(a.source_date).toLocaleDateString()}` : ''}
-                        </p>
-                      </div>
-                    ))}
-
-                    {addingToTopic === topic.id ? (
-                      <div style={{ background: '#f4f5f0', borderRadius: 6, padding: '0.6rem', marginTop: 8 }}>
-                        <textarea
-                          placeholder="What's the update?"
-                          value={manualContent}
-                          onChange={(e) => setManualContent(e.target.value)}
-                          rows={2}
-                          style={{ width: '100%', padding: 6, borderRadius: 4, border: '1px solid #ccc', fontSize: '0.85rem', fontFamily: 'inherit', boxSizing: 'border-box' }}
-                        />
-                        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                          <input placeholder="Who said it" value={manualPerson} onChange={(e) => setManualPerson(e.target.value)} style={{ flex: 1, padding: '0.3rem', borderRadius: 4, border: '1px solid #ccc', fontSize: '0.8rem' }} />
-                          <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} style={{ padding: '0.3rem', borderRadius: 4, border: '1px solid #ccc', fontSize: '0.8rem' }} />
-                          <button onClick={() => addManualAnnotation(topic)} style={btnStyle(ARMY_GREEN, true)}>Add</button>
-                          <button onClick={() => setAddingToTopic(null)} style={btnStyle('#999', false)}>Cancel</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <button onClick={() => setAddingToTopic(topic.id)} style={{ ...btnStyle(ARMY_GREEN, false), marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <Plus size={13} /> Add a note to this topic
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </>
       )}
 
@@ -394,8 +368,91 @@ export default function TeamNotes() {
           ))}
         </>
       )}
+
+      {openTopic && (
+        <div
+          onClick={() => { setOpenTopic(null); setAddingNote(false); }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1.5rem' }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: 'white', borderRadius: 14, maxWidth: 640, width: '100%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }}
+          >
+            <div style={{ background: ARMY_GREEN, color: 'white', padding: '1rem 1.25rem', borderRadius: '14px 14px 0 0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <span style={{ fontSize: '0.68rem', textTransform: 'uppercase', color: GOLD, fontWeight: 700 }}>
+                  {CATEGORIES.find((c) => c.value === openTopic.category)?.label || openTopic.category}
+                </span>
+                <h2 style={{ margin: '0.2rem 0 0', fontSize: '1.15rem' }}>{openTopic.title}</h2>
+              </div>
+              <button onClick={() => { setOpenTopic(null); setAddingNote(false); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'white' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ padding: '1.1rem 1.25rem' }}>
+              <p style={{ fontSize: '0.9rem', color: '#444', margin: '0 0 1rem' }}>{openTopic.summary}</p>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <p style={{ fontSize: '0.75rem', color: '#999', margin: 0, fontWeight: 700, textTransform: 'uppercase' }}>Notes</p>
+                {!addingNote && (
+                  <button onClick={() => setAddingNote(true)} style={{ ...btnStyle(ARMY_GREEN, false), display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Plus size={13} /> Add a note
+                  </button>
+                )}
+              </div>
+
+              {addingNote && (
+                <div style={{ background: '#f4f5f0', borderRadius: 8, padding: '0.75rem', marginBottom: 12 }}>
+                  <textarea
+                    placeholder="What's the update?"
+                    value={manualContent}
+                    onChange={(e) => setManualContent(e.target.value)}
+                    rows={3}
+                    style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: '0.85rem', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                  />
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                    <input placeholder="Who said it" value={manualPerson} onChange={(e) => setManualPerson(e.target.value)} style={{ flex: 1, padding: '0.35rem 0.5rem', borderRadius: 4, border: '1px solid #ccc', fontSize: '0.82rem' }} />
+                    <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} style={{ padding: '0.35rem 0.5rem', borderRadius: 4, border: '1px solid #ccc', fontSize: '0.82rem' }} />
+                    <button onClick={() => addManualAnnotation(openTopic)} style={btnStyle(ARMY_GREEN, true)}>Add</button>
+                    <button onClick={() => setAddingNote(false)} style={btnStyle('#999', false)}>Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {(annotations[openTopic.id] || []).map((a) => (
+                  <div key={a.id} style={{ borderLeft: `3px solid ${GOLD}`, paddingLeft: 12 }}>
+                    <AnnotationBody text={a.content} />
+                    <p style={{ margin: '4px 0 0', fontSize: '0.72rem', color: '#aaa' }}>
+                      {a.source_person || (a.added_manually ? 'Added manually' : 'Unknown source')}
+                      {a.source_date ? ` · ${new Date(a.source_date).toLocaleDateString()}` : ''}
+                    </p>
+                  </div>
+                ))}
+                {(annotations[openTopic.id] || []).length === 0 && !addingNote && (
+                  <p style={{ color: '#999', fontSize: '0.85rem' }}>No notes on this yet.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function tabStyle(color: string, active: boolean): CSSProperties {
+  return {
+    background: active ? color : 'white',
+    color: active ? 'white' : color,
+    border: `1px solid ${color}`,
+    borderRadius: 8,
+    padding: '0.45rem 1rem',
+    fontSize: '0.85rem',
+    cursor: 'pointer',
+    fontWeight: 600,
+  };
 }
 
 function btnStyle(color: string, filled: boolean): CSSProperties {
