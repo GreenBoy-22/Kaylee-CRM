@@ -2333,6 +2333,7 @@ function CallShowRateCard() {
   const [missed, setMissed] = useState(0);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     loadAll();
@@ -2360,12 +2361,14 @@ function CallShowRateCard() {
 
   async function loadCounts(start: string) {
     if (!supabase) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('student_touchpoints')
       .select('touchpoint_type, missed')
-      .gte('touchpoint_date', start)
-      .or('touchpoint_type.eq.Call from student,touchpoint_type.eq.Call to student,touchpoint_type.eq.No-show / missed call,missed.eq.true');
-    const rows = data || [];
+      .gte('touchpoint_date', start);
+    if (error) { setLoadError(error.message); setMade(0); setMissed(0); return; }
+    setLoadError('');
+    const callTypes = ['Call from student', 'Call to student', 'No-show / missed call'];
+    const rows = (data || []).filter((t) => t.missed || callTypes.includes(t.touchpoint_type));
     const missedCount = rows.filter((t) => t.missed || t.touchpoint_type === 'No-show / missed call').length;
     const madeCount = rows.length - missedCount;
     setMade(madeCount);
@@ -2393,6 +2396,7 @@ function CallShowRateCard() {
     <section className="panel">
       <div className="panel-head"><h2>Call Show Rate This Term</h2><Phone size={17} /></div>
       {loading && <div className="brief-item">Loading...</div>}
+      {loadError && <div className="brief-item" style={{ color: '#b00020' }}>Error loading call data: {loadError}</div>}
       {!loading && (
         <>
           <div className="brief-item">
