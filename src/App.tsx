@@ -2361,19 +2361,16 @@ function CallShowRateCard() {
 
   async function loadCounts(start: string) {
     if (!supabase) return;
-    const [{ data: touchData, error: touchErr }, { data: apptData, error: apptErr }] = await Promise.all([
-      supabase.from('student_touchpoints').select('touchpoint_type, missed').gte('touchpoint_date', start),
-      supabase.from('student_appointments').select('missed').gte('appointment_at', start),
-    ]);
-    if (touchErr || apptErr) { setLoadError((touchErr || apptErr)?.message || 'Unknown error'); setMade(0); setMissed(0); return; }
+    const { data, error } = await supabase
+      .from('student_touchpoints')
+      .select('touchpoint_type, missed')
+      .gte('touchpoint_date', start);
+    if (error) { setLoadError(error.message); setMade(0); setMissed(0); return; }
     setLoadError('');
     const callTypes = ['Call from student', 'Call to student', 'No-show / missed call'];
-    const touchRows = (touchData || []).filter((t) => t.missed || callTypes.includes(t.touchpoint_type));
-    const touchMissed = touchRows.filter((t) => t.missed || t.touchpoint_type === 'No-show / missed call').length;
-    const apptRows = apptData || [];
-    const apptMissed = apptRows.filter((a) => a.missed).length;
-    const missedCount = touchMissed + apptMissed;
-    const madeCount = (touchRows.length - touchMissed) + (apptRows.length - apptMissed);
+    const rows = (data || []).filter((t) => t.missed || callTypes.includes(t.touchpoint_type));
+    const missedCount = rows.filter((t) => t.missed || t.touchpoint_type === 'No-show / missed call').length;
+    const madeCount = rows.length - missedCount;
     setMade(madeCount);
     setMissed(missedCount);
   }
@@ -5333,18 +5330,13 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
             <section className="panel"><h2>Profile Details</h2><div className="profile-grid"><div><strong>Last contact</strong><p>{fmtDateShort(selected.last_contact_date)}</p></div><div><strong>Next appointment</strong><p>{fmtDateShort(soonestAppointment(selected))}</p></div><div><strong>Graduation goal</strong><p>{fmtDateShort(selected.graduation_goal_date)}</p></div><div><strong>Missed calls this term</strong><p>{(() => {
               const callTypes = ['Call from student', 'Call to student', 'No-show / missed call'];
               const termStart = selected.term_start_date ? new Date(selected.term_start_date) : null;
-              const termTouchCalls = touchpoints.filter((t) =>
+              const termCalls = touchpoints.filter((t) =>
                 t.student_id === selected.id &&
                 (t.missed || callTypes.includes(t.touchpoint_type)) &&
                 (!termStart || new Date(t.touchpoint_date) >= termStart)
               );
-              const termAppointments = appointments.filter((a) =>
-                a.student_id === selected.id &&
-                (!termStart || new Date(a.appointment_at) >= termStart)
-              );
-              const missedCount = termTouchCalls.filter((t) => t.missed || t.touchpoint_type === 'No-show / missed call').length
-                + termAppointments.filter((a) => a.missed).length;
-              const totalCount = termTouchCalls.length + termAppointments.length;
+              const missedCount = termCalls.filter((t) => t.missed || t.touchpoint_type === 'No-show / missed call').length;
+              const totalCount = termCalls.length;
               const pct = totalCount > 0 ? Math.round((missedCount / totalCount) * 100) : 0;
               return totalCount > 0
                 ? `${missedCount} missed / ${totalCount} calls (${pct}%)${(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}`
@@ -5358,10 +5350,9 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
                 </button>
               </div>
               {calendarOpen && <TouchpointCalendar dates={touchpointDates} />}
-              {selectedTouchpoints.length === 0 && selectedAppointments.length === 0 && <div className="brief-item">Nothing logged yet. Add the first call, email, text, thread, or voicemail in the panel on the right.</div>}
+              {selectedTouchpoints.length === 0 && <div className="brief-item">Nothing logged yet. Add the first call, email, text, thread, or voicemail in the panel on the right.</div>}
               {([
-                ...selectedTouchpoints.map((t) => ({ kind: 'touchpoint' as const, date: t.touchpoint_date, item: t })),
-                ...selectedAppointments.map((a) => ({ kind: 'appointment' as const, date: a.appointment_at, item: a }))
+                ...selectedTouchpoints.map((t) => ({ kind: 'touchpoint' as const, date: t.touchpoint_date, item: t }))
               ].sort((x, y) => y.date.localeCompare(x.date))).map((entry) => {
                 if (entry.kind === 'touchpoint') {
                   const touchpoint = entry.item;
@@ -5400,6 +5391,20 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
                         </div>
                       </div>
                       <p style={touchpoint.touchpoint_type === 'Email thread' ? { whiteSpace: 'pre-wrap', background: 'var(--surface-1)', padding: 10, borderRadius: 6 } : undefined}>{touchpoint.note}</p>
+                      {(touchpoint.is_weekly || touchpoint.missed) && (
+                        <p style={{ fontSize: 13, marginTop: 4 }}>
+                          {touchpoint.is_weekly && <span>📅 Weekly appointment</span>}
+                          {touchpoint.is_weekly && touchpoint.missed && ' · '}
+                          {touchpoint.missed && <span style={{ color: '#b00020' }}>❌ Missed</span>}
+                        </p>
+                      )}
+                      {touchpoint.missed && (touchpoint.missed_email_sent || touchpoint.voicemail_left) && (
+                        <p style={{ fontSize: 13, color: 'var(--muted)' }}>
+                          {touchpoint.missed_email_sent && <span>✅ Missed-call email sent</span>}
+                          {touchpoint.missed_email_sent && touchpoint.voicemail_left && ' · '}
+                          {touchpoint.voicemail_left && <span>✅ Voicemail left</span>}
+                        </p>
+                      )}
                       <details>
                         <summary>Next-call prep and follow-up drafts</summary>
                         <div className="brief-item"><strong>Next call:</strong>
@@ -5420,51 +5425,6 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
                   );
                 }
 
-                const a = entry.item;
-                const isEditingAppt = editingAppointmentId === a.id;
-                if (isEditingAppt) return (
-                  <div className="touchpoint-card touchpoint-card-editing" key={a.id}>
-                    <div className="form-grid">
-                      <input type="date" value={editApptForm.appointment_date} onChange={(e) => setEditApptForm({ ...editApptForm, appointment_date: e.target.value })} />
-                      <input type="time" value={editApptForm.appointment_time} onChange={(e) => setEditApptForm({ ...editApptForm, appointment_time: e.target.value })} />
-                    </div>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '6px 0' }}><input type="checkbox" checked={editApptForm.is_weekly} onChange={(e) => setEditApptForm({ ...editApptForm, is_weekly: e.target.checked })} /> Weekly appointment</label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '6px 0' }}><input type="checkbox" checked={editApptForm.missed} onChange={(e) => setEditApptForm({ ...editApptForm, missed: e.target.checked })} /> Missed</label>
-                    {editApptForm.missed && (
-                      <div style={{ paddingLeft: 24 }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 6 }}><input type="checkbox" checked={editApptForm.missed_email_sent} onChange={(e) => setEditApptForm({ ...editApptForm, missed_email_sent: e.target.checked })} /> Missed-call email sent</label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}><input type="checkbox" checked={editApptForm.voicemail_left} onChange={(e) => setEditApptForm({ ...editApptForm, voicemail_left: e.target.checked })} /> Voicemail left</label>
-                      </div>
-                    )}
-                    <textarea value={editApptForm.notes} onChange={(e) => setEditApptForm({ ...editApptForm, notes: e.target.value })} />
-                    <div className="form-actions">
-                      <button className="btn primary" onClick={saveEditAppointment}><Save size={15} /> Save Changes</button>
-                      <button className="btn ghost" onClick={() => setEditingAppointmentId(null)}>Cancel</button>
-                    </div>
-                  </div>
-                );
-
-                const d = new Date(a.appointment_at);
-                return (
-                  <div className="touchpoint-card" key={a.id}>
-                    <div className="panel-head">
-                      <div>
-                        <strong>📅 {d.toLocaleDateString()}</strong>
-                        <p>{a.is_weekly ? 'Weekly appointment' : 'One-off appointment'} · {a.missed ? '❌ Missed' : '✅ Attended'}</p>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <button className="btn ghost tiny" title="Edit" onClick={() => startEditAppointment(a)}><Edit3 size={14} /></button>
-                        <button className="btn ghost tiny" title="Delete" onClick={() => confirmDeleteAppointment(a.id)}><Trash2 size={14} /></button>
-                      </div>
-                    </div>
-                    {a.missed && (
-                      <p style={{ fontSize: 12, color: 'var(--muted)' }}>
-                        {a.missed_email_sent ? '✅' : '⬜'} Missed-call email sent · {a.voicemail_left ? '✅' : '⬜'} Voicemail left
-                      </p>
-                    )}
-                    {a.notes && <p>{a.notes}</p>}
-                  </div>
-                );
               })}
             </section>
             <section className="panel"><h2>Admin Notes</h2><textarea value={selected.admin_notes || ''} onChange={(e) => updateStudent(selected.id, { admin_notes: e.target.value })} placeholder="Private notes for Kaylee. Keep FERPA-safe." /></section>
