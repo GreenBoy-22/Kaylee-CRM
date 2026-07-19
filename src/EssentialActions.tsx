@@ -67,7 +67,7 @@ const EA_DEFS: Record<string, EaDef> = {
     label: 'No PM Contact (16/21 Days)',
     snippets: [{ shortcut: '/oops', name: 'No Mentor Contact in 16 Days' }],
     slaHours: 72,
-    autoDetect: true,
+    autoDetect: false,
     description: "Last contact >16 days ago (Low/Med Low/Med momentum) or >21 days (High/Med High momentum).",
   },
   not_engaged: {
@@ -79,7 +79,7 @@ const EA_DEFS: Record<string, EaDef> = {
       { shortcut: '/NOAAWD', name: 'No AA — WD Pending' },
     ],
     slaHours: 24,
-    autoDetect: true,
+    autoDetect: false,
     description: 'No recorded academic activity in 10 days (Low/Med Low momentum) or 15 days (High/Med High/Med momentum).',
   },
   passed_oa: {
@@ -331,32 +331,9 @@ export default function EssentialActions() {
     for (const s of students) {
       if (!s.term_start_date || new Date(s.term_start_date) < EA_COHORT_CUTOFF) continue;
       const tier = momentumTier(s.momentum);
-      const contactDays = daysSince(s.last_contact_date);
-      const contactThreshold = tier === 'high' ? 21 : 16;
-      const contactTriggerDate = s.last_contact_date ? new Date(new Date(s.last_contact_date).getTime() + contactThreshold * 86400000) : null;
-      if (
-        contactDays >= contactThreshold &&
-        contactTriggerDate && businessDaysSince(contactTriggerDate) <= 7 &&
-        !recentlyHandled.has(`${s.id}::no_contact`)
-      ) {
-        results.push({
-          key: `auto-no_contact-${s.id}`, student: s, eaType: 'no_contact',
-          firedAt: s.last_contact_date || '', slaHours: slaHoursFor(EA_DEFS.no_contact, tier),
-        });
-      }
-      const engagedDays = daysSince(s.last_academic_activity_date);
-      const engagedThreshold = tier === 'high' ? 15 : 10;
-      const engagedTriggerDate = s.last_academic_activity_date ? new Date(new Date(s.last_academic_activity_date).getTime() + engagedThreshold * 86400000) : null;
-      if (
-        engagedDays >= engagedThreshold &&
-        engagedTriggerDate && businessDaysSince(engagedTriggerDate) <= 7 &&
-        !recentlyHandled.has(`${s.id}::not_engaged`)
-      ) {
-        results.push({
-          key: `auto-not_engaged-${s.id}`, student: s, eaType: 'not_engaged',
-          firedAt: s.last_academic_activity_date || '', slaHours: slaHoursFor(EA_DEFS.not_engaged, tier),
-        });
-      }
+      // No PM Contact and Not Academically Engaged auto-detection turned
+      // off at Kaylee's request — only the pacing checkpoints below stay
+      // automatic. Both can still be logged manually via "Log an EA."
       // Pacing checkpoints fire once per term, not daily — suppressed by
       // checking the full closed-log history since this term started,
       // not just the last 24 hours.
@@ -484,7 +461,7 @@ export default function EssentialActions() {
         <button className="btn primary" onClick={() => setShowLogForm((v) => !v)}><Plus size={14} /> Log an EA</button>
       </div>
       <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
-        "No PM Contact" and "Not Academically Engaged" are detected automatically from your student data. Everything else has to be logged manually — the Hub doesn't have API access to WGU's Learner Care Dashboard, so it can't see those events on its own.
+        The "2-Month" and "4-Month Pacing Check-In" are detected automatically from your students' term start dates. Everything else — including "No PM Contact" and "Not Academically Engaged" — has to be logged manually via "Log an EA."
       </p>
 
       {showLogForm && (
