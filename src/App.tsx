@@ -171,6 +171,10 @@ type Touchpoint = {
   follow_up_email: string | null;
   follow_up_text: string | null;
   copied: boolean;
+  missed: boolean;
+  missed_email_sent: boolean;
+  voicemail_left: boolean;
+  is_weekly: boolean;
 };
 
 type EmailDraft = {
@@ -1379,7 +1383,8 @@ Kaylee`;
     const touchpoint: Touchpoint = { ...input, ...generated, copied: false, id: crypto.randomUUID() };
     setTouchpoints((current) => [touchpoint, ...current]);
 
-    const isMissed = input.touchpoint_type.toLowerCase().includes('missed') || input.touchpoint_type.toLowerCase().includes('no-show');
+    const isMissed = Boolean(input.missed) ||
+      input.touchpoint_type.toLowerCase().includes('missed') || input.touchpoint_type.toLowerCase().includes('no-show');
     const missed_call_count = isMissed ? Number(student?.missed_call_count || 0) + 1 : Number(student?.missed_call_count || 0);
     const status = missed_call_count >= 3 ? 'Ghost' : student?.status || 'Active';
     await updateStudent(input.student_id, {
@@ -1392,7 +1397,11 @@ Kaylee`;
     });
 
     if (!supabase) return setMessage('Touchpoint saved locally.');
-    const { data, error } = await supabase.from('student_touchpoints').insert({ ...input, ...generated, copied: false }).select().single();
+    const { data, error } = await supabase.from('student_touchpoints').insert({
+      ...input, ...generated, copied: false,
+      missed: Boolean(input.missed), missed_email_sent: Boolean(input.missed_email_sent),
+      voicemail_left: Boolean(input.voicemail_left), is_weekly: Boolean(input.is_weekly)
+    }).select().single();
     if (error) return setMessage(`Touchpoint save failed: ${error.message}`);
     setTouchpoints((current) => [data as Touchpoint, ...current.filter((t) => t.id !== touchpoint.id)]);
     setMessage('Touchpoint saved and next-call prep generated.');
@@ -1624,6 +1633,7 @@ Kaylee`;
           touchpoint_type: 'Email sent',
           touchpoint_date: new Date().toISOString().slice(0, 10),
           course: student.course || '',
+          missed: false, missed_email_sent: false, voicemail_left: false, is_weekly: false,
           momentum: '',
           note: `[${draft.cohort_label || 'outreach'} · ${draft.template_kind}] ${draft.subject}\n\n${draft.body}`
         });
@@ -2352,11 +2362,12 @@ function CallShowRateCard() {
     if (!supabase) return;
     const { data } = await supabase
       .from('student_touchpoints')
-      .select('touchpoint_type')
+      .select('touchpoint_type, missed')
       .gte('touchpoint_date', start)
-      .in('touchpoint_type', ['Call from student', 'Call to student', 'No-show / missed call']);
-    const missedCount = data?.filter((t) => t.touchpoint_type === 'No-show / missed call').length || 0;
-    const madeCount = (data?.length || 0) - missedCount;
+      .or('touchpoint_type.eq.Call from student,touchpoint_type.eq.Call to student,touchpoint_type.eq.No-show / missed call,missed.eq.true');
+    const rows = data || [];
+    const missedCount = rows.filter((t) => t.missed || t.touchpoint_type === 'No-show / missed call').length;
+    const madeCount = rows.length - missedCount;
     setMade(madeCount);
     setMissed(missedCount);
   }
@@ -5056,7 +5067,11 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
       touchpoint_date: touchForm.touchpoint_date,
       course: touchForm.course || selected.course || '',
       momentum: touchForm.momentum,
-      note: touchForm.note
+      note: touchForm.note,
+      missed: touchForm.missed,
+      missed_email_sent: touchForm.missed ? touchForm.missed_email_sent : false,
+      voicemail_left: touchForm.missed ? touchForm.voicemail_left : false,
+      is_weekly: touchForm.is_weekly
     });
     if (touchForm.next_call_at) {
       const iso = new Date(`${touchForm.next_call_at}T00:00`).toISOString();
