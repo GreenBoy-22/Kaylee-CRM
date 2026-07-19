@@ -81,13 +81,17 @@ export default function TermEnrollment() {
     setLoading(false);
   }
 
-  function nextMonthWindow(): { start: string; end: string; label: string } {
+  function targetWindow(): { start: string; end: string; newTermLabel: string; newTermStart: string } {
     const now = new Date();
-    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    const start = nextMonth.toISOString().slice(0, 10);
-    const endDate = new Date(now.getFullYear(), now.getMonth() + 2, 0);
-    const end = endDate.toISOString().slice(0, 10);
-    return { start, end, label: nextMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) };
+    // Students transitioning show up by their CURRENT term_end_date falling
+    // in this window — term_start_date for the new term isn't filled in
+    // until the new term actually begins, so it can't be used to predict
+    // who's coming up next.
+    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+    const newTermStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const newTermLabel = newTermStart.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    return { start, end, newTermLabel, newTermStart: newTermStart.toISOString().slice(0, 10) };
   }
 
   async function generateList() {
@@ -95,26 +99,27 @@ export default function TermEnrollment() {
     setGenerating(true);
     setConfirmGenerate(false);
 
-    const { start, end, label } = nextMonthWindow();
+    const { start, end, newTermLabel, newTermStart } = targetWindow();
 
     // Retire the current active list, if any
     if (activeList) {
       await supabase.from('term_enrollment_lists').update({ is_active: false }).eq('id', activeList.id);
     }
 
-    // Pull students whose new term starts within the target window
+    // Pull students whose CURRENT term ends within this window — they're
+    // the ones rolling into a new term next.
     const { data: sessionData } = await supabase.auth.getSession();
     const uid = sessionData?.session?.user?.id;
     const { data: students } = await supabase
       .from('students')
-      .select('id, display_name, contact_term, term_start_date')
+      .select('id, display_name, contact_term, term_end_date')
       .eq('archived', false)
-      .gte('term_start_date', start)
-      .lte('term_start_date', end);
+      .gte('term_end_date', start)
+      .lte('term_end_date', end);
 
     const { data: newList, error: listError } = await supabase
       .from('term_enrollment_lists')
-      .insert({ user_id: uid, label: `Term Enrollment: ${label}`, target_month: start, is_active: true })
+      .insert({ user_id: uid, label: `Term Enrollment: ${newTermLabel}`, target_month: newTermStart, is_active: true })
       .select()
       .single();
 
@@ -178,7 +183,7 @@ export default function TermEnrollment() {
 
       {!loading && !activeList && (
         <div style={{ marginTop: 24, padding: '1.5rem', background: '#f4f5f0', borderRadius: 10, textAlign: 'center' }}>
-          <p style={{ margin: 0, color: '#555' }}>No list running yet. Click "Generate Next Month's List" to pull in students whose new term starts next month.</p>
+          <p style={{ margin: 0, color: '#555' }}>No list running yet. Click "Generate Next Month's List" to pull in students whose current term ends this month.</p>
         </div>
       )}
 
@@ -204,7 +209,7 @@ export default function TermEnrollment() {
               </thead>
               <tbody>
                 {entries.length === 0 && (
-                  <tr><td colSpan={7} style={{ padding: '1rem', textAlign: 'center', color: '#999' }}>No students matched next month's term start window.</td></tr>
+                  <tr><td colSpan={7} style={{ padding: '1rem', textAlign: 'center', color: '#999' }}>No students have a term ending this month.</td></tr>
                 )}
                 {entries.map((e) => (
                   <tr key={e.id} style={{ background: STATUS_COLORS[e.row_status], borderBottom: '1px solid #eee' }}>
