@@ -137,6 +137,7 @@ interface StudentRow {
   known_blockers: string | null;
   next_conversation_focus: string | null;
   on_term_break?: boolean;
+  term_break_expected_back?: string | null;
   term_number?: number;
   term_start_date?: string | null;
   term_end_date?: string | null;
@@ -305,6 +306,8 @@ export default function WorkPerformance() {
   const [termHistory, setTermHistory] = useState<TermRecord[]>([]);
   const [monthlyPrompt, setMonthlyPrompt] = useState<MonthlyPrompt | null>(null);
   const [showStartsModal, setShowStartsModal] = useState(false);
+  const [deferringId, setDeferringId] = useState<string | null>(null);
+  const [deferDate, setDeferDate] = useState('');
   const [showEndsModal, setShowEndsModal] = useState(false);
   const [endsDraft, setEndsDraft] = useState<Record<string, { met_otp: boolean | null; outcome: TermRecord['outcome'] }>>({});
 
@@ -345,7 +348,7 @@ export default function WorkPerformance() {
       supabase.from('work_reviews').select('*').eq('user_id', uid).order('review_date', { ascending: false }),
       supabase.from('work_coaching_notes').select('*').eq('user_id', uid).order('note_date', { ascending: false }),
       supabase.from('work_goals').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
-      supabase.from('students').select('id, display_name, risk, momentum, last_contact_date, next_call_at, missed_call_count, known_blockers, next_conversation_focus, on_term_break, term_number, term_start_date, term_end_date, graduated').eq('archived', false),
+      supabase.from('students').select('id, display_name, risk, momentum, last_contact_date, next_call_at, missed_call_count, known_blockers, next_conversation_focus, on_term_break, term_break_expected_back, term_number, term_start_date, term_end_date, graduated').eq('archived', false),
       supabase.from('student_touchpoints').select('id, student_id, touchpoint_type, touchpoint_date, note, momentum').order('touchpoint_date', { ascending: true }),
       supabase.from('student_appointments').select('id, student_id, appointment_at, is_weekly, missed, missed_email_sent, voicemail_left').order('appointment_at', { ascending: true }),
       supabase.from('student_term_history').select('id, student_id, term_number, term_start_date, term_end_date, met_otp, outcome').order('term_end_date', { ascending: true }),
@@ -404,18 +407,19 @@ export default function WorkPerformance() {
     setMonthlyPrompt((p) => p ? { ...p, ...patch } : p);
   }
 
-  async function resolveStart(student: StudentRow, action: 'start' | 'defer') {
+  async function resolveStart(student: StudentRow, action: 'start' | 'defer', deferUntil?: string) {
     if (!supabase) return;
     if (action === 'start') {
       const today = new Date().toISOString().slice(0, 10);
       const sixMonthsOut = new Date(); sixMonthsOut.setMonth(sixMonthsOut.getMonth() + 6);
       await supabase.from('students').update({
-        term_start_date: today, term_end_date: sixMonthsOut.toISOString().slice(0, 10), on_term_break: false
+        term_start_date: today, term_end_date: sixMonthsOut.toISOString().slice(0, 10), on_term_break: false, term_break_expected_back: null
       }).eq('id', student.id);
+      setAllStudents((cur) => cur.map(s => s.id === student.id ? { ...s, on_term_break: false, term_break_expected_back: null } : s));
     } else {
-      await supabase.from('students').update({ on_term_break: true }).eq('id', student.id);
+      await supabase.from('students').update({ on_term_break: true, term_break_expected_back: deferUntil || null }).eq('id', student.id);
+      setAllStudents((cur) => cur.map(s => s.id === student.id ? { ...s, on_term_break: true, term_break_expected_back: deferUntil || null } : s));
     }
-    setAllStudents((cur) => cur.map(s => s.id === student.id ? { ...s, on_term_break: action === 'defer' } : s));
     load();
   }
 
@@ -686,15 +690,48 @@ export default function WorkPerformance() {
               These students don't have a confirmed term in progress yet (new, or currently on term break). For each, confirm whether their term is starting now or being deferred.
             </p>
             {termStartCandidates.map(st => (
-              <div key={st.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+              <div key={st.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', gap: 6 }}>
                 <div>
                   <strong style={{ fontSize: 13 }}>{st.display_name}</strong>
-                  {st.on_term_break && <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 6 }}>currently on term break</span>}
+                  {st.on_term_break && (
+                    <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 6 }}>
+                      currently on term break{st.term_break_expected_back ? ` · expected back ${fmtDate(st.term_break_expected_back)}` : ''}
+                    </span>
+                  )}
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button className="btn tiny" style={{ background: '#16a34a', color: '#fff' }} onClick={() => resolveStart(st, 'start')}>Starting Now</button>
-                  <button className="btn ghost tiny" onClick={() => resolveStart(st, 'defer')}>☕ Deferring</button>
-                </div>
+                {deferringId === st.id ? (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      type="date"
+                      value={deferDate}
+                      onChange={(e) => setDeferDate(e.target.value)}
+                      style={{ fontSize: 12, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)' }}
+                    />
+                    <button
+                      className="btn tiny"
+                      style={{ background: '#16a34a', color: '#fff' }}
+                      onClick={() => { resolveStart(st, 'defer', deferDate); setDeferringId(null); }}
+                    >
+                      Confirm
+                    </button>
+                    <button className="btn ghost tiny" onClick={() => setDeferringId(null)}>Cancel</button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn tiny" style={{ background: '#16a34a', color: '#fff' }} onClick={() => resolveStart(st, 'start')}>Starting Now</button>
+                    <button
+                      className="btn ghost tiny"
+                      onClick={() => {
+                        setDeferringId(st.id);
+                        const base = st.term_break_expected_back ? new Date(`${st.term_break_expected_back}T00:00:00`) : new Date();
+                        base.setDate(base.getDate() + 30);
+                        setDeferDate(base.toISOString().slice(0, 10));
+                      }}
+                    >
+                      ☕ Deferring
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
             <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
