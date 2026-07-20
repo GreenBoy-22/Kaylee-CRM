@@ -5,7 +5,7 @@ import {
   Activity, Cloud, Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Gamepad2, Film, Plane, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Check, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope, TrendingUp, NotebookText, ChefHat, Bell
+  CheckCircle2, Check, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope, TrendingUp, NotebookText, ChefHat, Bell, PawPrint
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
@@ -25,6 +25,7 @@ import TeamChatAssistant from './TeamChatAssistant';
 import TeamNotes from './TeamNotes';
 import TermEnrollment from './TermEnrollment';
 import RecipeBook from './RecipeBook';
+import DogSitter from './DogSitter';
 import MoodTracker from './MoodTracker';
 import PlantCatalog from './PlantCatalog';
 import WeatherWidget from './WeatherWidget';
@@ -37,7 +38,7 @@ import Appointments from './Appointments';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'team_chat' | 'team_notes' | 'term_enrollment' | 'mood' | 'weather' | 'plants' | 'recipes' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'essential_actions' | 'settings';
+type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'team_chat' | 'team_notes' | 'term_enrollment' | 'mood' | 'weather' | 'plants' | 'recipes' | 'dog_sitter' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'essential_actions' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -277,6 +278,7 @@ const homeNav: readonly NavEntry[] = [
   ['chores', 'Chores & Tasks', ListTodo],
   ['contacts', 'Contacts', Users],
   ['briefing', 'Daily Briefing', Sparkles],
+  ['dog_sitter', 'Dog Sitter', PawPrint],
   ['games', 'Games', Gamepad2],
   ['suggestions', 'Home Suggestions', Home],
   ['inventory', 'Inventory', Inbox],
@@ -2136,6 +2138,7 @@ Kaylee`;
           {page === 'mood' && <MoodTracker />}
           {page === 'plants' && <PlantCatalog />}
           {page === 'recipes' && <RecipeBook key={deepLinkRecipeId || 'default'} initialRecipeId={deepLinkRecipeId} />}
+          {page === 'dog_sitter' && <DogSitter />}
           {page === 'packages' && session && <PackageTracking userId={session.user.id} />}
           {page === 'games' && <Games />}
           {page === 'media' && <Media />}

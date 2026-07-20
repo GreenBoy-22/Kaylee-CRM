@@ -2,12 +2,16 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import RateMeal from './RateMeal';
+import SitJules from './SitJules';
 import './styles.css';
 import './gcal-calendar.css';
 
 // Public, no-login recipe rating page — anyone with the link lands here
 // directly, bypassing the authenticated Hub shell entirely.
 const rateMatch = window.location.pathname.match(/^\/rate\/([^/]+)/);
+
+// Public, no-login dog-sitter RSVP page — same pattern.
+const sitMatch = window.location.pathname.match(/^\/sit\/([^/]+)/);
 
 // ── PWA update banner ───────────────────────────────────────────────────
 // Registers the service worker and watches for a new version becoming
@@ -99,6 +103,8 @@ createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     {rateMatch ? (
       <RateMeal recipeId={rateMatch[1]} />
+    ) : sitMatch ? (
+      <SitJules requestId={sitMatch[1]} />
     ) : (
       <>
         <App />
