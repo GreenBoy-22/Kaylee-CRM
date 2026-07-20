@@ -71,7 +71,7 @@ type AISuggestion = { game: Game; reason: string } | null;
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const STATUS_LABELS: Record<PlayStatus, string> = {
-  backlog:    'Backlog',
+  backlog:    'Unplayed',
   playing:    'Currently Playing',
   completed:  'Completed',
   wishlist:   'Wishlist',
@@ -505,7 +505,7 @@ export default function Games() {
           ['Owned', stats.total],
           ['Playing', stats.playing],
           ['Completed', stats.completed],
-          ['Backlog', stats.backlog],
+          ['Unplayed', stats.backlog],
           ['Wishlist', stats.wishlist],
           ['Video', stats.video],
           ['Board', stats.board],
@@ -575,7 +575,7 @@ export default function Games() {
                         {result.genre && <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0 }}>{result.genre}</p>}
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
-                        <button className="btn primary tiny" onClick={() => addFromRAWG(result, 'backlog')}>Add to backlog</button>
+                        <button className="btn primary tiny" onClick={() => addFromRAWG(result, 'backlog')}>Add to unplayed</button>
                         <button className="btn ghost tiny" onClick={() => addFromRAWG(result, 'playing')}>Currently playing</button>
                         <button className="btn ghost tiny" onClick={() => addFromRAWG(result, 'wishlist')}>Wishlist</button>
                       </div>
@@ -664,7 +664,7 @@ export default function Games() {
             </p>
           ) : (
             <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 10px' }}>
-              Nothing currently playing — suggesting based on your backlog.
+              Nothing currently playing — suggesting from your unplayed games.
             </p>
           )}
 
@@ -675,7 +675,7 @@ export default function Games() {
                 onClick={() => getSuggestion('match')}
                 disabled={suggesting || stats.backlog === 0}
               >
-                <Sparkles size={14} /> Suggest from backlog
+                <Sparkles size={14} /> Suggest from unplayed
               </button>
               <button
                 className="btn ghost"
@@ -685,7 +685,7 @@ export default function Games() {
                 <Heart size={14} /> Something chill
               </button>
               {stats.backlog === 0 && (
-                <span style={{ fontSize: 12, color: 'var(--muted)', alignSelf: 'center' }}>No backlog games found.</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)', alignSelf: 'center' }}>No unplayed games found.</span>
               )}
             </div>
           )}
@@ -744,7 +744,7 @@ export default function Games() {
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as PlayStatus | 'all')}>
             <option value="all">All statuses</option>
             <option value="playing">🎮 Playing</option>
-            <option value="backlog">📚 Backlog</option>
+            <option value="backlog">📚 Unplayed</option>
             <option value="completed">✅ Completed</option>
             <option value="wishlist">🛒 Wishlist</option>
             <option value="dropped">❌ Dropped</option>

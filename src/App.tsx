@@ -280,7 +280,6 @@ const homeNav: readonly NavEntry[] = [
   ['briefing', 'Daily Briefing', Sparkles],
   ['dog_sitter', 'Dog Sitter', PawPrint],
   ['games', 'Games', Gamepad2],
-  ['suggestions', 'Home Suggestions', Home],
   ['inventory', 'Inventory', Inbox],
   ['jules', 'Jules', Heart],
   ['books', 'Library', BookOpen],
@@ -318,7 +317,6 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'vehicles', module_name: 'vehicles', label: 'Vehicles', default_access: 'view' },
   { page: 'jules', module_name: 'jules', label: 'Jules', default_access: 'edit' },
   { page: 'migraine', module_name: 'migraine', label: 'Migraine Tracker', default_access: 'edit' },
-  { page: 'suggestions', module_name: 'home_suggestions', label: 'Home Suggestions', default_access: 'edit' },
   { page: 'budget', module_name: 'budget', label: 'Budget', default_access: 'view' },
   { page: 'contacts', module_name: 'contacts', label: 'Contacts', default_access: 'view' },
   { page: 'books', module_name: 'books', label: 'Library', default_access: 'view' },
@@ -2128,7 +2126,6 @@ Kaylee`;
           {page === 'books' && <Books />}
           {page === 'work_performance' && <WorkPerformance />}
           {page === 'essential_actions' && <EssentialActions />}
-          {page === 'suggestions' && <Suggestions choreSuggestions={choreSuggestions} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} editable={canEdit('suggestions')} />}
           {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} appointments={appointments} eaLog={eaLog} createEaLog={createEaLog} closeEaLog={closeEaLog} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} updateTouchpoint={updateTouchpoint} deleteTouchpoint={deleteTouchpoint} createAppointment={createAppointment} updateAppointment={updateAppointment} deleteAppointment={deleteAppointment} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} setMessage={setMessage} />}
           {page === 'fto' && activeRole === 'admin' && <FTOTracker />}
           {page === 'course_notes' && activeRole === 'admin' && <CourseNotes />}
@@ -3096,16 +3093,91 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
         </div>
       </div>
 
-      {/* Top row: calendar today + scanner/grocery */}
+      {/* Row 1: today's calendar + today's chores — the two most time-critical things */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
         <div><GoogleCalendarToday /></div>
+
+        {/* My Chores Today */}
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('chores')}>
+          <div className="panel-head">
+            <h2>✅ My Chores Today</h2>
+            {myChores.length > 0 && <span className="risk-pill high">{myChores.length}</span>}
+          </div>
+          {myChores.length === 0
+            ? <div style={{ fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>Nothing on your plate today ✓</div>
+            : myChores.map((c) => (
+                <div key={c.id} className="brief-item" style={{ borderLeft: `3px solid ${c.priority >= 3 ? 'var(--red)' : 'var(--amber)'}` }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
+                  {c.room && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{c.room}</div>}
+                </div>
+              ))
+          }
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Open Chores &amp; Tasks →</div>
+        </section>
+      </div>
+
+      {/* Row 2: needs action soon — money, upkeep, restocking */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, marginBottom: 12 }}>
+
+        {/* Budget */}
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('budget')}>
+          <div className="panel-head">
+            <h2>💰 Budget</h2>
+            {budgetToday.length > 0 && <span className="risk-pill medium">{budgetToday.length} due today</span>}
+          </div>
+          {budgetToday.length === 0
+            ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>No bills due today</div>
+            : budgetToday.map((b, i) => (
+                <div key={i} className="brief-item" style={{ borderLeft: '3px solid var(--amber)', display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 12 }}>{b.name}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>${b.amount.toFixed(2)}</span>
+                </div>
+              ))
+          }
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Open Budget →</div>
+        </section>
+
+        {/* Vehicles */}
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('vehicles')}>
+          <div className="panel-head">
+            <h2>🚗 Vehicles</h2>
+            {vehicleAlerts.length > 0 && <span className="risk-pill high">{vehicleAlerts.length} alerts</span>}
+          </div>
+          {vehicleAlerts.length === 0
+            ? <div style={{ fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>No maintenance due ✓</div>
+            : vehicleAlerts.map((a, i) => (
+                <div key={i} className="brief-item" style={{ borderLeft: `3px solid ${a.status === 'overdue' ? 'var(--red)' : 'var(--amber)'}` }}>
+                  <div style={{ fontWeight: 600, fontSize: 12 }}>{a.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{a.item} — {a.status}</div>
+                </div>
+              ))
+          }
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>View Vehicles →</div>
+        </section>
+
+        {/* Inventory */}
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('inventory')}>
+          <div className="panel-head">
+            <h2>📦 Inventory</h2>
+            {expiringSoon.length > 0 && <span className="risk-pill medium">{expiringSoon.length} expiring</span>}
+          </div>
+          {expiringSoon.length === 0
+            ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>Nothing expiring this week</div>
+            : expiringSoon.map((item, i) => (
+                <div key={i} className="brief-item" style={{ borderLeft: '3px solid var(--amber)', display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 12 }}>{item.name}</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>{item.expires}</span>
+                </div>
+              ))
+          }
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Open Inventory →</div>
+        </section>
+
+        {/* Scanner & Grocery */}
         <section className="panel">
           <div className="panel-head">
-            <h2>📷 Scanner &amp; Grocery List</h2>
+            <h2>📷 Scanner &amp; Grocery</h2>
           </div>
-          <button className="btn primary" onClick={() => setPage('inventory')} style={{ width: '100%', marginBottom: 10 }}>
-            Open Scanner Inbox
-          </button>
           {(() => {
             const REPLENISH_CATS = ['Cleaning', 'Personal Care'];
             const REPLENISH_LOCS = ['Kitchen', 'Bathroom', 'Laundry Room', 'Garage', 'Backstock Closet'];
@@ -3118,55 +3190,24 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
             }
             return (
               <>
-                {outOfStock.slice(0, 5).map(i => (
+                {outOfStock.slice(0, 3).map(i => (
                   <div key={i.id} className="brief-item" style={{ borderLeft: '3px solid #0891b2' }}>
                     <div style={{ fontWeight: 600, fontSize: 13 }}>{i.name}</div>
                     {i.location && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{i.location}</div>}
                   </div>
                 ))}
-                {outOfStock.length > 5 && (
-                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>+{outOfStock.length - 5} more</div>
+                {outOfStock.length > 3 && (
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>+{outOfStock.length - 3} more</div>
                 )}
               </>
             );
           })()}
-          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right', cursor: 'pointer' }} onClick={() => setPage('inventory')}>View all →</div>
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right', cursor: 'pointer' }} onClick={() => setPage('inventory')}>Open Scanner Inbox →</div>
         </section>
       </div>
 
-      {/* Middle row: 4-column snapshot grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, marginBottom: 12 }}>
-
-        {/* Migraine */}
-        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('migraine')}>
-          <div className="panel-head"><h2>🧠 Migraine</h2></div>
-          {migraineToday === null
-            ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>Loading…</div>
-            : migraineToday === 'yes'
-            ? <div style={{ textAlign: 'center', padding: '8px 0' }}>
-                <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--red)' }}>YES</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{migraineSeverity.replace(/_/g, ' ')}</div>
-              </div>
-            : <div style={{ textAlign: 'center', padding: '8px 0' }}>
-                <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--green)' }}>NO</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)' }}>None logged today</div>
-              </div>
-          }
-          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Log / view →</div>
-        </section>
-
-        {/* Library */}
-        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('books')}>
-          <div className="panel-head"><h2>📖 Reading Now</h2></div>
-          {currentBook
-            ? <>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{currentBook.title}</div>
-                {currentBook.author && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>by {currentBook.author}</div>}
-              </>
-            : <div style={{ fontSize: 12, color: 'var(--muted)' }}>No book in progress</div>
-          }
-          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Library →</div>
-        </section>
+      {/* Row 3: care & relationships — important, but rarely urgent same-day */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginBottom: 12 }}>
 
         {/* Jules */}
         <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('jules')}>
@@ -3181,20 +3222,6 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
           }
           <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>View Jules →</div>
         </section>
-
-        {/* Home Suggestions */}
-        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('suggestions')}>
-          <div className="panel-head"><h2>🏠 Suggestions</h2></div>
-          <div style={{ textAlign: 'center', padding: '8px 0' }}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: suggestionCount > 0 ? 'var(--amber)' : 'var(--green)' }}>{suggestionCount}</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)' }}>pending items</div>
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>View all →</div>
-        </section>
-      </div>
-
-      {/* Bottom row: contacts, vehicles, budget, inventory */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
 
         {/* Contacts due */}
         {isKaylee && (
@@ -3215,59 +3242,27 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
             <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Open Contacts →</div>
           </section>
         )}
+      </div>
 
-        {/* Vehicles */}
-        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('vehicles')}>
-          <div className="panel-head">
-            <h2>🚗 Vehicles</h2>
-            {vehicleAlerts.length > 0 && <span className="risk-pill high">{vehicleAlerts.length} alerts</span>}
-          </div>
-          {vehicleAlerts.length === 0
-            ? <div style={{ fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>No maintenance due ✓</div>
-            : vehicleAlerts.map((a, i) => (
-                <div key={i} className="brief-item" style={{ borderLeft: `3px solid ${a.status === 'overdue' ? 'var(--red)' : 'var(--amber)'}` }}>
-                  <div style={{ fontWeight: 600, fontSize: 12 }}>{a.name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{a.item} — {a.status}</div>
-                </div>
-              ))
-          }
-          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>View Vehicles →</div>
-        </section>
+      {/* Row 4: personal tracking & glanceable info — lowest urgency */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
 
-        {/* Budget */}
-        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('budget')}>
-          <div className="panel-head">
-            <h2>💰 Budget</h2>
-            {budgetToday.length > 0 && <span className="risk-pill medium">{budgetToday.length} due today</span>}
-          </div>
-          {budgetToday.length === 0
-            ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>No bills due today</div>
-            : budgetToday.map((b, i) => (
-                <div key={i} className="brief-item" style={{ borderLeft: '3px solid var(--amber)', display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: 12 }}>{b.name}</span>
-                  <span style={{ fontSize: 12, fontWeight: 600 }}>${b.amount.toFixed(2)}</span>
-                </div>
-              ))
+        {/* Migraine */}
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('migraine')}>
+          <div className="panel-head"><h2>🧠 Migraine</h2></div>
+          {migraineToday === null
+            ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>Loading…</div>
+            : migraineToday === 'yes'
+            ? <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--red)' }}>YES</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{migraineSeverity.replace(/_/g, ' ')}</div>
+              </div>
+            : <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--green)' }}>NO</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>None logged today</div>
+              </div>
           }
-          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Open Budget →</div>
-        </section>
-
-        {/* Inventory */}
-        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('inventory')}>
-          <div className="panel-head">
-            <h2>📦 Inventory</h2>
-            {expiringSoon.length > 0 && <span className="risk-pill medium">{expiringSoon.length} expiring</span>}
-          </div>
-          {expiringSoon.length === 0
-            ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>Nothing expiring this week</div>
-            : expiringSoon.map((item, i) => (
-                <div key={i} className="brief-item" style={{ borderLeft: '3px solid var(--amber)', display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: 12 }}>{item.name}</span>
-                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>{item.expires}</span>
-                </div>
-              ))
-          }
-          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Open Inventory →</div>
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Log / view →</div>
         </section>
 
         {/* Mood snapshot */}
@@ -3290,6 +3285,19 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
             : <div style={{ fontSize: 13, color: 'var(--green)', fontWeight: 600 }}>No incident logged today</div>
           }
           <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>View log →</div>
+        </section>
+
+        {/* Library */}
+        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('books')}>
+          <div className="panel-head"><h2>📖 Reading Now</h2></div>
+          {currentBook
+            ? <>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{currentBook.title}</div>
+                {currentBook.author && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>by {currentBook.author}</div>}
+              </>
+            : <div style={{ fontSize: 12, color: 'var(--muted)' }}>No book in progress</div>
+          }
+          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Library →</div>
         </section>
 
         {/* Weather snapshot */}
