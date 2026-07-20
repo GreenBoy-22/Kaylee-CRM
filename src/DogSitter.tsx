@@ -16,6 +16,7 @@ interface CoverageEvent {
   status: string;
   sitter_name: string | null;
   sitter_phone: string | null;
+  calendar_name: string | null;
 }
 
 interface GCalEvent {
@@ -92,8 +93,10 @@ export default function DogSitter() {
       const sixMonthsOut = new Date();
       sixMonthsOut.setMonth(sixMonthsOut.getMonth() + 6);
 
-      const qualifying = events.filter((e) => {
-        if (e.calendarName !== 'Places To Be/To Do' && e.calendarName !== 'Vacation') return false;
+      const alwaysCheck = new Set(['Places To Be/To Do', 'Vacation']);
+
+      const autoEvents = events.filter((e) => {
+        if (!alwaysCheck.has(e.calendarName)) return false;
         // Events like "Watch Maple & Leela" or "Watch Sean's Doggos" are the
         // reverse direction — Kaylee/Adam are the ones pet-sitting, so Jules
         // doesn't need separate coverage for those.
@@ -102,21 +105,41 @@ export default function DogSitter() {
         return start >= now && start <= sixMonthsOut;
       });
 
+      // Everything else — only timed events (not all-day) from any other
+      // calendar (Kaylee's, Adam's, etc.) get flagged as "might need a
+      // sitter" rather than auto-assumed, since a single person's
+      // appointment doesn't always mean Jules needs coverage.
+      const maybeEvents = events.filter((e) => {
+        if (alwaysCheck.has(e.calendarName)) return false;
+        if (e.allDay) return false;
+        if (/^watch\s/i.test(e.title.trim())) return false;
+        const start = new Date(e.start);
+        return start >= now && start <= sixMonthsOut;
+      });
+
+      const qualifying = [...autoEvents, ...maybeEvents];
+
       if (qualifying.length === 0) {
         setScanMessage('No events found in "Places To Be/To Do" over the next 6 months.');
         setScanning(false);
         return;
       }
 
-      const rows = qualifying.map((e) => ({
-        user_id: uid,
-        calendar_event_id: e.id,
-        event_title: e.title,
-        event_start: e.allDay ? `${e.start}T00:00:00` : e.start,
-        event_end: e.allDay ? `${e.end}T23:59:59` : e.end,
-        all_day: e.allDay,
-        location: e.location || null,
-      }));
+      const rows = [
+        ...autoEvents.map((e) => ({
+          user_id: uid, calendar_event_id: e.id, event_title: e.title,
+          event_start: e.allDay ? `${e.start}T00:00:00` : e.start,
+          event_end: e.allDay ? `${e.end}T23:59:59` : e.end,
+          all_day: e.allDay, location: e.location || null,
+          calendar_name: e.calendarName, status: 'needs_coverage',
+        })),
+        ...maybeEvents.map((e) => ({
+          user_id: uid, calendar_event_id: e.id, event_title: e.title,
+          event_start: e.start, event_end: e.end,
+          all_day: false, location: e.location || null,
+          calendar_name: e.calendarName, status: 'maybe_needed',
+        })),
+      ];
 
       const { error } = await supabase
         .from('dog_sitter_coverage')
@@ -124,12 +147,24 @@ export default function DogSitter() {
 
       if (error) { setScanMessage(`Scan failed: ${error.message}`); setScanning(false); return; }
 
-      setScanMessage(`Found ${qualifying.length} event${qualifying.length !== 1 ? 's' : ''} \u2014 new ones were added below.`);
+      setScanMessage(`Found ${autoEvents.length} event${autoEvents.length !== 1 ? 's' : ''} that always need coverage, plus ${maybeEvents.length} more that might \u2014 new ones were added below.`);
       await loadCoverage();
     } catch {
       setScanMessage('Something went wrong pulling your calendar.');
     }
     setScanning(false);
+  }
+
+  async function confirmNeeded(id: string) {
+    if (!supabase) return;
+    await supabase.from('dog_sitter_coverage').update({ status: 'needs_coverage' }).eq('id', id);
+    setCoverage((cur) => cur.map((c) => (c.id === id ? { ...c, status: 'needs_coverage' } : c)));
+  }
+
+  async function dismissNotNeeded(id: string) {
+    if (!supabase) return;
+    await supabase.from('dog_sitter_coverage').update({ status: 'not_needed' }).eq('id', id);
+    setCoverage((cur) => cur.map((c) => (c.id === id ? { ...c, status: 'not_needed' } : c)));
   }
 
   function openRequestForm(event: CoverageEvent) {
@@ -160,6 +195,7 @@ export default function DogSitter() {
     setCoverage((cur) => cur.map((c) => (c.id === requestingFor.id ? { ...c, status: 'requested', sitter_name: sitterName.trim(), sitter_phone: sitterPhone.trim() || null } : c)));
   }
 
+  const maybeNeeded = useMemo(() => coverage.filter((c) => c.status === 'maybe_needed'), [coverage]);
   const needsCoverage = useMemo(() => coverage.filter((c) => c.status === 'needs_coverage' || c.status === 'requested' || c.status === 'declined'), [coverage]);
   const covered = useMemo(() => coverage.filter((c) => c.status === 'covered'), [coverage]);
 
@@ -189,6 +225,44 @@ export default function DogSitter() {
 
       {!loading && (
         <>
+          {maybeNeeded.length > 0 && (
+            <>
+              <h2 style={{ fontSize: '1rem', color: ARMY_GREEN, marginBottom: '0.75rem' }}>
+                Might need a sitter? ({maybeNeeded.length})
+              </h2>
+              <p style={{ fontSize: '0.8rem', color: '#999', marginTop: '-0.5rem', marginBottom: '0.75rem' }}>
+                Timed events from your other calendars \u2014 confirm if Jules needs coverage or dismiss if not.
+              </p>
+              {maybeNeeded.map((event) => (
+                <div key={event.id} style={{ border: '1px solid #eee', borderLeft: '4px solid #999', borderRadius: 8, padding: '0.9rem 1rem', marginBottom: '0.75rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                    <div>
+                      <strong style={{ fontSize: '0.95rem' }}>{event.event_title}</strong>
+                      {event.calendar_name && <span style={{ fontSize: '0.72rem', color: '#aaa', marginLeft: 6 }}>({event.calendar_name})</span>}
+                      <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#666', display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <Calendar size={12} /> {fmtRange(event.event_start, event.event_end, event.all_day)}
+                      </p>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        onClick={() => confirmNeeded(event.id)}
+                        style={{ background: ORANGE, border: 'none', color: 'white', borderRadius: 6, padding: '0.4rem 0.8rem', fontSize: '0.8rem', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      >
+                        Needs a Sitter
+                      </button>
+                      <button
+                        onClick={() => dismissNotNeeded(event.id)}
+                        style={{ background: 'white', border: '1px solid #ccc', color: '#999', borderRadius: 6, padding: '0.4rem 0.8rem', fontSize: '0.8rem', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      >
+                        Not Needed
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+
           <h2 style={{ fontSize: '1rem', color: ARMY_GREEN, marginTop: '1.5rem', marginBottom: '0.75rem' }}>
             Needs attention ({needsCoverage.length})
           </h2>
