@@ -2639,7 +2639,8 @@ function NotificationBell({ setPage, setDeepLinkOverride }: { setPage: (p: Page)
         <>
           <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 998 }} />
           <div style={{
-            position: 'absolute', top: '110%', right: 0, width: 340, maxHeight: 440, overflowY: 'auto',
+            position: 'fixed', top: 56, right: 12, left: 12, marginLeft: 'auto', width: 'min(340px, calc(100vw - 24px))',
+            maxHeight: '70vh', overflowY: 'auto',
             background: 'var(--surface-0, white)', border: '1px solid #ddd', borderRadius: 10,
             boxShadow: '0 8px 24px rgba(0,0,0,0.15)', zIndex: 999,
           }}>
