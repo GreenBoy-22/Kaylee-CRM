@@ -1,6 +1,7 @@
 {
   "rewrites": [
-    { "source": "/rate/(.*)", "destination": "/index.html" }
+    { "source": "/rate/(.*)", "destination": "/index.html" },
+    { "source": "/sit/(.*)", "destination": "/index.html" }
   ],
   "headers": [
     {
