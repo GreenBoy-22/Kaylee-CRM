@@ -286,12 +286,20 @@ export default function DogSitter() {
                     <p style={{ margin: '6px 0 0', fontSize: '0.8rem', color: '#c0392b' }}>{event.sitter_name} said they can't \u2014 needs a new sitter</p>
                   )}
                 </div>
-                <button
-                  onClick={() => openRequestForm(event)}
-                  style={{ background: 'white', border: `1px solid ${ARMY_GREEN}`, color: ARMY_GREEN, borderRadius: 6, padding: '0.4rem 0.8rem', fontSize: '0.8rem', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                >
-                  {event.status === 'needs_coverage' ? 'Ask a Sitter' : 'Ask Someone Else'}
-                </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+                  <button
+                    onClick={() => openRequestForm(event)}
+                    style={{ background: 'white', border: `1px solid ${ARMY_GREEN}`, color: ARMY_GREEN, borderRadius: 6, padding: '0.4rem 0.8rem', fontSize: '0.8rem', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  >
+                    {event.status === 'needs_coverage' ? 'Ask a Sitter' : 'Ask Someone Else'}
+                  </button>
+                  <button
+                    onClick={() => dismissNotNeeded(event.id)}
+                    style={{ background: 'none', border: 'none', color: '#999', fontSize: '0.75rem', cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+                  >
+                    No Sitter Needed
+                  </button>
+                </div>
               </div>
             </div>
           ))}
