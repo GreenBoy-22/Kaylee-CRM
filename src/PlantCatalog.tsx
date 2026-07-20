@@ -30,6 +30,8 @@ interface Plant {
   image_url?: string | null;
   notes: string | null;
   is_active: boolean;
+  archive_reason: 'harvested' | 'died' | null;
+  archived_at: string | null;
   care_guide: string | null;
   acquired_date: string | null;
   created_at: string;
@@ -167,13 +169,13 @@ function parseCareGuide(guide: string): CareSection[] {
 // __ Default plants to seed ______________________________________________
 
 const DEFAULT_PLANTS: Omit<Plant, 'id' | 'created_at'>[] = [
-  { name: 'Fiddle Leaf Fig', scientific_name: 'Ficus lyrata',        nickname: null, location: 'indoor',  spot: null, pot_size: null, soil_type: null, photo_url: null, notes: null, is_active: true, care_guide: null, acquired_date: null },
-  { name: 'Monstera',        scientific_name: 'Monstera deliciosa',   nickname: null, location: 'indoor',  spot: null, pot_size: null, soil_type: null, photo_url: null, notes: null, is_active: true, care_guide: null, acquired_date: null },
-  { name: 'Lime Tree',       scientific_name: 'Citrus aurantiifolia', nickname: null, location: 'indoor',  spot: 'Indoors (warm season)', pot_size: null, soil_type: null, photo_url: null, notes: null, is_active: true, care_guide: null, acquired_date: null },
-  { name: 'Rosemary',        scientific_name: 'Salvia rosmarinus',    nickname: null, location: 'outdoor', spot: 'Herb garden', pot_size: null, soil_type: null, photo_url: null, notes: null, is_active: true, care_guide: null, acquired_date: null },
-  { name: 'Clematis',        scientific_name: 'Clematis spp.',        nickname: null, location: 'outdoor', spot: null, pot_size: null, soil_type: null, photo_url: null, notes: null, is_active: true, care_guide: null, acquired_date: null },
-  { name: 'Lavender',        scientific_name: 'Lavandula spp.',       nickname: null, location: 'outdoor', spot: null, pot_size: null, soil_type: null, photo_url: null, notes: null, is_active: true, care_guide: null, acquired_date: null },
-  { name: 'Azalea',          scientific_name: 'Rhododendron spp.',    nickname: null, location: 'outdoor', spot: null, pot_size: null, soil_type: null, photo_url: null, notes: null, is_active: true, care_guide: null, acquired_date: null },
+  { name: 'Fiddle Leaf Fig', scientific_name: 'Ficus lyrata',        nickname: null, location: 'indoor',  spot: null, pot_size: null, soil_type: null, photo_url: null, notes: null, is_active: true, archive_reason: null, archived_at: null, care_guide: null, acquired_date: null },
+  { name: 'Monstera',        scientific_name: 'Monstera deliciosa',   nickname: null, location: 'indoor',  spot: null, pot_size: null, soil_type: null, photo_url: null, notes: null, is_active: true, archive_reason: null, archived_at: null, care_guide: null, acquired_date: null },
+  { name: 'Lime Tree',       scientific_name: 'Citrus aurantiifolia', nickname: null, location: 'indoor',  spot: 'Indoors (warm season)', pot_size: null, soil_type: null, photo_url: null, notes: null, is_active: true, archive_reason: null, archived_at: null, care_guide: null, acquired_date: null },
+  { name: 'Rosemary',        scientific_name: 'Salvia rosmarinus',    nickname: null, location: 'outdoor', spot: 'Herb garden', pot_size: null, soil_type: null, photo_url: null, notes: null, is_active: true, archive_reason: null, archived_at: null, care_guide: null, acquired_date: null },
+  { name: 'Clematis',        scientific_name: 'Clematis spp.',        nickname: null, location: 'outdoor', spot: null, pot_size: null, soil_type: null, photo_url: null, notes: null, is_active: true, archive_reason: null, archived_at: null, care_guide: null, acquired_date: null },
+  { name: 'Lavender',        scientific_name: 'Lavandula spp.',       nickname: null, location: 'outdoor', spot: null, pot_size: null, soil_type: null, photo_url: null, notes: null, is_active: true, archive_reason: null, archived_at: null, care_guide: null, acquired_date: null },
+  { name: 'Azalea',          scientific_name: 'Rhododendron spp.',    nickname: null, location: 'outdoor', spot: null, pot_size: null, soil_type: null, photo_url: null, notes: null, is_active: true, archive_reason: null, archived_at: null, care_guide: null, acquired_date: null },
 ];
 
 // __ AI suggestion helper ________________________________________________
@@ -297,6 +299,11 @@ export default function PlantCatalog() {
   const [filterLoc, setFilterLoc]     = useState<Location | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Archived (harvested / died) plants — kept in the catalog for reference
+  // but out of the active tracking list, logs, and task views.
+  const [archivedPlants, setArchivedPlants] = useState<Plant[]>([]);
+  const [showArchived, setShowArchived]     = useState(false);
+
   const load = useCallback(async () => {
     if (!supabase) return;
     setLoading(true);
@@ -304,14 +311,16 @@ export default function PlantCatalog() {
     const userId = sessionData.session?.user?.id;
     if (!userId) { setLoading(false); return; }
 
-    const [plantsRes, logsRes, tasksRes] = await Promise.all([
+    const [plantsRes, archivedRes, logsRes, tasksRes] = await Promise.all([
       supabase.from('plants').select('*').eq('user_id', userId).eq('is_active', true).order('name'),
+      supabase.from('plants').select('*').eq('user_id', userId).eq('is_active', false).order('archived_at', { ascending: false }),
       supabase.from('plant_log').select('*').eq('user_id', userId).order('log_date', { ascending: false }),
       supabase.from('plant_tasks').select('*').eq('user_id', userId).order('due_date', { ascending: true }),
     ]);
 
     const loadedPlants = (plantsRes.data as Plant[]) ?? [];
     setPlants(loadedPlants);
+    setArchivedPlants((archivedRes.data as Plant[]) ?? []);
     setLogs((logsRes.data as PlantLog[]) ?? []);
     setTasks((tasksRes.data as PlantTask[]) ?? []);
 
@@ -470,10 +479,26 @@ export default function PlantCatalog() {
     setShowAddPlant(false); setEditingPlant(null); resetPlantForm(); setPSaving(false);
   }
 
-  async function archivePlant(id: string) {
+  async function archivePlant(id: string, reason: 'harvested' | 'died') {
     if (!supabase) return;
-    await supabase.from('plants').update({ is_active: false }).eq('id', id);
-    setPlants(prev => prev.filter(p => p.id !== id));
+    const archived_at = new Date().toISOString();
+    await supabase.from('plants').update({ is_active: false, archive_reason: reason, archived_at }).eq('id', id);
+    setPlants(prev => {
+      const p = prev.find(pl => pl.id === id);
+      if (p) setArchivedPlants(cur => [{ ...p, is_active: false, archive_reason: reason, archived_at }, ...cur]);
+      return prev.filter(pl => pl.id !== id);
+    });
+    setExpandedPlant(cur => (cur === id ? null : cur));
+  }
+
+  async function reactivatePlant(id: string) {
+    if (!supabase) return;
+    await supabase.from('plants').update({ is_active: true, archive_reason: null, archived_at: null }).eq('id', id);
+    setArchivedPlants(prev => {
+      const p = prev.find(pl => pl.id === id);
+      if (p) setPlants(cur => [...cur, { ...p, is_active: true, archive_reason: null, archived_at: null }].sort((a, b) => a.name.localeCompare(b.name)));
+      return prev.filter(pl => pl.id !== id);
+    });
   }
 
   async function saveLog() {
@@ -1068,6 +1093,13 @@ export default function PlantCatalog() {
             >
               {showPhotoGrid ? '📷 Photos' : '📷 Photos'}
             </button>
+            <button
+              onClick={() => setShowArchived(prev => !prev)}
+              title="Plants marked harvested or died — kept for reference, out of active tracking"
+              style={{ padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: `2px solid ${showArchived ? 'var(--amber)' : 'var(--border)'}`, background: showArchived ? 'var(--amber-bg, #fff3d6)' : 'transparent', color: showArchived ? 'var(--amber)' : 'var(--muted)' }}
+            >
+              🗄️ Harvested / Died ({archivedPlants.length})
+            </button>
           </div>
 
           {loading && <div style={{ color: 'var(--muted)', fontSize: 13, padding: 20 }}>Loading plants...</div>}
@@ -1100,6 +1132,36 @@ export default function PlantCatalog() {
             </div>
           )}
 
+          {showArchived && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {archivedPlants.length === 0 && (
+                <section className="panel" style={{ textAlign: 'center', padding: 40 }}>
+                  <Leaf size={32} style={{ color: 'var(--muted)', marginBottom: 12 }} />
+                  <p style={{ color: 'var(--muted)' }}>Nothing harvested or died yet — plants you mark either way land here, out of your active list but still on file.</p>
+                </section>
+              )}
+              {archivedPlants.map(p => (
+                <section key={p.id} className="panel" style={{ borderLeft: `4px solid ${p.archive_reason === 'harvested' ? 'var(--green)' : 'var(--muted)'}`, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 700, fontSize: 15 }}>{p.nickname || p.name}</span>
+                      {p.scientific_name && <span style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{p.scientific_name}</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: p.archive_reason === 'harvested' ? 'var(--green)' : 'var(--muted)', background: p.archive_reason === 'harvested' ? 'var(--green-bg)' : 'var(--surface-1)', padding: '2px 8px', borderRadius: 999 }}>
+                        {p.archive_reason === 'harvested' ? '🌾 Harvested' : '🥀 Died'}
+                      </span>
+                      <span style={{ fontSize: 11, color: 'var(--muted)' }}>{LOCATION_LABELS[p.location]}{p.spot ? ` — ${p.spot}` : ''}</span>
+                      {p.archived_at && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{fmtDate(p.archived_at.slice(0, 10))}</span>}
+                    </div>
+                  </div>
+                  <button className="btn ghost tiny" style={{ flexShrink: 0 }} onClick={() => reactivatePlant(p.id)}>↩ Track Again</button>
+                </section>
+              ))}
+            </div>
+          )}
+
+          {!showArchived && <>
           {/* Accordion plant list */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {filteredPlants.map(p => {
@@ -1215,7 +1277,8 @@ export default function PlantCatalog() {
                           <Sparkles size={11} /> {inlineAILoading ? 'Thinking...' : inlineAI ? 'Refresh AI Tips' : 'Get AI Tips'}
                         </button>
                         <button className="btn ghost tiny" onClick={() => { setTaskPlantId(p.id); setShowAddTask(true); setTab('tasks'); }}>📋 Add Task</button>
-                        <button className="btn ghost tiny" style={{ color: 'var(--red)', marginLeft: 'auto' }} onClick={() => archivePlant(p.id)}>Remove</button>
+                        <button className="btn ghost tiny" style={{ color: 'var(--green)', marginLeft: 'auto' }} onClick={() => archivePlant(p.id, 'harvested')}>🌾 Mark Harvested</button>
+                        <button className="btn ghost tiny" style={{ color: 'var(--muted)' }} onClick={() => archivePlant(p.id, 'died')}>🥀 Mark Died</button>
                       </div>
 
                       {/* Household Info grid */}
@@ -1367,6 +1430,7 @@ export default function PlantCatalog() {
               <p style={{ color: 'var(--muted)' }}>No plants found. Click "Add Plant" to get started.</p>
             </section>
           )}
+          </>}
         </div>
       )}
 
