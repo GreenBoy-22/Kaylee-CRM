@@ -85,7 +85,7 @@ export default function SitJules({ requestId }: { requestId: string }) {
     <img
       src="/jules.jpg"
       alt="Jules"
-      style={{ width: '100%', height: 220, objectFit: 'cover', display: 'block' }}
+      style={{ width: '100%', height: 240, objectFit: 'cover', objectPosition: 'center 15%', display: 'block' }}
     />
   );
 
@@ -155,14 +155,12 @@ export default function SitJules({ requestId }: { requestId: string }) {
             <p style={{ margin: '0 0 6px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: 6 }}>
               <Calendar size={14} /> {fmtRange(coverage.event_start, coverage.event_end, coverage.all_day)}
             </p>
-            <p style={{ margin: 0, fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <p style={{ margin: '0 0 6px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: 6 }}>
               <Clock size={14} /> {durationLabel(coverage.event_start, coverage.event_end, coverage.all_day)}
             </p>
-            {coverage.location && (
-              <p style={{ margin: '6px 0 0', fontSize: '0.85rem', color: '#777', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <MapPin size={14} /> {coverage.location}
-              </p>
-            )}
+            <p style={{ margin: 0, fontSize: '0.85rem', color: '#777', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <MapPin size={14} /> {coverage.event_title}
+            </p>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
