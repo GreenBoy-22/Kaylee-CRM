@@ -2570,6 +2570,7 @@ interface NotificationRow {
 function NotificationBell({ setPage, setDeepLinkOverride }: { setPage: (p: Page) => void; setDeepLinkOverride: (url: string | null) => void }) {
   const [items, setItems] = useState<NotificationRow[]>([]);
   const [open, setOpen] = useState(false);
+  const [textPreview, setTextPreview] = useState<NotificationRow | null>(null);
 
   useEffect(() => {
     load();
@@ -2602,6 +2603,14 @@ function NotificationBell({ setPage, setDeepLinkOverride }: { setPage: (p: Page)
   function handleClick(n: NotificationRow) {
     markRead(n.id);
     setOpen(false);
+    // Ready-to-text reminders (e.g. day-before dog-sitter pings) carry the
+    // full SMS body in `body` — pop that up with a direct "Open in
+    // Messages" hand-off instead of just navigating, since the whole point
+    // is to get the text sent, not to browse to a page.
+    if (n.type?.startsWith('dog_sitter_reminder') && n.body) {
+      setTextPreview(n);
+      return;
+    }
     if (n.link_url) {
       try {
         const url = new URL(n.link_url, window.location.origin);
@@ -2671,6 +2680,37 @@ function NotificationBell({ setPage, setDeepLinkOverride }: { setPage: (p: Page)
             ))}
           </div>
         </>
+      )}
+
+      {textPreview && (
+        <div onClick={() => setTextPreview(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '1.5rem' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: 'white', borderRadius: 12, maxWidth: 420, width: '100%', padding: '1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <h2 style={{ margin: '0 0 0.5rem', color: '#4B5320', fontSize: '1.1rem' }}>{textPreview.title}</h2>
+              <button onClick={() => setTextPreview(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><XIcon size={18} /></button>
+            </div>
+            <textarea
+              readOnly
+              value={textPreview.body ?? ''}
+              rows={5}
+              style={{ width: '100%', padding: '0.6rem', borderRadius: 8, border: '1px solid #ccc', boxSizing: 'border-box', fontSize: '0.85rem', fontFamily: 'inherit', margin: '10px 0' }}
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <a
+                href={`sms:?body=${encodeURIComponent(textPreview.body ?? '')}`}
+                style={{ flex: 1, textAlign: 'center', background: '#25D366', color: 'white', border: 'none', borderRadius: 8, padding: '0.65rem', fontSize: '0.85rem', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              >
+                <Send size={14} /> Open in Messages
+              </a>
+              <button
+                onClick={() => navigator.clipboard.writeText(textPreview.body ?? '')}
+                style={{ flex: 1, background: 'white', border: '1px solid #4B5320', color: '#4B5320', borderRadius: 8, padding: '0.65rem', fontSize: '0.85rem', cursor: 'pointer' }}
+              >
+                Copy text
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
