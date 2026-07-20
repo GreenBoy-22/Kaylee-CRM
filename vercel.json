@@ -1,7 +1,7 @@
 {
   "rewrites": [
     { "source": "/rate/(.*)", "destination": "/index.html" },
-    { "source": "/sit/(.*)", "destination": "/index.html" }
+    { "source": "/sit/(.*)", "destination": "/sit.html" }
   ],
   "headers": [
     {
@@ -12,6 +12,12 @@
     },
     {
       "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/sit.html",
       "headers": [
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
       ]
