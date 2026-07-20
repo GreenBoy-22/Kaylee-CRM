@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { PawPrint, Calendar, MapPin, Clock, Send, RefreshCw, Check, X } from 'lucide-react';
+import { PawPrint, Calendar, MapPin, Clock, Send, RefreshCw, Check, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
 const ARMY_GREEN = '#4B5320';
@@ -45,6 +45,100 @@ function durationLabel(startIso: string, endIso: string, allDay: boolean): strin
   if (hours < 1) return `${Math.round(ms / 60000)} min`;
   if (hours % 1 === 0) return `${hours} hr${hours !== 1 ? 's' : ''}`;
   return `${hours.toFixed(1)} hrs`;
+}
+
+function CoverageCalendar({ coverage }: { coverage: CoverageEvent[] }) {
+  const [monthOffset, setMonthOffset] = useState(0);
+
+  const relevant = useMemo(
+    () => coverage.filter((c) => c.status !== 'not_needed' && c.status !== 'maybe_needed'),
+    [coverage]
+  );
+
+  const viewMonth = useMemo(() => {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + monthOffset);
+    return d;
+  }, [monthOffset]);
+
+  // For each day in the visible month, figure out the "worst" status among
+  // any event touching that day: red (still needs a sitter or was told no)
+  // beats orange (asked, awaiting/maybe) beats green (fully covered).
+  const dayStatus = useMemo(() => {
+    const map = new Map<string, 'red' | 'orange' | 'green'>();
+    for (const c of relevant) {
+      const start = new Date(c.event_start);
+      const end = new Date(c.event_end);
+      const cursor = new Date(start);
+      cursor.setHours(0, 0, 0, 0);
+      const endDay = new Date(end);
+      endDay.setHours(0, 0, 0, 0);
+      while (cursor <= endDay) {
+        const key = cursor.toISOString().slice(0, 10);
+        const color: 'red' | 'orange' | 'green' =
+          c.status === 'needs_coverage' || c.status === 'declined' ? 'red'
+          : c.status === 'covered' ? 'green'
+          : 'orange';
+        const existing = map.get(key);
+        const rank = { red: 0, orange: 1, green: 2 };
+        if (!existing || rank[color] < rank[existing]) map.set(key, color);
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+    return map;
+  }, [relevant]);
+
+  const firstOfMonth = new Date(viewMonth);
+  const startWeekday = firstOfMonth.getDay();
+  const daysInMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 0).getDate();
+  const cells: (number | null)[] = [...Array(startWeekday).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+
+  const colorHex = { red: '#c0392b', orange: '#ffad46', green: '#6b9c5e' };
+
+  return (
+    <div style={{ border: '1px solid #eee', borderRadius: 10, padding: '1rem', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <button onClick={() => setMonthOffset((m) => m - 1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: ARMY_GREEN }}><ChevronLeft size={18} /></button>
+        <strong style={{ fontSize: '0.95rem', color: ARMY_GREEN }}>
+          {viewMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+        </strong>
+        <button onClick={() => setMonthOffset((m) => m + 1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: ARMY_GREEN }}><ChevronRight size={18} /></button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, fontSize: '0.7rem', color: '#999', textAlign: 'center', marginBottom: 4 }}>
+        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={i}>{d}</div>)}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+        {cells.map((day, i) => {
+          if (day === null) return <div key={i} />;
+          const key = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day).toISOString().slice(0, 10);
+          const status = dayStatus.get(key);
+          return (
+            <div
+              key={i}
+              title={status ? `${status === 'red' ? 'Needs coverage' : status === 'orange' ? 'Awaiting response' : 'Covered'}` : undefined}
+              style={{
+                aspectRatio: '1', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                borderRadius: 6, fontSize: '0.78rem',
+                background: status ? colorHex[status] : '#f7f7f7',
+                color: status ? 'white' : '#555',
+                fontWeight: status ? 700 : 400,
+              }}
+            >
+              {day}
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', gap: 14, marginTop: 10, fontSize: '0.75rem', color: '#666', flexWrap: 'wrap' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: colorHex.red, display: 'inline-block' }} /> Needs coverage</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: colorHex.orange, display: 'inline-block' }} /> Awaiting response</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: colorHex.green, display: 'inline-block' }} /> Covered</span>
+      </div>
+    </div>
+  );
 }
 
 export default function DogSitter() {
@@ -189,14 +283,14 @@ export default function DogSitter() {
     const url = `https://kaylee-crm.vercel.app/sit/${reqRow.id}`;
     const range = fmtRange(requestingFor.event_start, requestingFor.event_end, requestingFor.all_day);
     const duration = durationLabel(requestingFor.event_start, requestingFor.event_end, requestingFor.all_day);
-    const message = `Hi ${sitterName.trim()}! Would you be able to watch Jules on ${range} (${duration})? Tap here to let us know: ${url}`;
+    const message = `Hi ${sitterName.trim()}! Can you dog sit? \ud83d\udc3e Jules needs a sitter ${range} (${duration}). Tap here for the details and to let us know: ${url}`;
     setLinkResult({ url, message });
     setSending(false);
     setCoverage((cur) => cur.map((c) => (c.id === requestingFor.id ? { ...c, status: 'requested', sitter_name: sitterName.trim(), sitter_phone: sitterPhone.trim() || null } : c)));
   }
 
   const maybeNeeded = useMemo(() => coverage.filter((c) => c.status === 'maybe_needed'), [coverage]);
-  const needsCoverage = useMemo(() => coverage.filter((c) => c.status === 'needs_coverage' || c.status === 'requested' || c.status === 'declined'), [coverage]);
+  const needsCoverage = useMemo(() => coverage.filter((c) => c.status === 'needs_coverage' || c.status === 'requested' || c.status === 'declined' || c.status === 'tentative'), [coverage]);
   const covered = useMemo(() => coverage.filter((c) => c.status === 'covered'), [coverage]);
 
   return (
@@ -220,6 +314,8 @@ export default function DogSitter() {
       </div>
 
       {scanMessage && <p style={{ fontSize: '0.85rem', color: ARMY_GREEN, marginTop: 10 }}>{scanMessage}</p>}
+
+      {!loading && <CoverageCalendar coverage={coverage} />}
 
       {loading && <p style={{ marginTop: 20 }}>Loading...</p>}
 
@@ -281,6 +377,9 @@ export default function DogSitter() {
                   </p>
                   {event.status === 'requested' && (
                     <p style={{ margin: '6px 0 0', fontSize: '0.8rem', color: '#a66' }}>Waiting to hear back from {event.sitter_name}</p>
+                  )}
+                  {event.status === 'tentative' && (
+                    <p style={{ margin: '6px 0 0', fontSize: '0.8rem', color: '#a67c00' }}>{event.sitter_name} said "maybe" \u2014 worth following up</p>
                   )}
                   {event.status === 'declined' && (
                     <p style={{ margin: '6px 0 0', fontSize: '0.8rem', color: '#c0392b' }}>{event.sitter_name} said they can't \u2014 needs a new sitter</p>
