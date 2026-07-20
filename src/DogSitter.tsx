@@ -430,7 +430,7 @@ export default function DogSitter() {
               <button onClick={() => setRequestingFor(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
             </div>
             <p style={{ fontSize: '0.85rem', color: '#666', margin: '0 0 1rem' }}>
-              {requestingFor.event_title} \u2014 {fmtRange(requestingFor.event_start, requestingFor.event_end, requestingFor.all_day)}
+              {requestingFor.event_title} — {fmtRange(requestingFor.event_start, requestingFor.event_end, requestingFor.all_day)}
             </p>
 
             {!linkResult ? (
