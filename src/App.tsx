@@ -294,7 +294,6 @@ const homeNav: readonly NavEntry[] = [
 ];
 
 const workNav: readonly NavEntry[] = [
-  ['dashboard', 'Dashboard', LayoutDashboard],
   ['calendar', 'Calendar', CalendarDays],
   ['course_notes', 'Course Notes', BookOpen],
   ['essential_actions', 'Essential Actions', ClipboardCheck],
@@ -638,6 +637,10 @@ function App() {
       setPage('dashboard');
     }
   }, [profile, mode]);
+
+  useEffect(() => {
+    if (mode === 'work' && page === 'dashboard') setPage('students');
+  }, [mode, page]);
 
   // Auto-creates a 2-month / 4-month pacing check-in draft for every active
   // student who's crossed that mark in their current term, once per term —
@@ -2078,7 +2081,7 @@ Kaylee`;
         <div className="logo"><span className="logo-mark">KH</span><span>Kaylee's Hub</span></div>
         <div className="toggle-wrap">
           <button className={mode === 'home' ? 'active' : ''} onClick={() => { setMode('home'); setPage('dashboard'); }}><Home size={15} /> Home</button>
-          <button className={mode === 'work' ? 'active' : ''} disabled={activeRole !== 'admin'} onClick={() => { setMode('work'); setPage('dashboard'); }}><Users size={15} /> Work</button>
+          <button className={mode === 'work' ? 'active' : ''} disabled={activeRole !== 'admin'} onClick={() => { setMode('work'); setPage('students'); }}><Users size={15} /> Work</button>
         </div>
         <div className="top-actions">
           <button
@@ -2763,48 +2766,8 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, 
     .sort((a, b) => priorityScore(b, touchpoints) - priorityScore(a, touchpoints))
     .slice(0, 5);
 
-  if (mode === 'work' && role === 'admin') {
-    return <>
-      <Header title="Mentor Success Dashboard" sub="A quick daily glance — open Students or Work Performance for the full detail.">
-        <button className="btn primary" onClick={() => setPage('students')}><Users size={15} /> Open Students</button>
-      </Header>
-      <Stats items={[
-        ['High risk', String(highRiskStudents.length), 'needs strategy'],
-        ['Ghost risk', String(ghostRiskStudents.length), '3+ missed/no contact'],
-        ['Calls today', String(todaysCallsRanked.length), 'weekly appts + scheduled'],
-        ['Follow-ups due', String(followUpsDue.length), 'copy/draft needed']
-      ]} />
-      <section className="panel">
-        <div className="panel-head"><h2>Who to talk to today</h2><Phone size={17} /></div>
-        {todaysCallsRanked.length === 0 && (
-          <div className="brief-item">No weekly appointments or scheduled calls land today.</div>
-        )}
-        {todaysCallsRanked.map((student) => {
-          const timeText = student.is_weekly_appointment && student.weekly_appointment_day_of_week === todayDow && student.weekly_appointment_time
-            ? student.weekly_appointment_time
-            : student.next_call_at
-              ? new Date(student.next_call_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-              : 'Today';
-          const reasonText = student.is_weekly_appointment && student.weekly_appointment_day_of_week === todayDow
-            ? 'Weekly appointment'
-            : isSameDay(student.next_call_at, today)
-              ? 'Scheduled call today'
-              : student.next_appointment_date === today
-                ? 'Appointment today'
-                : 'Following up today';
-          return (
-            <button className="mentor-queue-row" key={student.id} onClick={() => setPage('students')}>
-              <span className="queue-rank">{timeText}</span>
-              <div>
-                <strong>{student.display_name}</strong>
-                <p>{reasonText}</p>
-              </div>
-            </button>
-          );
-        })}
-      </section>
-    </>;
-  }
+  // Work mode no longer has its own dashboard — the Work nav lands on
+  // Students directly (see the redirect effect above).
 
   // ── Home dashboard: command center grid ───────────────────────────────
   return <HomeDashboard
