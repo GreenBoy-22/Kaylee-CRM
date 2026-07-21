@@ -189,8 +189,6 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .stat-label, .stat-sub, .panel p, small { color: var(--muted); }
 .stat-val { font-size: 20px; font-weight: 700; margin-top: 2px; }
 .grid.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.dash-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
-.dash-grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
 .panel { margin-bottom: 10px; }
 .panel h2 { margin-top: 0; font-size: 14px; margin-bottom: 8px; }
 .panel-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
@@ -234,7 +232,7 @@ td small { display: block; margin-top: 2px; color: var(--muted); }
   .sidebar.collapsed { width: 100% !important; padding: 18px 0 !important; overflow: visible !important; border-bottom: 1px solid var(--border) !important; }
   .content { overflow: visible; }
   .sidebar-toggle { display: none; }
-  .stats-row, .grid.two, .day-grid, .form-grid, .permission-row, .dash-grid-2, .dash-grid-4 { grid-template-columns: 1fr; }
+  .stats-row, .grid.two, .day-grid, .form-grid, .permission-row { grid-template-columns: 1fr; }
   .page-header { flex-direction: column; }
   .topbar { flex-wrap: wrap; }
   .top-actions { width: 100%; justify-content: space-between; }
@@ -353,24 +351,26 @@ td small { display: block; margin-top: 2px; color: var(--muted); }
   border: 1px solid var(--border);
   background: #fff;
   border-radius: 14px;
-  padding: 12px;
-  margin-bottom: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
   display: grid;
   grid-template-columns: 34px 1fr auto auto;
   gap: 10px;
   align-items: center;
   text-align: left;
   cursor: pointer;
+  font-size: 12px;
 }
 
+.mentor-queue-row strong { font-size: 12.5px; }
 .mentor-queue-row:hover { border-color: var(--purple); background: var(--purple-bg); }
-.mentor-queue-row p, .mentor-queue-row small { margin: 3px 0 0; color: var(--muted); }
+.mentor-queue-row p, .mentor-queue-row small { margin: 3px 0 0; color: var(--muted); font-size: 11.5px; }
 
 .queue-rank {
-  width: 28px; height: 28px; border-radius: 999px;
+  width: 26px; height: 26px; border-radius: 999px;
   background: var(--purple); color: white;
   display: inline-flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 13px;
+  font-weight: 700; font-size: 11px;
 }
 
 .call-prep-card { border-left: 4px solid var(--purple); background: #f7f7fa; border-radius: 12px; padding: 12px; margin-bottom: 10px; }
