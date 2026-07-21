@@ -108,19 +108,21 @@ const STATUS_CONFIG: Record<Status, { label: string; color: string; bg: string; 
 };
 
 // A lot of these (dermatologist, dentist, OBGYN, etc.) need to be booked
-// months out, so it's not enough to know the current cycle is covered —
-// we also want to see something already on the books within 45 days
-// either side of the cycle's due date, so the next renewal doesn't sneak
-// up with no appointment booked.
+// months out, so we want to know: is *something* already on the calendar
+// for this? That used to mean "is there a scheduled visit within 45 days
+// of the due_date" — but due_date can legitimately sit a full year out
+// (e.g. an annual visit's *next* cycle), which meant an already-booked,
+// still-upcoming appointment for the CURRENT cycle got missed entirely
+// because it didn't fall inside that narrow window. Simpler and correct:
+// just find the soonest visit that's actually scheduled (not yet
+// happened), regardless of how it relates to due_date.
 const NEXT_APPT_WINDOW_DAYS = 45;
 
 function findNextAppointment(row: AppointmentRow): Visit | null {
-  const windowStart = addDays(row.due_date, -NEXT_APPT_WINDOW_DAYS);
-  const windowEnd = addDays(row.due_date, NEXT_APPT_WINDOW_DAYS);
-  const candidates = row.visits.filter(v => v.date >= windowStart && v.date <= windowEnd);
-  if (candidates.length === 0) return null;
-  // Prefer the one closest to (or latest before/after) the due date.
-  return candidates.sort((a, b) => b.date.localeCompare(a.date))[0];
+  const todayKey = toKey(new Date());
+  const upcoming = row.visits.filter(v => v.status === 'scheduled' && v.date >= todayKey);
+  if (upcoming.length === 0) return null;
+  return upcoming.sort((a, b) => a.date.localeCompare(b.date))[0];
 }
 
 // ── Main Component ───────────────────────────────────────────────────────

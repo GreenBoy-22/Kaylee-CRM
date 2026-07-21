@@ -331,6 +331,7 @@ export default function Books() {
   const [loading, setLoading]         = useState(true);
   const [search, setSearch]           = useState('');
   const [statusFilter, setStatusFilter] = useState<ReadStatus | 'all'>('all');
+  const [ownedOnly, setOwnedOnly]     = useState(false);
   const [genreFilter, setGenreFilter] = useState('all');
   const [sortKey, setSortKey]         = useState<SortKey>('title');
   const [sortAsc, setSortAsc]         = useState(true);
@@ -745,6 +746,7 @@ export default function Books() {
     const q = search.trim().toLowerCase();
     return books.filter(b => {
       if (statusFilter !== 'all' && b.status !== statusFilter) return false;
+      if (ownedOnly && !b.owned) return false;
       if (genreFilter !== 'all' && b.genre !== genreFilter) return false;
       if (!q) return true;
       return (
@@ -753,7 +755,7 @@ export default function Books() {
         (b.genre ?? '').toLowerCase().includes(q)
       );
     });
-  }, [books, search, statusFilter, genreFilter]);
+  }, [books, search, statusFilter, ownedOnly, genreFilter]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -783,7 +785,7 @@ export default function Books() {
 
   const currentlyReading = books.filter(b => b.status === 'reading');
 
-  useEffect(() => { setVisibleCount(60); }, [filtered.length, sortKey, sortAsc, statusFilter, genreFilter, search]);
+  useEffect(() => { setVisibleCount(60); }, [filtered.length, sortKey, sortAsc, statusFilter, ownedOnly, genreFilter, search]);
 
   const visibleBooks = useMemo(() => sorted.slice(0, visibleCount), [sorted, visibleCount]);
 
@@ -824,12 +826,38 @@ export default function Books() {
 
       {/* Stats row */}
       <div className="stats-row">
-        {([['Owned', stats.total], ['Read', stats.read], ['Reading', stats.reading], ['Unread', stats.unread], ['Wishlist', stats.wishlist], ['DNF', stats.dnf]] as [string, number][]).map(([label, val]) => (
-          <div className="stat-card" key={label}>
-            <div className="stat-label">{label}</div>
-            <div className="stat-val">{val}</div>
-          </div>
-        ))}
+        {([
+          ['Owned', stats.total, 'all', false],
+          ['Read', stats.read, 'read', false],
+          ['Reading', stats.reading, 'reading', false],
+          ['Unread', stats.unread, 'unread', true],
+          ['Wishlist', stats.wishlist, 'wishlist', false],
+          ['DNF', stats.dnf, 'dnf', false],
+        ] as [string, number, ReadStatus | 'all', boolean][]).map(([label, val, targetStatus, targetOwnedOnly]) => {
+          const isActive = label === 'Owned'
+            ? statusFilter === 'all' && ownedOnly
+            : statusFilter === targetStatus && ownedOnly === targetOwnedOnly;
+          return (
+            <button
+              key={label}
+              className="stat-card"
+              type="button"
+              onClick={() => {
+                if (isActive) { setStatusFilter('all'); setOwnedOnly(false); }
+                else { setStatusFilter(targetStatus); setOwnedOnly(targetOwnedOnly); }
+                document.getElementById('library-book-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+              style={{
+                cursor: 'pointer', textAlign: 'left',
+                border: isActive ? '2px solid var(--purple)' : '1px solid transparent',
+                background: isActive ? 'var(--purple-bg)' : undefined,
+              }}
+            >
+              <div className="stat-label">{label}</div>
+              <div className="stat-val">{val}</div>
+            </button>
+          );
+        })}
       </div>
 
       {/* Sync status + nudge banners */}
@@ -1025,7 +1053,7 @@ export default function Books() {
       )}
 
       {/* Filters + sort */}
-      <section className="panel" style={{ paddingBottom: 10 }}>
+      <section className="panel" id="library-book-list" style={{ paddingBottom: 10 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', boxSizing: 'border-box' }}>
           <div style={{ position: 'relative', flex: '1 1 180px', minWidth: 0, boxSizing: 'border-box' }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)' }} />

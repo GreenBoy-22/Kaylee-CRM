@@ -1369,14 +1369,15 @@ function LoanCard({ loan, history, calendarEvents, onUpdateBalance }: LoanCardPr
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)' }}>{fmtMoney(loan.current_balance)}</div>
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>as of {fmtDate(loan.balance_updated_at)}</div>
-            {showEstimate && (
-              <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>
-                ~{fmtMoney(estimate.estimatedBalance)} est. now
-                <span style={{ color: 'var(--muted)' }}> ({estimate.paymentsSinceUpdate} payment{estimate.paymentsSinceUpdate !== 1 ? 's' : ''} since)</span>
-              </div>
-            )}
+            <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)' }}>{fmtMoney(estimate.estimatedBalance)}</div>
+            <div style={{ fontSize: 11, color: showEstimate ? 'var(--green)' : 'var(--muted)' }}>
+              {showEstimate
+                ? `est. today · ${estimate.paymentsSinceUpdate} payment${estimate.paymentsSinceUpdate !== 1 ? 's' : ''} since last update`
+                : 'estimated balance today'}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+              Confirmed {fmtMoney(loan.current_balance)} as of {fmtDate(loan.balance_updated_at)}
+            </div>
           </div>
         </div>
       </div>
