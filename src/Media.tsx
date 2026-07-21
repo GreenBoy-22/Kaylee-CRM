@@ -226,17 +226,18 @@ function TypeBadge({ type }: { type: MediaType }) {
 
 // ── Main Component ─────────────────────────────────────────────────────────
 
-export default function Media() {
+export default function Media({ initialMediaId }: { initialMediaId?: string | null } = {}) {
   const [items, setItems]               = useState<MediaItem[]>([]);
   const [loading, setLoading]           = useState(true);
   const [search, setSearch]             = useState('');
   const [typeFilter, setTypeFilter]     = useState<MediaType | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<WatchStatus | 'all'>('all');
   const [streamFilter, setStreamFilter] = useState('all');
+  const [minRating, setMinRating]       = useState(0);
   const [sortKey, setSortKey]           = useState<SortKey>('title');
   const [sortAsc, setSortAsc]           = useState(true);
-  const [viewMode, setViewMode]         = useState<ViewMode>('grid');
-  const [expandedId, setExpandedId]     = useState<string | null>(null);
+  const [viewMode, setViewMode]         = useState<ViewMode>(initialMediaId ? 'list' : 'grid');
+  const [expandedId, setExpandedId]     = useState<string | null>(initialMediaId ?? null);
 
   // AI suggestion state
   const [suggestion, setSuggestion]         = useState<string | null>(null);
@@ -456,6 +457,7 @@ Keep it conversational and enthusiastic. Don't suggest anything already in their
     return items.filter(i => {
       if (typeFilter !== 'all' && i.media_type !== typeFilter) return false;
       if (statusFilter !== 'all' && i.status !== statusFilter) return false;
+      if (minRating > 0 && (i.rating ?? 0) < minRating) return false;
       if (streamFilter !== 'all') {
         const services = (i.streaming_services ?? '').split(',').map(s => s.trim());
         if (!services.includes(streamFilter)) return false;
@@ -469,7 +471,7 @@ Keep it conversational and enthusiastic. Don't suggest anything already in their
         (i.streaming_services ?? '').toLowerCase().includes(q)
       );
     });
-  }, [items, search, typeFilter, statusFilter, streamFilter]);
+  }, [items, search, typeFilter, statusFilter, streamFilter, minRating]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -745,6 +747,14 @@ Keep it conversational and enthusiastic. Don't suggest anything already in their
               {allStreaming.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           )}
+          <select value={minRating} onChange={e => setMinRating(Number(e.target.value))}>
+            <option value={0}>Any rating</option>
+            <option value={5}>★★★★★ only</option>
+            <option value={4}>★★★★+ and up</option>
+            <option value={3}>★★★+ and up</option>
+            <option value={2}>★★+ and up</option>
+            <option value={1}>★+ and up</option>
+          </select>
         </div>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
           <div style={{ display: 'flex', gap: 4, flex: 1, flexWrap: 'wrap' }}>
@@ -965,9 +975,167 @@ function MediaListRow({ item, expanded, onToggle, onUpdate, onDelete, onRefreshS
             onChange={e => onUpdate(item.id, { notes: e.target.value || null })}
             style={{ fontSize: 13, minHeight: 60, resize: 'vertical', width: '100%', boxSizing: 'border-box' }}
           />
+
+          <MediaFeedbackSection item={item} />
+
           <div style={{ marginTop: 8 }}>
             <button className="btn warning tiny" onClick={() => onDelete(item.id)}><X size={12} /> Remove</button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── MediaFeedbackSection — reviews + push/text "rate this" link, mirrors
+// the same feature on Recipe Book so it's consistent across the app ────────
+
+interface MediaFeedback {
+  id: string;
+  media_id: string;
+  reviewer_name: string;
+  rating: number | null;
+  comment: string | null;
+  watched_date: string;
+  created_at: string;
+}
+
+function MediaFeedbackSection({ item }: { item: MediaItem }) {
+  const [feedback, setFeedback] = useState<MediaFeedback[]>([]);
+  const [showTextComposer, setShowTextComposer] = useState(false);
+  const [textMessage, setTextMessage] = useState('');
+  const [pushSending, setPushSending] = useState(false);
+  const [pushResult, setPushResult] = useState('');
+
+  useEffect(() => {
+    load();
+    const emoji = item.media_type === 'movie' ? '🎬' : '📺';
+    setTextMessage(`Hey! We watched ${item.title} ${emoji} Would love to know what you thought — rate it here: https://kaylee-crm.vercel.app/watch/${item.id}`);
+    setShowTextComposer(false);
+    setPushResult('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id]);
+
+  async function load() {
+    if (!supabase) return;
+    const { data } = await supabase
+      .from('media_feedback')
+      .select('*')
+      .eq('media_id', item.id)
+      .order('created_at', { ascending: false });
+    setFeedback((data as MediaFeedback[]) || []);
+  }
+
+  async function sendPushRequest() {
+    if (!supabase) return;
+    setPushSending(true);
+    setPushResult('');
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const myId = sessionData?.session?.user?.id;
+      const { data: otherUsers } = await supabase.from('users').select('id, name').neq('id', myId || '');
+      if (!otherUsers || otherUsers.length === 0) {
+        setPushResult('No other Hub users to notify.');
+        setPushSending(false);
+        return;
+      }
+      const deepLink = `/?media=${item.id}`;
+      let totalSent = 0;
+      for (const u of otherUsers) {
+        const { data: result, error } = await supabase.functions.invoke('send-push-notifications', {
+          body: {
+            user_id: u.id,
+            title: `Rate ${item.title}!`,
+            body: 'Kaylee wants to know what you thought — tap to rate it.',
+            url: deepLink,
+          },
+        });
+        if (!error && result?.sent) totalSent += result.sent;
+      }
+      setPushResult(
+        totalSent > 0
+          ? `Notification sent to ${totalSent} device${totalSent > 1 ? 's' : ''}.`
+          : "Nobody has notifications turned on yet — they'll need to enable push notifications in the Hub first."
+      );
+    } catch {
+      setPushResult('Could not send — try again in a moment.');
+    }
+    setPushSending(false);
+  }
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border, rgba(0,0,0,0.07))' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+          Family Feedback {feedback.length > 0 && (() => {
+            const rated = feedback.filter((f) => f.rating);
+            if (!rated.length) return '';
+            const avg = rated.reduce((s, f) => s + (f.rating || 0), 0) / rated.length;
+            return `— avg ${avg.toFixed(1)}/5 (${rated.length})`;
+          })()}
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            onClick={sendPushRequest}
+            disabled={pushSending}
+            style={{ fontSize: 11, background: '#534AB7', color: 'white', border: 'none', borderRadius: 5, padding: '0.3rem 0.6rem', cursor: 'pointer' }}
+          >
+            {pushSending ? 'Sending...' : 'Send push notification'}
+          </button>
+          <button
+            onClick={() => setShowTextComposer((v) => !v)}
+            style={{ fontSize: 11, background: '#4B5320', color: 'white', border: 'none', borderRadius: 5, padding: '0.3rem 0.6rem', cursor: 'pointer' }}
+          >
+            Ask for feedback
+          </button>
+        </div>
+      </div>
+
+      {pushResult && (
+        <p style={{ fontSize: 11, color: pushResult.startsWith('Notification sent') ? '#4B5320' : '#c0392b', margin: '0 0 8px' }}>
+          {pushResult}
+        </p>
+      )}
+
+      {showTextComposer && (
+        <div style={{ background: 'var(--surface-1, #f4f5f0)', borderRadius: 8, padding: '0.6rem', marginBottom: 10 }}>
+          <textarea
+            value={textMessage}
+            onChange={(e) => setTextMessage(e.target.value)}
+            rows={3}
+            style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #ccc', fontSize: 12, fontFamily: 'inherit', boxSizing: 'border-box' }}
+          />
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            <a
+              href={`sms:?body=${encodeURIComponent(textMessage)}`}
+              style={{ fontSize: 11, background: '#25D366', color: 'white', border: 'none', borderRadius: 5, padding: '0.3rem 0.6rem', textDecoration: 'none' }}
+            >
+              Open in Messages
+            </a>
+            <button
+              onClick={() => navigator.clipboard.writeText(textMessage)}
+              style={{ fontSize: 11, background: 'white', border: '1px solid #ccc', borderRadius: 5, padding: '0.3rem 0.6rem', cursor: 'pointer' }}
+            >
+              Copy text
+            </button>
+          </div>
+        </div>
+      )}
+
+      {feedback.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {feedback.map((f) => (
+            <div key={f.id} style={{ fontSize: 12, padding: '5px 7px', background: 'var(--surface-1, #fafafa)', borderRadius: 6 }}>
+              <strong>{f.reviewer_name}</strong>
+              {f.rating ? (
+                <span style={{ marginLeft: 6 }}>
+                  {[1, 2, 3, 4, 5].map((n) => <Star key={n} size={10} fill={n <= f.rating! ? '#d4a017' : 'none'} color="#d4a017" style={{ verticalAlign: -1 }} />)}
+                </span>
+              ) : null}
+              <span style={{ color: 'var(--muted)', fontSize: 10, marginLeft: 6 }}>{new Date(f.watched_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</span>
+              {f.comment && <p style={{ margin: '2px 0 0', color: 'var(--muted)' }}>{f.comment}</p>}
+            </div>
+          ))}
         </div>
       )}
     </div>

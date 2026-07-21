@@ -612,6 +612,13 @@ function App() {
       return null;
     }
   });
+  const [deepLinkMediaId, setDeepLinkMediaId] = useState<string | null>(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('media');
+    } catch {
+      return null;
+    }
+  });
   const [inventory, setInventory] = useState<InventoryItem[]>(seedInventory);
   const [students, setStudents] = useState<Student[]>(seedStudents);
   const [touchpoints, setTouchpoints] = useState<Touchpoint[]>(seedTouchpoints);
@@ -2123,7 +2130,7 @@ Kaylee`;
             {darkMode ? <Sun size={15} /> : <Moon size={15} />}
           </button>
           <span className={`role-pill ${activeRole}`}>{activeName} · {activeRole === 'admin' ? 'Admin' : 'Limited'}</span>
-          <NotificationBell setPage={setPage} setDeepLinkOverride={setDeepLinkRecipeId} />
+          <NotificationBell setPage={setPage} setDeepLinkRecipeId={setDeepLinkRecipeId} setDeepLinkMediaId={setDeepLinkMediaId} />
           <button className="btn ghost" onClick={signOut}><LogOut size={15} /> Sign out</button>
         </div>
       </header>
@@ -2181,7 +2188,7 @@ Kaylee`;
           {page === 'dog_sitter' && <DogSitter />}
           {page === 'packages' && session && <PackageTracking userId={session.user.id} />}
           {page === 'games' && <Games />}
-          {page === 'media' && <Media />}
+          {page === 'media' && <Media key={deepLinkMediaId || 'default'} initialMediaId={deepLinkMediaId} />}
           {page === 'travel' && session && <Travel userId={session.user.id} />}
           {page === 'appointments' && <Appointments />}
           {page === 'weather' && <WeatherWidget />}
@@ -2663,7 +2670,7 @@ interface NotificationRow {
   created_at: string;
 }
 
-function NotificationBell({ setPage, setDeepLinkOverride }: { setPage: (p: Page) => void; setDeepLinkOverride: (url: string | null) => void }) {
+function NotificationBell({ setPage, setDeepLinkRecipeId, setDeepLinkMediaId }: { setPage: (p: Page) => void; setDeepLinkRecipeId: (id: string | null) => void; setDeepLinkMediaId: (id: string | null) => void }) {
   const [items, setItems] = useState<NotificationRow[]>([]);
   const [open, setOpen] = useState(false);
   const [textPreview, setTextPreview] = useState<NotificationRow | null>(null);
@@ -2712,8 +2719,10 @@ function NotificationBell({ setPage, setDeepLinkOverride }: { setPage: (p: Page)
         const url = new URL(n.link_url, window.location.origin);
         const targetPage = url.searchParams.get('page') as Page | null;
         const recipeId = url.searchParams.get('recipe');
+        const mediaId = url.searchParams.get('media');
         if (targetPage) setPage(targetPage);
-        if (recipeId) setDeepLinkOverride(recipeId);
+        if (recipeId) setDeepLinkRecipeId(recipeId);
+        if (mediaId) setDeepLinkMediaId(mediaId);
       } catch {}
     }
   }
