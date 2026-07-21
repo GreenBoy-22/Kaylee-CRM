@@ -278,7 +278,7 @@ type ActiveEa = {
   logRow?: EaLogRow; // present only for manually-logged EAs
 };
 
-export default function EssentialActions({ onEaChange }: { onEaChange?: () => void } = {}) {
+export default function EssentialActions({ onEaChange }: { onEaChange?: () => void }) {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [touchpoints, setTouchpoints] = useState<TouchpointRow[]>([]);
   const [eaLog, setEaLog] = useState<EaLogRow[]>([]);
