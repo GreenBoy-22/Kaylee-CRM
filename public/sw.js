@@ -6,7 +6,7 @@
 // Not required for normal updates — stale-while-revalidate below already
 // self-heals within one extra page load — but bumping it guarantees an
 // immediate full refresh instead of a one-visit lag.
-const CACHE_NAME = 'kaylees-hub-v3';
+const CACHE_NAME = 'kaylees-hub-v4';
 
 const PRECACHE_URLS = [
   '/',
@@ -83,6 +83,11 @@ self.addEventListener('notificationclick', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
+
+  // Only handle plain http(s) requests — browser extensions, devtools, and
+  // other non-standard schemes (chrome-extension://, etc.) aren't cacheable
+  // and just throw if you try, so let the browser handle those normally.
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
 
   // Always go network-first for Supabase API calls
   if (url.hostname.includes('supabase.co') || url.pathname.startsWith('/functions/')) {
