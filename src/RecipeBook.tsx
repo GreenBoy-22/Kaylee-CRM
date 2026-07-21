@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Search, Star, Heart, Clock, Users, ChefHat, X } from 'lucide-react';
+import { Search, Star, Heart, Clock, Users, ChefHat, X, Sparkles, ShoppingCart, Check } from 'lucide-react';
 import { supabase } from './lib/supabase';
+import { addGroceryItems } from './lib/groceryList';
 
 const ARMY_GREEN = '#4B5320';
 
@@ -44,13 +45,56 @@ function humanDuration(iso: string | null): string {
   return h > 0 ? `${h}h ${m > 0 ? `${m}m` : ''}`.trim() : `${m} min`;
 }
 
-export default function RecipeBook({ initialRecipeId }: { initialRecipeId?: string | null }) {
+// Loosely matches a free-text ingredient line ("2 cups all-purpose flour")
+// against an inventory item's name ("Flour") — inventory names are
+// usually short, so checking whether the ingredient line CONTAINS the
+// item name (both lowercased, item name trimmed) catches most real
+// matches without needing a full parser for quantities/units.
+function ingredientMatchesInventoryName(ingredientLine: string, invName: string): boolean {
+  const name = invName.trim().toLowerCase();
+  if (name.length < 3) return false; // too short to match reliably (e.g. "oz")
+  return ingredientLine.toLowerCase().includes(name);
+}
+
+interface IngredientMatch {
+  matched: string[];
+  missing: string[];
+}
+
+function matchRecipeAgainstInventory(recipe: Recipe, inStockNames: string[]): IngredientMatch {
+  const matched: string[] = [];
+  const missing: string[] = [];
+  for (const line of recipe.ingredients) {
+    const hasMatch = inStockNames.some((n) => ingredientMatchesInventoryName(line, n));
+    if (hasMatch) matched.push(line);
+    else missing.push(line);
+  }
+  return { matched, missing };
+}
+
+// Strips the leading quantity/unit off an ingredient line so it reads
+// better as a grocery list item — e.g. "2 cups all-purpose flour" becomes
+// "all-purpose flour". Falls back to the original line if nothing obvious
+// to strip.
+function groceryNameFromIngredientLine(line: string): string {
+  const cleaned = line
+    .replace(/^[\d\s./½¼¾⅓⅔-]+/, '') // leading numbers/fractions
+    .replace(/^(cups?|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|cans?|jars?|cloves?|packages?|pkg|pinch(es)?|large|small|medium)\b\.?\s*/i, '')
+    .trim();
+  return cleaned || line.trim();
+}
+
+export default function RecipeBook({ initialRecipeId, inventory = [] }: { initialRecipeId?: string | null; inventory?: { name: string; quantity: number }[] }) {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [courseFilter, setCourseFilter] = useState('');
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [minRating, setMinRating] = useState(0);
   const [selected, setSelected] = useState<Recipe | null>(null);
+  const [cookWhatIHaveOpen, setCookWhatIHaveOpen] = useState(false);
+  const [addingToGrocery, setAddingToGrocery] = useState(false);
+  const [groceryAddedMsg, setGroceryAddedMsg] = useState('');
   const [feedback, setFeedback] = useState<RecipeFeedback[]>([]);
   const [showTextComposer, setShowTextComposer] = useState(false);
   const [textMessage, setTextMessage] = useState('');
@@ -70,7 +114,7 @@ export default function RecipeBook({ initialRecipeId }: { initialRecipeId?: stri
       setTextMessage(`Hey! I made ${selected.title} tonight \u{1F37D}\uFE0F Would love to know what you thought — rate it here: https://kaylee-crm.vercel.app/rate/${selected.id}`);
       setShowTextComposer(false);
       setFbName(''); setFbRating(0); setFbComment('');
-    } else {
+      setGroceryAddedMsg('');
       setFeedback([]);
     }
   }, [selected?.id]);
@@ -162,6 +206,34 @@ export default function RecipeBook({ initialRecipeId }: { initialRecipeId?: stri
     await supabase.from('recipes').update({ rating, updated_at: new Date().toISOString() }).eq('id', recipe.id);
   }
 
+  const inStockNames = useMemo(
+    () => inventory.filter((i) => i.quantity > 0).map((i) => i.name),
+    [inventory]
+  );
+
+  async function addMissingToGroceryList(recipe: Recipe) {
+    const { missing } = matchRecipeAgainstInventory(recipe, inStockNames);
+    if (missing.length === 0) {
+      setGroceryAddedMsg("You've already got everything for this one!");
+      return;
+    }
+    setAddingToGrocery(true);
+    const result = await addGroceryItems(
+      missing.map((line) => ({
+        name: groceryNameFromIngredientLine(line),
+        note: line,
+        source: 'recipe',
+        source_label: recipe.title,
+      }))
+    );
+    setAddingToGrocery(false);
+    setGroceryAddedMsg(
+      result.added > 0
+        ? `Added ${result.added} item${result.added !== 1 ? 's' : ''} to the grocery list${result.skipped > 0 ? ` (${result.skipped} already on it)` : ''}.`
+        : "Everything's already on the grocery list."
+    );
+  }
+
   const courses = useMemo(() => {
     const set = new Set(recipes.map((r) => r.course).filter((c): c is string => !!c && c.trim() !== ''));
     return Array.from(set).sort();
@@ -172,12 +244,38 @@ export default function RecipeBook({ initialRecipeId }: { initialRecipeId?: stri
     return recipes.filter((r) => {
       if (favoritesOnly && !r.is_favorite) return false;
       if (courseFilter && r.course !== courseFilter) return false;
+      if (minRating > 0 && r.rating < minRating) return false;
       if (!q) return true;
       const inTitle = r.title.toLowerCase().includes(q);
       const inIngredients = r.ingredients.some((i) => i.toLowerCase().includes(q));
       return inTitle || inIngredients;
     });
-  }, [recipes, search, courseFilter, favoritesOnly]);
+  }, [recipes, search, courseFilter, favoritesOnly, minRating]);
+
+  // "Cook What I Have" — scans every recipe with at least one ingredient
+  // and finds whichever has the most ingredient lines matched against
+  // what's currently in stock. Ties broken by highest match ratio (so a
+  // 5-ingredient recipe that's fully covered beats a 20-ingredient recipe
+  // that happens to share the same raw count).
+  const cookWhatIHaveResult = useMemo(() => {
+    if (!cookWhatIHaveOpen || inStockNames.length === 0) return null;
+    let best: { recipe: Recipe; match: IngredientMatch } | null = null;
+    for (const r of recipes) {
+      if (r.ingredients.length === 0) continue;
+      const match = matchRecipeAgainstInventory(r, inStockNames);
+      if (match.matched.length === 0) continue;
+      if (!best) { best = { recipe: r, match }; continue; }
+      const bestRatio = best.match.matched.length / best.recipe.ingredients.length;
+      const thisRatio = match.matched.length / r.ingredients.length;
+      if (
+        match.matched.length > best.match.matched.length ||
+        (match.matched.length === best.match.matched.length && thisRatio > bestRatio)
+      ) {
+        best = { recipe: r, match };
+      }
+    }
+    return best;
+  }, [cookWhatIHaveOpen, recipes, inStockNames]);
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '1.5rem' }}>
@@ -204,6 +302,14 @@ export default function RecipeBook({ initialRecipeId }: { initialRecipeId?: stri
             {courses.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         )}
+        <select value={minRating} onChange={(e) => setMinRating(Number(e.target.value))} style={{ padding: '0.5rem', borderRadius: 8, border: '1px solid #ccc' }}>
+          <option value={0}>Any rating</option>
+          <option value={5}>★★★★★ only</option>
+          <option value={4}>★★★★+ and up</option>
+          <option value={3}>★★★+ and up</option>
+          <option value={2}>★★+ and up</option>
+          <option value={1}>★+ and up</option>
+        </select>
         <button
           onClick={() => setFavoritesOnly((f) => !f)}
           style={{
@@ -214,7 +320,72 @@ export default function RecipeBook({ initialRecipeId }: { initialRecipeId?: stri
         >
           <Heart size={14} fill={favoritesOnly ? '#c0392b' : 'none'} /> Favorites
         </button>
+        <button
+          onClick={() => setCookWhatIHaveOpen(true)}
+          disabled={inStockNames.length === 0}
+          title={inStockNames.length === 0 ? 'No inventory items in stock to match against' : undefined}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '0.5rem 0.8rem', borderRadius: 8,
+            border: `1px solid ${ARMY_GREEN}`, background: ARMY_GREEN, color: 'white', cursor: 'pointer',
+            opacity: inStockNames.length === 0 ? 0.5 : 1,
+          }}
+        >
+          <Sparkles size={14} /> Cook What I Have
+        </button>
       </div>
+
+      {cookWhatIHaveOpen && (
+        <div style={{ border: `2px solid ${ARMY_GREEN}`, borderRadius: 12, padding: '1rem 1.1rem', marginBottom: '1.25rem', background: '#f4f5f0' }}>
+          {!cookWhatIHaveResult ? (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <p style={{ margin: 0, fontSize: '0.9rem', color: '#666' }}>
+                No recipe matched anything currently in stock — try restocking a few staples first.
+              </p>
+              <button onClick={() => setCookWhatIHaveOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: ARMY_GREEN, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Sparkles size={14} /> Best match for what's on hand
+                  </div>
+                  <h3 style={{ margin: '4px 0 2px', fontSize: '1.1rem' }}>{cookWhatIHaveResult.recipe.title}</h3>
+                  <p style={{ margin: 0, fontSize: '0.85rem', color: '#555' }}>
+                    You have {cookWhatIHaveResult.match.matched.length} of {cookWhatIHaveResult.recipe.ingredients.length} ingredients already.
+                  </p>
+                </div>
+                <button onClick={() => setCookWhatIHaveOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+              </div>
+
+              {cookWhatIHaveResult.match.missing.length > 0 && (
+                <div style={{ fontSize: '0.82rem', color: '#666', marginBottom: 10 }}>
+                  Still need: {cookWhatIHaveResult.match.missing.map(groceryNameFromIngredientLine).join(', ')}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => { setSelected(cookWhatIHaveResult.recipe); }}
+                  style={{ background: ARMY_GREEN, color: 'white', border: 'none', borderRadius: 6, padding: '0.5rem 0.9rem', fontSize: '0.85rem', cursor: 'pointer' }}
+                >
+                  View recipe
+                </button>
+                {cookWhatIHaveResult.match.missing.length > 0 && (
+                  <button
+                    onClick={() => addMissingToGroceryList(cookWhatIHaveResult.recipe)}
+                    disabled={addingToGrocery}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'white', border: `1px solid ${ARMY_GREEN}`, color: ARMY_GREEN, borderRadius: 6, padding: '0.5rem 0.9rem', fontSize: '0.85rem', cursor: 'pointer' }}
+                  >
+                    <ShoppingCart size={14} /> Add missing to Grocery List
+                  </button>
+                )}
+              </div>
+              {groceryAddedMsg && <p style={{ fontSize: '0.8rem', color: ARMY_GREEN, margin: '8px 0 0' }}>{groceryAddedMsg}</p>}
+            </>
+          )}
+        </div>
+      )}
 
       {loading && <p>Loading...</p>}
       {!loading && filtered.length === 0 && <p style={{ color: '#999' }}>No recipes match.</p>}
@@ -283,10 +454,35 @@ export default function RecipeBook({ initialRecipeId }: { initialRecipeId?: stri
               </div>
             </div>
 
-            <h3 style={{ fontSize: '0.9rem', color: ARMY_GREEN, marginBottom: 6 }}>Ingredients</h3>
-            <ul style={{ margin: '0 0 1rem', paddingLeft: 18, fontSize: '0.88rem' }}>
-              {selected.ingredients.map((ing, i) => <li key={i} style={{ marginBottom: 3 }}>{ing}</li>)}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <h3 style={{ fontSize: '0.9rem', color: ARMY_GREEN, margin: 0 }}>Ingredients</h3>
+              {inStockNames.length > 0 && (
+                <button
+                  onClick={() => addMissingToGroceryList(selected)}
+                  disabled={addingToGrocery}
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'white', border: `1px solid ${ARMY_GREEN}`, color: ARMY_GREEN, borderRadius: 6, padding: '0.3rem 0.65rem', fontSize: '0.75rem', cursor: 'pointer' }}
+                >
+                  <ShoppingCart size={12} /> Add missing to Grocery List
+                </button>
+              )}
+            </div>
+            <ul style={{ margin: '0 0 4px', paddingLeft: 2, fontSize: '0.88rem', listStyle: 'none' }}>
+              {selected.ingredients.map((ing, i) => {
+                const have = inStockNames.length > 0 && inStockNames.some((n) => ingredientMatchesInventoryName(ing, n));
+                return (
+                  <li key={i} style={{ marginBottom: 4, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                    {inStockNames.length > 0 && (
+                      have
+                        ? <Check size={14} style={{ color: ARMY_GREEN, flexShrink: 0, marginTop: 2 }} />
+                        : <span style={{ width: 14, height: 14, borderRadius: '50%', border: '1.5px solid #ccc', flexShrink: 0, marginTop: 2 }} />
+                    )}
+                    <span style={{ color: have ? '#222' : inStockNames.length > 0 ? '#999' : '#222' }}>{ing}</span>
+                  </li>
+                );
+              })}
             </ul>
+            {groceryAddedMsg && <p style={{ fontSize: '0.78rem', color: ARMY_GREEN, margin: '0 0 1rem' }}>{groceryAddedMsg}</p>}
+            {!groceryAddedMsg && <div style={{ marginBottom: '1rem' }} />}
 
             <h3 style={{ fontSize: '0.9rem', color: ARMY_GREEN, marginBottom: 6 }}>Directions</h3>
             <ol style={{ margin: 0, paddingLeft: 18, fontSize: '0.88rem' }}>

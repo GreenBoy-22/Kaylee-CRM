@@ -5,7 +5,7 @@ import {
   Activity, Cloud, Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Gamepad2, Film, Plane, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Check, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope, TrendingUp, NotebookText, ChefHat, Bell, PawPrint, Ghost as GhostIcon
+  CheckCircle2, Check, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope, TrendingUp, NotebookText, ChefHat, Bell, PawPrint, Ghost as GhostIcon, ShoppingCart
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
@@ -26,6 +26,8 @@ import TeamNotes from './TeamNotes';
 import TermEnrollment from './TermEnrollment';
 import RecipeBook from './RecipeBook';
 import DogSitter from './DogSitter';
+import GroceryList from './GroceryList';
+import { addGroceryItems } from './lib/groceryList';
 import MoodTracker from './MoodTracker';
 import PlantCatalog from './PlantCatalog';
 import WeatherWidget from './WeatherWidget';
@@ -38,7 +40,7 @@ import Appointments from './Appointments';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'team_chat' | 'team_notes' | 'term_enrollment' | 'mood' | 'weather' | 'plants' | 'recipes' | 'dog_sitter' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'essential_actions' | 'settings';
+type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'team_chat' | 'team_notes' | 'term_enrollment' | 'mood' | 'weather' | 'plants' | 'recipes' | 'dog_sitter' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'essential_actions' | 'grocery' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -287,6 +289,7 @@ const homeNav: readonly NavEntry[] = [
   ['media', 'Movies & TV', Film],
   ['packages', 'Packages', Inbox],
   ['plants', 'Plant Catalog', Flower2],
+  ['grocery', 'Grocery List', ShoppingCart],
   ['recipes', 'Recipe Book', ChefHat],
   ['travel', 'Travel', Plane],
   ['vehicles', 'Vehicles', Car],
@@ -2175,7 +2178,8 @@ Kaylee`;
           {page === 'term_enrollment' && activeRole === 'admin' && <TermEnrollment />}
           {page === 'mood' && <MoodTracker />}
           {page === 'plants' && <PlantCatalog />}
-          {page === 'recipes' && <RecipeBook key={deepLinkRecipeId || 'default'} initialRecipeId={deepLinkRecipeId} />}
+          {page === 'recipes' && <RecipeBook key={deepLinkRecipeId || 'default'} initialRecipeId={deepLinkRecipeId} inventory={inventory} />}
+          {page === 'grocery' && <GroceryList />}
           {page === 'dog_sitter' && <DogSitter />}
           {page === 'packages' && session && <PackageTracking userId={session.user.id} />}
           {page === 'games' && <Games />}
@@ -4408,6 +4412,49 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   const filteredExpiring = useMemo(()=>items.filter(i=>i.expires&&i.is_perishable&&i.quantity>0).map(i=>({...i,_days:invDays(i.expires!)})).sort((a,b)=>(a._days??999)-(b._days??999)),[items]);
   const expiredCount=filteredExpiring.filter(i=>(i._days??0)<0).length;
 
+  // "By Friday" = through the upcoming Friday (or today, if today already
+  // is Friday) — matches a normal weekend grocery-run cadence rather than
+  // a fixed day count.
+  const groceryTripKey = useMemo(() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const daysUntilFriday = (5 - today.getDay() + 7) % 7;
+    const friday = new Date(today); friday.setDate(today.getDate() + daysUntilFriday);
+    return invKey(friday);
+  }, []);
+  const outOfStockItems = useMemo(() => items.filter(i => i.quantity <= 0 && needsStockTracking(i)), [items]);
+  const expiringByTripItems = useMemo(
+    () => items.filter(i => i.expires && i.is_perishable && i.quantity > 0 && i.expires <= groceryTripKey),
+    [items, groceryTripKey]
+  );
+  const [addingGrocery, setAddingGrocery] = useState(false);
+  const [groceryMsg, setGroceryMsg] = useState('');
+
+  async function addExpiringToGroceryList() {
+    const toAdd = [
+      ...expiringByTripItems.map(i => ({
+        name: i.name,
+        note: invDays(i.expires!) < 0 ? 'Expired' : invDays(i.expires!) === 0 ? 'Expires today' : `Expires ${invFmt(i.expires!)}`,
+        source: 'inventory' as const,
+        source_label: 'Expiring before this weekend\u2019s trip',
+      })),
+      ...outOfStockItems.map(i => ({
+        name: i.name,
+        note: 'Out of stock',
+        source: 'inventory' as const,
+        source_label: 'Out of stock',
+      })),
+    ];
+    if (toAdd.length === 0) { setGroceryMsg('Nothing expiring before the weekend or out of stock right now.'); return; }
+    setAddingGrocery(true);
+    const result = await addGroceryItems(toAdd);
+    setAddingGrocery(false);
+    setGroceryMsg(
+      result.added > 0
+        ? `Added ${result.added} item${result.added !== 1 ? 's' : ''} to the grocery list${result.skipped > 0 ? ` (${result.skipped} already on it)` : ''}.`
+        : 'Everything\u2019s already on the grocery list.'
+    );
+  }
+
   return <>
     <div className="page-header">
       <div><h1>Inventory</h1><p>{items.length} items · Canton, GA</p></div>
@@ -4516,6 +4563,23 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
 
     {tab==='expiring'&&<div>
       {expiredCount>0&&<div style={{background:'#fee2e2',border:'1px solid var(--red)',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:13,fontWeight:600,color:'var(--red)'}}>⚠️ {expiredCount} item(s) expired — check and discard.</div>}
+
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8,marginBottom:12}}>
+        <div style={{fontSize:12,color:'var(--muted)'}}>
+          {expiringByTripItems.length + outOfStockItems.length > 0
+            ? `${expiringByTripItems.length} expiring by this weekend\u2019s trip \u00b7 ${outOfStockItems.length} out of stock`
+            : 'Nothing expiring before the weekend, and nothing out of stock.'}
+        </div>
+        <button
+          onClick={addExpiringToGroceryList}
+          disabled={addingGrocery || (expiringByTripItems.length + outOfStockItems.length === 0)}
+          className="btn primary"
+          style={{opacity: (expiringByTripItems.length + outOfStockItems.length === 0) ? 0.5 : 1}}
+        >
+          🛒 {addingGrocery ? 'Adding...' : 'Add to Grocery List'}
+        </button>
+      </div>
+      {groceryMsg && <div style={{fontSize:12,color:'var(--green)',marginBottom:12}}>{groceryMsg}</div>}
 
       {/* Date-range toggle — defaults to the "before your next grocery trip" window */}
       <div style={{display:'flex',gap:6,marginBottom:14,flexWrap:'wrap'}}>
