@@ -277,7 +277,6 @@ const homeNav: readonly NavEntry[] = [
   ['calendar', 'Calendar', CalendarDays],
   ['chores', 'Chores & Tasks', ListTodo],
   ['contacts', 'Contacts', Users],
-  ['briefing', 'Daily Briefing', Sparkles],
   ['dog_sitter', 'Dog Sitter', PawPrint],
   ['games', 'Games', Gamepad2],
   ['inventory', 'Inventory', Inbox],
@@ -310,7 +309,6 @@ const workNav: readonly NavEntry[] = [
 
 const moduleMeta: { page: Page; module_name: string; label: string; default_access: AccessLevel }[] = [
   { page: 'dashboard', module_name: 'dashboard', label: 'Dashboard', default_access: 'edit' },
-  { page: 'briefing', module_name: 'daily_briefing', label: 'Daily Briefing', default_access: 'view' },
   { page: 'calendar', module_name: 'calendar', label: 'Calendar', default_access: 'edit' },
   { page: 'inventory', module_name: 'inventory', label: 'Inventory', default_access: 'edit' },
   { page: 'chores', module_name: 'chores', label: 'Chores & Tasks', default_access: 'edit' },
@@ -1584,6 +1582,19 @@ Kaylee`;
     if (error) setMessage(`EA update failed: ${error.message}`);
   }
 
+  // The Essential Actions page manages its own EA data independently
+  // (auto-detected pacing checkpoints, its own open/closed queries) rather
+  // than going through createEaLog/closeEaLog above. It calls this after
+  // any write of its own so the shared `eaLog` state — the one the
+  // Students page's "mark complete" reads from — stays in sync with
+  // whatever just changed on the Essential Actions page, and vice versa
+  // (Students already writes through closeEaLog/createEaLog directly).
+  async function refreshEaLog() {
+    if (!supabase) return;
+    const { data, error } = await supabase.from('work_ea_log').select('*').order('created_at', { ascending: false });
+    if (!error && data) setEaLog(data as EaLogEntry[]);
+  }
+
   function buildDraftForStudent(student: Student, kind: string, cohortLabel: string): { subject: string; body: string } {
     const name = student.display_name || 'there';
     const course = student.course || 'your current course';
@@ -2111,7 +2122,6 @@ Kaylee`;
         <main className="content">
           {!activeCanEdit && activeRole === 'limited' && page !== 'dashboard' && <ViewOnlyBanner />}
           {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} choreTasks={choreTasks} householdUsers={householdUsers} role={activeRole} setPage={setPage} />}
-          {page === 'briefing' && <Briefing role={activeRole} />}
           {page === 'calendar' && (mode === 'home' || activeRole === 'limited'
             ? <GoogleCalendar />
             : <WorkCalendar students={students} />
@@ -2125,7 +2135,7 @@ Kaylee`;
           {page === 'contacts' && <Contacts />}
           {page === 'books' && <Books />}
           {page === 'work_performance' && <WorkPerformance />}
-          {page === 'essential_actions' && <EssentialActions />}
+          {page === 'essential_actions' && <EssentialActions onEaChange={refreshEaLog} />}
           {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} appointments={appointments} eaLog={eaLog} createEaLog={createEaLog} closeEaLog={closeEaLog} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} updateTouchpoint={updateTouchpoint} deleteTouchpoint={deleteTouchpoint} createAppointment={createAppointment} updateAppointment={updateAppointment} deleteAppointment={deleteAppointment} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} setMessage={setMessage} />}
           {page === 'fto' && activeRole === 'admin' && <FTOTracker />}
           {page === 'course_notes' && activeRole === 'admin' && <CourseNotes />}
