@@ -3211,7 +3211,7 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
             : expiringSoon.map((item, i) => (
                 <div key={i} className="brief-item" style={{ borderLeft: '3px solid var(--amber)', display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ fontSize: 12 }}>{item.name}</span>
-                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>{item.expires}</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(item.expires + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</span>
                 </div>
               ))
           }
