@@ -278,7 +278,7 @@ type ActiveEa = {
   logRow?: EaLogRow; // present only for manually-logged EAs
 };
 
-export default function EssentialActions() {
+export default function EssentialActions({ onEaChange }: { onEaChange?: () => void } = {}) {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [touchpoints, setTouchpoints] = useState<TouchpointRow[]>([]);
   const [eaLog, setEaLog] = useState<EaLogRow[]>([]);
@@ -422,6 +422,7 @@ export default function EssentialActions() {
     setFormStudentId('');
     setStudentSearch('');
     await load();
+    onEaChange?.();
   }
 
   async function markManualHandled(row: EaLogRow, snippetUsed: string | null) {
@@ -429,6 +430,7 @@ export default function EssentialActions() {
     const { error } = await supabase.from('work_ea_log').update({ status: 'closed', closed_at: new Date().toISOString(), snippet_used: snippetUsed }).eq('id', row.id);
     if (error) { alert(`EA update failed: ${error.message}`); return; }
     await load();
+    onEaChange?.();
   }
 
   // Auto-detected EAs don't have a DB row of their own — marking one handled
@@ -453,6 +455,7 @@ export default function EssentialActions() {
     });
     if (error) { alert(`EA log failed: ${error.message}`); return; }
     await load();
+    onEaChange?.();
   }
 
   const filteredStudentsForForm = useMemo(() => {
