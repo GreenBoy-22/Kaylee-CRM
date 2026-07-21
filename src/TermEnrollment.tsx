@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Check, X, Mail, RefreshCw } from 'lucide-react';
+import { Check, X, Mail, RefreshCw, UserPlus, Search } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
 const ARMY_GREEN = '#4B5320';
@@ -41,6 +41,14 @@ interface EnrollmentEntry {
   notes: string | null;
 }
 
+interface RosterStudent {
+  id: string;
+  display_name: string;
+  contact_term: number | null;
+  on_term_break: boolean | null;
+  course: string | null;
+}
+
 function monthLabel(dateStr: string): string {
   const d = new Date(`${dateStr}T00:00:00`);
   return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -52,10 +60,25 @@ export default function TermEnrollment() {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [confirmGenerate, setConfirmGenerate] = useState(false);
+  const [roster, setRoster] = useState<RosterStudent[]>([]);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addSearch, setAddSearch] = useState('');
+  const [adding, setAdding] = useState<string | null>(null);
 
   useEffect(() => {
     load();
+    loadRoster();
   }, []);
+
+  async function loadRoster() {
+    if (!supabase) return;
+    const { data } = await supabase
+      .from('students')
+      .select('id, display_name, contact_term, on_term_break, course')
+      .eq('archived', false)
+      .order('display_name', { ascending: true });
+    setRoster((data as RosterStudent[]) || []);
+  }
 
   async function load() {
     if (!supabase) return;
@@ -145,6 +168,32 @@ export default function TermEnrollment() {
     await supabase.from('term_enrollment_entries').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', id);
   }
 
+  async function addStudentToList(student: RosterStudent) {
+    if (!supabase || !activeList) return;
+    setAdding(student.id);
+    // If this student is coming off a term break, clear the flag so they
+    // drop out of the Term Break filter on the Students page too.
+    if (student.on_term_break) {
+      await supabase.from('students').update({ on_term_break: false }).eq('id', student.id);
+    }
+    await supabase.from('term_enrollment_entries').insert({
+      list_id: activeList.id,
+      student_id: student.id,
+      student_name: student.display_name,
+      term_number: student.contact_term,
+    });
+    await load();
+    await loadRoster();
+    setAdding(null);
+    setAddSearch('');
+  }
+
+  const alreadyOnList = new Set(entries.map((e) => e.student_id).filter(Boolean));
+  const addFiltered = roster
+    .filter((s) => !alreadyOnList.has(s.id))
+    .filter((s) => s.display_name.toLowerCase().includes(addSearch.trim().toLowerCase()))
+    .slice(0, 8);
+
   const otpCount = entries.filter((e) => e.otp_met).length;
   const degreePlanCount = entries.filter((e) => e.row_status === 'degree_plan_made').length;
   const registeredCount = entries.filter((e) => e.row_status === 'registered').length;
@@ -194,6 +243,62 @@ export default function TermEnrollment() {
             <div style={{ background: NAVY, color: GOLD, padding: '0.75rem 1rem', fontWeight: 800, fontSize: '1.1rem', textTransform: 'uppercase' }}>
               Term Enrollment: {monthLabel(activeList.target_month)}
               <span style={{ float: 'right', fontSize: '0.85rem', fontWeight: 600 }}># {entries.length}</span>
+            </div>
+            <div style={{ padding: '0.6rem 1rem', background: '#f4f5f0', borderBottom: `2px solid ${GOLD}` }}>
+              {!showAddForm ? (
+                <button
+                  onClick={() => setShowAddForm(true)}
+                  style={{ background: 'white', border: `1px solid ${NAVY}`, color: NAVY, borderRadius: 8, padding: '0.4rem 0.8rem', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <UserPlus size={14} /> Add Student
+                </button>
+              ) : (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <Search size={14} color="#888" />
+                    <input
+                      autoFocus
+                      type="text"
+                      placeholder="Search your roster by name..."
+                      value={addSearch}
+                      onChange={(e) => setAddSearch(e.target.value)}
+                      style={{ flex: 1, fontSize: '0.8rem', padding: '5px 8px' }}
+                    />
+                    <button
+                      onClick={() => { setShowAddForm(false); setAddSearch(''); }}
+                      style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: '0.8rem' }}
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#888', marginBottom: 6 }}>
+                    New students who don't have a term-end date this month, or students whose term break just ended, won't show up automatically — search and add them here. Adding someone flagged "on break" also clears their term-break status.
+                  </div>
+                  {addFiltered.length === 0 && (
+                    <div style={{ fontSize: '0.78rem', color: '#999', padding: '4px 2px' }}>
+                      {addSearch.trim() ? 'No matching students (or already on this list).' : 'Start typing a name to search your roster.'}
+                    </div>
+                  )}
+                  {addFiltered.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => addStudentToList(s)}
+                      disabled={adding === s.id}
+                      style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'white', border: '1px solid #ddd', borderRadius: 6, padding: '6px 8px', marginBottom: 4, cursor: 'pointer', textAlign: 'left' }}
+                    >
+                      <span>
+                        <strong style={{ fontSize: '0.82rem' }}>{s.display_name}</strong>
+                        <span style={{ fontSize: '0.72rem', color: '#888', marginLeft: 6 }}>{s.course || 'No course'}</span>
+                      </span>
+                      {s.on_term_break && (
+                        <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#c0392b', background: STATUS_COLORS.term_break, borderRadius: 4, padding: '2px 6px' }}>
+                          ☕ Break ending
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
               <thead>
