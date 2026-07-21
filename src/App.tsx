@@ -4459,7 +4459,16 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   return <>
     <div className="page-header">
       <div><h1>Inventory</h1><p>{items.length} items · Canton, GA</p></div>
-      {editable&&<button className="btn primary" onClick={()=>{resetInvForm();setTab('add');}}><Plus size={14}/> Add Item</button>}
+      <div style={{display:'flex',gap:8}}>
+        <button
+          className="btn primary"
+          onClick={()=>setTab('grocery')}
+          style={{background: tab==='grocery' ? '#0e7490' : undefined, borderColor: '#0e7490'}}
+        >
+          🛒 Grocery List{groceryCount>0?` (${groceryCount})`:''}
+        </button>
+        {editable&&<button className="btn primary" onClick={()=>{resetInvForm();setTab('add');}}><Plus size={14}/> Add Item</button>}
+      </div>
     </div>
 
     <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:14}}>
@@ -4470,7 +4479,6 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
         {label:'Out of Stock', value:items.filter(i=>i.quantity<=0&&needsStockTracking(i)).length, color:'#0891b2', active: tab==='items'&&showOutOfStockOnly, onClick:()=>{setTab('items');setShowOutOfStockOnly(true);}},
         {label:'Scanner', value:queueRows.length, color:'#16a34a', active: tab==='scan', onClick:()=>setTab('scan')},
         {label:'History', value:txs.length, color:'#4B5320', active: tab==='history', onClick:()=>setTab('history')},
-        {label:'Grocery List', value:groceryCount, color:'#0e7490', active: tab==='grocery', onClick:()=>setTab('grocery')},
       ].map(s=>(
         <section key={s.label} className="panel" onClick={s.onClick} style={{textAlign:'center',padding:'10px 8px',cursor:'pointer',border:s.active?`2px solid ${s.color}`:'1px solid var(--border)'}}>
           <div style={{fontSize:11,color:'var(--muted)',marginBottom:4}}>{s.label}</div>

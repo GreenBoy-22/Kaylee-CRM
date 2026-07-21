@@ -122,6 +122,8 @@ export default function RecipeBook({ initialRecipeId, inventory = [] }: { initia
   const [minRating, setMinRating] = useState(0);
   const [selected, setSelected] = useState<Recipe | null>(null);
   const [cookWhatIHaveOpen, setCookWhatIHaveOpen] = useState(false);
+  const [cookCategory, setCookCategory] = useState('');
+  const [cookResultIndex, setCookResultIndex] = useState(0);
   const [addingToGrocery, setAddingToGrocery] = useState(false);
   const [groceryAddedMsg, setGroceryAddedMsg] = useState('');
   const [feedback, setFeedback] = useState<RecipeFeedback[]>([]);
@@ -282,29 +284,30 @@ export default function RecipeBook({ initialRecipeId, inventory = [] }: { initia
   }, [recipes, search, courseFilter, favoritesOnly, minRating]);
 
   // "Cook What I Have" — scans every recipe with at least one ingredient
-  // and finds whichever has the most ingredient lines matched against
-  // what's currently in stock. Ties broken by highest match ratio (so a
-  // 5-ingredient recipe that's fully covered beats a 20-ingredient recipe
-  // that happens to share the same raw count).
-  const cookWhatIHaveResult = useMemo(() => {
-    if (!cookWhatIHaveOpen || inStockNames.length === 0) return null;
-    let best: { recipe: Recipe; match: IngredientMatch } | null = null;
+  // and ranks them by how many ingredient lines match what's currently in
+  // stock (ties broken by match ratio, so a 5-ingredient recipe that's
+  // fully covered beats a 20-ingredient recipe with the same raw count).
+  // Keeps the full ranked list, not just the top one, so "skip" can step
+  // through runners-up instead of only ever showing a single suggestion.
+  const cookWhatIHaveCandidates = useMemo(() => {
+    if (!cookWhatIHaveOpen || inStockNames.length === 0) return [];
+    const scored: { recipe: Recipe; match: IngredientMatch; ratio: number }[] = [];
     for (const r of recipes) {
       if (r.ingredients.length === 0) continue;
+      if (cookCategory && r.course !== cookCategory) continue;
       const match = matchRecipeAgainstInventory(r, inStockNames);
       if (match.matched.length === 0) continue;
-      if (!best) { best = { recipe: r, match }; continue; }
-      const bestRatio = best.match.matched.length / best.recipe.ingredients.length;
-      const thisRatio = match.matched.length / r.ingredients.length;
-      if (
-        match.matched.length > best.match.matched.length ||
-        (match.matched.length === best.match.matched.length && thisRatio > bestRatio)
-      ) {
-        best = { recipe: r, match };
-      }
+      scored.push({ recipe: r, match, ratio: match.matched.length / r.ingredients.length });
     }
-    return best;
-  }, [cookWhatIHaveOpen, recipes, inStockNames]);
+    scored.sort((a, b) => b.match.matched.length - a.match.matched.length || b.ratio - a.ratio);
+    return scored;
+  }, [cookWhatIHaveOpen, recipes, inStockNames, cookCategory]);
+
+  useEffect(() => {
+    setCookResultIndex(0);
+  }, [cookCategory, cookWhatIHaveOpen]);
+
+  const cookWhatIHaveResult = cookWhatIHaveCandidates[cookResultIndex] ?? null;
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '1.5rem' }}>
@@ -365,48 +368,74 @@ export default function RecipeBook({ initialRecipeId, inventory = [] }: { initia
 
       {cookWhatIHaveOpen && (
         <div style={{ border: `2px solid ${ARMY_GREEN}`, borderRadius: 12, padding: '1rem 1.1rem', marginBottom: '1.25rem', background: '#f4f5f0' }}>
-          {!cookWhatIHaveResult ? (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <p style={{ margin: 0, fontSize: '0.9rem', color: '#666' }}>
-                No recipe matched anything currently in stock — try restocking a few staples first.
-              </p>
-              <button onClick={() => setCookWhatIHaveOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: ARMY_GREEN, textTransform: 'uppercase' }}>Looking for</span>
+              <select
+                value={cookCategory}
+                onChange={(e) => setCookCategory(e.target.value)}
+                style={{ padding: '0.4rem 0.6rem', borderRadius: 8, border: '1px solid #ccc', fontSize: '0.85rem' }}
+              >
+                <option value="">Any category</option>
+                {courses.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
             </div>
+            <button onClick={() => setCookWhatIHaveOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+          </div>
+
+          {cookWhatIHaveCandidates.length === 0 ? (
+            <p style={{ margin: 0, fontSize: '0.9rem', color: '#666' }}>
+              {cookCategory
+                ? `Nothing in "${cookCategory}" matched what's currently in stock.`
+                : "No recipe matched anything currently in stock — try restocking a few staples first."}
+            </p>
           ) : (
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                 <div>
                   <div style={{ fontSize: '0.75rem', fontWeight: 700, color: ARMY_GREEN, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Sparkles size={14} /> Best match for what's on hand
+                    {cookWhatIHaveCandidates.length > 1 && (
+                      <span style={{ fontWeight: 500, color: '#888', textTransform: 'none' }}>
+                        ({cookResultIndex + 1} of {cookWhatIHaveCandidates.length})
+                      </span>
+                    )}
                   </div>
-                  <h3 style={{ margin: '4px 0 2px', fontSize: '1.1rem' }}>{cookWhatIHaveResult.recipe.title}</h3>
+                  <h3 style={{ margin: '4px 0 2px', fontSize: '1.1rem' }}>{cookWhatIHaveResult!.recipe.title}</h3>
                   <p style={{ margin: 0, fontSize: '0.85rem', color: '#555' }}>
-                    You have {cookWhatIHaveResult.match.matched.length} of {cookWhatIHaveResult.recipe.ingredients.length} ingredients already.
+                    You have {cookWhatIHaveResult!.match.matched.length} of {cookWhatIHaveResult!.recipe.ingredients.length} ingredients already.
                   </p>
                 </div>
-                <button onClick={() => setCookWhatIHaveOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
               </div>
 
-              {cookWhatIHaveResult.match.missing.length > 0 && (
+              {cookWhatIHaveResult!.match.missing.length > 0 && (
                 <div style={{ fontSize: '0.82rem', color: '#666', marginBottom: 10 }}>
-                  Still need: {cookWhatIHaveResult.match.missing.map(groceryNameFromIngredientLine).join(', ')}
+                  Still need: {cookWhatIHaveResult!.match.missing.map(groceryNameFromIngredientLine).join(', ')}
                 </div>
               )}
 
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button
-                  onClick={() => { setSelected(cookWhatIHaveResult.recipe); }}
+                  onClick={() => { setSelected(cookWhatIHaveResult!.recipe); }}
                   style={{ background: ARMY_GREEN, color: 'white', border: 'none', borderRadius: 6, padding: '0.5rem 0.9rem', fontSize: '0.85rem', cursor: 'pointer' }}
                 >
                   View recipe
                 </button>
-                {cookWhatIHaveResult.match.missing.length > 0 && (
+                {cookWhatIHaveResult!.match.missing.length > 0 && (
                   <button
-                    onClick={() => addMissingToGroceryList(cookWhatIHaveResult.recipe)}
+                    onClick={() => addMissingToGroceryList(cookWhatIHaveResult!.recipe)}
                     disabled={addingToGrocery}
                     style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'white', border: `1px solid ${ARMY_GREEN}`, color: ARMY_GREEN, borderRadius: 6, padding: '0.5rem 0.9rem', fontSize: '0.85rem', cursor: 'pointer' }}
                   >
                     <ShoppingCart size={14} /> Add missing to Grocery List
+                  </button>
+                )}
+                {cookResultIndex + 1 < cookWhatIHaveCandidates.length && (
+                  <button
+                    onClick={() => { setCookResultIndex((i) => i + 1); setGroceryAddedMsg(''); }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'white', border: '1px solid #ccc', color: '#555', borderRadius: 6, padding: '0.5rem 0.9rem', fontSize: '0.85rem', cursor: 'pointer', marginLeft: 'auto' }}
+                  >
+                    Skip, show next →
                   </button>
                 )}
               </div>
