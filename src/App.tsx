@@ -2367,7 +2367,11 @@ function studentStatusSignals(student: Student, touchpoints: Touchpoint[]) {
   const lastTouchpoint = studentTouchpoints[0];
   const lastMeaningful = meaningfulTouchpoints[0];
   const missedCalls = consecutiveMissedCallStreak(studentTouchpoints);
-  const isGhost = missedCalls >= 3 || String(student.status).toLowerCase() === 'ghost';
+  // Purely computed from the actual history log — never trust the stored
+  // status string here, since that field only gets corrected the next
+  // time a touchpoint is logged and can otherwise sit stale (e.g. showing
+  // "Ghost" for a student who was already reached again).
+  const isGhost = missedCalls >= 3;
   const isSupport = String(student.status).toLowerCase().includes('support');
   const isPortalOnly = String(student.status).toLowerCase().includes('portal');
   const isHighRisk = String(student.risk).toLowerCase().includes('high') || isGhost || isPortalOnly;
@@ -5678,8 +5682,8 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
               const totalCount = termCalls.length;
               const pct = totalCount > 0 ? Math.round((missedCount / totalCount) * 100) : 0;
               return totalCount > 0
-                ? `${missedCount} missed / ${totalCount} calls (${pct}%)${(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}`
-                : `0 calls logged this term${(selected.missed_call_count || 0) >= 3 ? ' · Ghost flag' : ''}`;
+                ? `${missedCount} missed / ${totalCount} calls (${pct}%)${selectedIsGhost ? ' · Ghost flag' : ''}`
+                : `0 calls logged this term${selectedIsGhost ? ' · Ghost flag' : ''}`;
             })()}</p></div><div><strong>Momentum</strong><p>{selected.momentum || '—'}</p></div><div><strong>Term #</strong><p><input type="number" value={selected.contact_term ?? ''} onChange={(e) => updateStudent(selected.id, { contact_term: e.target.value ? Number(e.target.value) : null } as Partial<Student>)} style={{ width: 60, padding: '2px 6px' }} />{selected.graduated ? ' · 🎓 Graduated' : ''}</p></div><div><strong>Term start</strong><p>{fmtDateShort(selected.term_start_date, true)}</p></div><div><strong>Term end</strong><p>{fmtDateShort(selected.term_end_date, true)}</p></div><div><strong>CUs</strong><p>{selected.term_completed_cu ?? '—'} completed · {selected.term_remaining_cu ?? '—'} remaining</p></div></div></section>
             <section className="panel">
               <div className="panel-head">
