@@ -3093,31 +3093,13 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
         </div>
       </div>
 
-      {/* Row 1: today's calendar + today's chores — the two most time-critical things */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-        <div><GoogleCalendarToday /></div>
-
-        {/* My Chores Today */}
-        <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('chores')}>
-          <div className="panel-head">
-            <h2>✅ My Chores Today</h2>
-            {myChores.length > 0 && <span className="risk-pill high">{myChores.length}</span>}
-          </div>
-          {myChores.length === 0
-            ? <div style={{ fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>Nothing on your plate today ✓</div>
-            : myChores.map((c) => (
-                <div key={c.id} className="brief-item" style={{ borderLeft: `3px solid ${c.priority >= 3 ? 'var(--red)' : 'var(--amber)'}` }}>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
-                  {c.room && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{c.room}</div>}
-                </div>
-              ))
-          }
-          <div style={{ fontSize: 11, color: 'var(--purple)', marginTop: 6, textAlign: 'right' }}>Open Chores &amp; Tasks →</div>
-        </section>
+      {/* Row 1: today's calendar — the single most time-critical thing */}
+      <div style={{ marginBottom: 12 }}>
+        <GoogleCalendarToday />
       </div>
 
       {/* Row 2: needs action soon — money, upkeep, restocking */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, marginBottom: 12 }}>
+      <div className="dash-grid-4">
 
         {/* Budget */}
         <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('budget')}>
@@ -3207,7 +3189,7 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
       </div>
 
       {/* Row 3: care & relationships — important, but rarely urgent same-day */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginBottom: 12 }}>
+      <div className="dash-grid-2">
 
         {/* Jules */}
         <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('jules')}>
@@ -3245,7 +3227,7 @@ function HomeDashboard({ role, tasks, choreTasks, inventory, householdUsers, set
       </div>
 
       {/* Row 4: personal tracking & glanceable info — lowest urgency */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+      <div className="dash-grid-2" style={{ marginBottom: 0 }}>
 
         {/* Migraine */}
         <section className="panel" style={{ cursor: 'pointer' }} onClick={() => setPage('migraine')}>
