@@ -5,7 +5,7 @@ import {
   Activity, Cloud, Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Gamepad2, Film, Plane, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Check, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope, TrendingUp, NotebookText, ChefHat, Bell, PawPrint
+  CheckCircle2, Check, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope, TrendingUp, NotebookText, ChefHat, Bell, PawPrint, Ghost as GhostIcon
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
@@ -1496,10 +1496,21 @@ Kaylee`;
     const touchpoint: Touchpoint = { ...input, ...generated, copied: false, id: crypto.randomUUID() };
     setTouchpoints((current) => [touchpoint, ...current]);
 
-    const isMissed = Boolean(input.missed) ||
-      input.touchpoint_type.toLowerCase().includes('missed') || input.touchpoint_type.toLowerCase().includes('no-show');
-    const missed_call_count = isMissed ? Number(student?.missed_call_count || 0) + 1 : Number(student?.missed_call_count || 0);
-    const status = missed_call_count >= 3 ? 'Ghost' : student?.status || 'Active';
+    // Ghost status is about missed CALLS IN A ROW, right now — not a
+    // lifetime tally. Any real contact (this entry or a past one) resets
+    // the streak to zero; only consecutive missed-call entries build it
+    // back up. See consecutiveMissedCallStreak / isContactTouchpoint.
+    const newEntrySignal = { touchpoint_type: input.touchpoint_type, missed: Boolean(input.missed) };
+    const missed_call_count = isContactTouchpoint(newEntrySignal)
+      ? 0
+      : isMissedCallTouchpoint(newEntrySignal)
+        ? consecutiveMissedCallStreak(pastForStudent) + 1
+        : consecutiveMissedCallStreak(pastForStudent);
+    const wasGhost = String(student?.status).toLowerCase() === 'ghost';
+    // Once the streak breaks (drops under 3), automatically clear the
+    // Ghost status rather than leaving it stuck — the fourth call being
+    // picked up (or any other contact) means they're no longer a ghost.
+    const status = missed_call_count >= 3 ? 'Ghost' : (wasGhost ? 'Active' : (student?.status || 'Active'));
     await updateStudent(input.student_id, {
       course: input.course || student?.course || '',
       last_contact_date: input.touchpoint_date,
@@ -2298,13 +2309,65 @@ function Stats({ items }: { items: [string, string, string?, (() => void)?, bool
   ))}</div>;
 }
 
+// ── Ghost detection ────────────────────────────────────────────────────
+// A student is only a "ghost" if they have THREE MISSED CALLS IN A ROW,
+// right now — not three missed calls at any point in the term. Any real
+// contact resets the streak to zero immediately, including:
+//   - the student reaching out first (email, text, call, or voicemail
+//     FROM them), or
+//   - Kaylee calling and the student actually picking up.
+// Kaylee's own one-way outreach that gets no reply (an email or text SHE
+// sent, or a voicemail SHE left) doesn't count as contact — it's just an
+// attempt — but it also doesn't add to the missed-CALL streak, since only
+// actual call attempts (not emails/texts) build that streak.
+
+const GHOST_CONTACT_TYPES = new Set([
+  'Email from student',
+  'Text from student',
+  'Call from student',
+  'Voicemail from student',
+  'Email thread',
+  'Appointment',
+]);
+
+function isContactTouchpoint(t: { touchpoint_type: string; missed?: boolean }): boolean {
+  if (GHOST_CONTACT_TYPES.has(t.touchpoint_type)) return true;
+  // Kaylee called and the student actually answered — real contact.
+  if (t.touchpoint_type === 'Call to student' && !t.missed) return true;
+  return false;
+}
+
+function isMissedCallTouchpoint(t: { touchpoint_type: string; missed?: boolean }): boolean {
+  if (t.touchpoint_type === 'No-show / missed call') return true;
+  if (t.touchpoint_type === 'Call to student' && t.missed) return true;
+  return false;
+}
+
+/**
+ * Walks a student's touchpoints most-recent-first and counts how many
+ * missed CALLS have happened in a row since the last real contact. Any
+ * contact touchpoint stops the count immediately. Non-call touchpoints
+ * that aren't contact either (e.g. an unanswered outbound email) are
+ * skipped over — they neither add to nor reset the calls-in-a-row streak.
+ * Expects touchpoints already sorted newest-first (how they're loaded
+ * from Supabase and how new ones get prepended locally).
+ */
+function consecutiveMissedCallStreak(touchpointsNewestFirst: { touchpoint_type: string; missed?: boolean }[]): number {
+  let streak = 0;
+  for (const t of touchpointsNewestFirst) {
+    if (isContactTouchpoint(t)) break;
+    if (isMissedCallTouchpoint(t)) { streak++; continue; }
+  }
+  return streak;
+}
+
 function studentStatusSignals(student: Student, touchpoints: Touchpoint[]) {
   const studentTouchpoints = touchpoints.filter((touchpoint) => touchpoint.student_id === student.id);
   const meaningfulTouchpoints = studentTouchpoints.filter((touchpoint) => !touchpoint.touchpoint_type.toLowerCase().includes('missed') && !touchpoint.touchpoint_type.toLowerCase().includes('no-show'));
   const lastTouchpoint = studentTouchpoints[0];
   const lastMeaningful = meaningfulTouchpoints[0];
-  const missedCalls = Number(student.missed_call_count || 0);
-  const isGhost = String(student.status).toLowerCase().includes('ghost') || missedCalls >= 3;
+  const missedCalls = consecutiveMissedCallStreak(studentTouchpoints);
+  const isGhost = missedCalls >= 3 || String(student.status).toLowerCase() === 'ghost';
   const isSupport = String(student.status).toLowerCase().includes('support');
   const isPortalOnly = String(student.status).toLowerCase().includes('portal');
   const isHighRisk = String(student.risk).toLowerCase().includes('high') || isGhost || isPortalOnly;
@@ -3367,16 +3430,16 @@ function choreToRowProps(chore: ChoreTask, showReason: boolean) {
   let timeLabel: string | null = null;
   if (due) {
     const hasTime = chore.due_date && chore.due_date.includes('T');
-    if (overdue) timeLabel = `Overdue · ${due.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
+    if (overdue) timeLabel = `Overdue · ${due.toLocaleDateString([], { month: 'long', day: 'numeric' })}`;
     else if (dueToday && hasTime) timeLabel = due.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     else if (dueToday) timeLabel = 'Today';
-    else timeLabel = due.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    else timeLabel = due.toLocaleDateString([], { month: 'long', day: 'numeric' });
   }
 
   let reason: string | null = null;
   if (showReason) {
     const parts: string[] = [];
-    if (overdue && due) parts.push(`Wasn't done ${due.toLocaleDateString()}`);
+    if (overdue && due) parts.push(`Wasn't done ${due.toLocaleDateString([], { month: 'long', day: 'numeric' })}`);
     else if (dueToday) parts.push('Due today');
     else if (chore.day_of_week === dayOfWeekName(new Date())) parts.push(`Scheduled for ${chore.day_of_week}`);
     else if (chore.day_of_week === 'Daily') parts.push('Daily recurring');
@@ -3698,7 +3761,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   ];
 
   function invDays(iso:string){const e=new Date(iso+'T00:00:00'),n=new Date();n.setHours(0,0,0,0);return Math.round((e.getTime()-n.getTime())/(86400000));}
-  function invFmt(iso:string){return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}
+  function invFmt(iso:string){return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric'});}
   function invKey(d:Date){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
 
   const [items, setItems] = useState<InvItem[]>([]);
@@ -4641,7 +4704,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
         return<div key={tx.id}>
           <div style={{display:'flex',gap:10,alignItems:'flex-start',padding:'8px 0',borderBottom:isEditingThis?'none':'1px solid var(--border)'}}>
             <span style={{fontSize:16,fontWeight:800,color:isIn?'#16a34a':'#ef4444',flexShrink:0}}>{isIn?'↑':'↓'}</span>
-            <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600}}>{item?.name??'Unknown (no longer in inventory)'}</div><div style={{fontSize:12,color:'var(--muted)'}}>{tx.transaction_type.replace('_',' ')} · {isIn?'+':''}{tx.quantity_change} · {new Date(tx.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</div>{tx.notes&&<div style={{fontSize:11,color:'var(--muted)'}}>{tx.notes}</div>}</div>
+            <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600}}>{item?.name??'Unknown (no longer in inventory)'}</div><div style={{fontSize:12,color:'var(--muted)'}}>{tx.transaction_type.replace('_',' ')} · {isIn?'+':''}{tx.quantity_change} · {new Date(tx.created_at).toLocaleDateString('en-US',{month:'long',day:'numeric',hour:'numeric',minute:'2-digit'})}</div>{tx.notes&&<div style={{fontSize:11,color:'var(--muted)'}}>{tx.notes}</div>}</div>
             {tx.barcode&&<span style={{fontSize:10,color:'var(--muted)',flexShrink:0}}>{tx.barcode}</span>}
             {item && (
               <button className="qty-button" onClick={()=>{
@@ -4757,7 +4820,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
                           {displayName ?? <span style={{color:'#dc2626'}}>Unknown barcode</span>}
                           {matchedItem && <span style={{fontSize:10,fontWeight:700,color:'#0891b2',background:'#e0f2fe',padding:'1px 6px',borderRadius:999,marginLeft:6}}>IN INVENTORY</span>}
                         </div>
-                        <div style={{fontSize:11,color:'var(--muted)'}}>{row.barcode} · {new Date(row.scanned_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</div>
+                        <div style={{fontSize:11,color:'var(--muted)'}}>{row.barcode} · {new Date(row.scanned_at).toLocaleString('en-US',{month:'long',day:'numeric',hour:'numeric',minute:'2-digit'})}</div>
                       </div>
                       <div className="kh-scan-row-actions">
                         {(['in','out','undecided'] as const).map(a=>(
@@ -5110,7 +5173,7 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
   const filteredByStat = statFilter === 'high_risk'
     ? filteredByBreak.filter((s) => s.risk === 'High Risk' && !s.on_term_break)
     : statFilter === 'ghost'
-    ? filteredByBreak.filter((s) => s.status === 'Ghost' && !s.on_term_break)
+    ? filteredByBreak.filter((s) => studentStatusSignals(s, touchpoints).isGhost && !s.on_term_break)
     : filteredByBreak;
   const visibleStudents = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -5392,6 +5455,9 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
   }
 
   const activeWarnings = selected ? ferpaWarnings(`${selected.display_name} ${selected.goal} ${selected.admin_notes || ''}`) : [];
+  const selectedSignals = selected ? studentStatusSignals(selected, touchpoints) : null;
+  const selectedIsGhost = selectedSignals?.isGhost ?? false;
+  const selectedIsHighRisk = selected ? String(selected.risk).toLowerCase().includes('high') : false;
 
   return <>
     <Header title="Students" sub="FERPA-safe student history, touchpoints, next-call prep, and follow-up drafts.">
@@ -5404,21 +5470,37 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
       ["Active", String(activeStudents.length), undefined, () => { setShowArchived(false); setStatFilter(null); }, !showArchived && statFilter === null],
       ["Archived", String(archivedStudents.length), undefined, () => { setShowArchived(true); setStatFilter(null); }, showArchived],
       ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived && !s.on_term_break).length), undefined, () => { setShowArchived(false); setStatFilter('high_risk'); }, statFilter === 'high_risk'],
-      ["Ghost flags", String(students.filter((s) => s.status === 'Ghost' && !s.archived && !s.on_term_break).length), undefined, () => { setShowArchived(false); setStatFilter('ghost'); }, statFilter === 'ghost'],
+      ["Ghost flags", String(students.filter((s) => !s.archived && !s.on_term_break && studentStatusSignals(s, touchpoints).isGhost).length), undefined, () => { setShowArchived(false); setStatFilter('ghost'); }, statFilter === 'ghost'],
       ["Term Break", String(students.filter((s) => s.on_term_break && !s.archived).length), undefined, () => { setShowArchived(false); setStatFilter(null); setTermBreakOnly(!termBreakOnly); }, termBreakOnly]
     ]} />
     {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><CourseCombobox value={studentForm.course} onChange={(v) => setStudentForm({ ...studentForm, course: v })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email (for outreach drafts)" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
     <div className="students-crm-layout" style={listCollapsed ? { gridTemplateColumns: '1fr' } : undefined}>
       {!listCollapsed && <section className="panel student-scroll-list"><div className="panel-head"><h2>{showArchived ? 'Archived Students' : 'Student List'}</h2><span className="readonly-pill"><Users size={14} /> {visibleStudents.length}</span></div><div className="student-search-row"><Search size={15} /><input type="text" placeholder="Search by name or ID" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search students" /></div>{visibleStudents.length === 0 && <div className="brief-item">{search ? 'No students match that search.' : 'No students in this view yet.'}</div>}{visibleStudents.map((student) => <button key={student.id} className={`student-list-item ${selected?.id === student.id ? 'active' : ''}`} style={student.on_term_break ? { opacity: 0.6, background: 'var(--surface-3)' } : {}} onClick={() => { setSelectedId(student.id); setListCollapsed(true); }}><div><strong>{student.display_name}</strong><p>{student.course || 'No course'} · {student.status}{student.on_term_break ? ' · ☕ Break' : ''}</p></div><span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span><small>Last: {student.last_contact_date || '—'}</small></button>)}</section>}
-      {selected ? <section className="student-detail-pane" style={selected.on_term_break ? { filter: 'grayscale(0.6)', opacity: 0.75, background: 'var(--surface-1)' } : undefined}>
+      {selected ? <section className="student-detail-pane" style={{
+        ...(selected.on_term_break ? { filter: 'grayscale(0.6)', opacity: 0.75, background: 'var(--surface-1)' } : {}),
+        ...(selectedIsHighRisk ? { background: 'linear-gradient(180deg, rgba(192,57,43,0.08), rgba(192,57,43,0.02) 260px, transparent 460px)', borderLeft: '4px solid #c0392b' } : {}),
+      }}>
         {listCollapsed && <button className="btn ghost" style={{ marginBottom: 10 }} onClick={() => setListCollapsed(false)}>← Back to student list</button>}
         {/* TOP ZONE: header + health + quick facts + next call prep — always visible without scrolling */}
-        <section className="panel student-top-zone">
+        <section className="panel student-top-zone" style={{ position: 'relative', overflow: 'hidden' }}>
+          {selectedIsGhost && (
+            <GhostIcon
+              size={110}
+              strokeWidth={1.5}
+              aria-hidden="true"
+              style={{ position: 'absolute', top: 4, right: 8, opacity: 0.16, color: '#7c8ba1', pointerEvents: 'none' }}
+            />
+          )}
           {/* student-top-zone header */}
           <div className="panel-head">
             <div>
               <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {selected.display_name}
+                {selectedIsGhost && (
+                  <span style={{ fontSize: 11, fontWeight: 700, background: '#e4e7ee', color: '#5b6478', borderRadius: 999, padding: '2px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <GhostIcon size={12} /> Ghost — 3 missed calls in a row
+                  </span>
+                )}
                 {selected.on_term_break && (
                   <span style={{ fontSize: 11, fontWeight: 600, background: '#e0e0e8', color: '#666', borderRadius: 999, padding: '2px 10px' }}>
                     Term Break
@@ -6228,7 +6310,7 @@ function Chores({
   }
 
   const lastSyncLabel = syncState?.last_sync_at
-    ? new Date(syncState.last_sync_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    ? new Date(syncState.last_sync_at).toLocaleString([], { month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })
     : 'never';
 
   return <>
@@ -6404,11 +6486,11 @@ function addDays(d: Date, days: number): Date {
 
 function dateGroupLabel(d: Date, today: Date): string {
   const diffDays = Math.round((startOfDay(d).getTime() - today.getTime()) / 86400000);
-  if (diffDays < 0) return diffDays === -1 ? 'Yesterday' : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} · Overdue`;
+  if (diffDays < 0) return diffDays === -1 ? 'Yesterday' : `${d.toLocaleDateString([], { month: 'long', day: 'numeric' })} · Overdue`;
   if (diffDays === 0) return 'Today';
   if (diffDays === 1) return 'Tomorrow';
   if (diffDays < 7) return d.toLocaleDateString([], { weekday: 'long' });
-  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  return d.toLocaleDateString([], { weekday: 'short', month: 'long', day: 'numeric' });
 }
 
 const WEEKDAY_INDEX: Record<string, number> = {
