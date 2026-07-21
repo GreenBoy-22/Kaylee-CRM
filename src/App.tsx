@@ -306,17 +306,34 @@ const workNav: readonly NavEntry[] = [
   ['work_performance', 'Work Performance', TrendingUp],
 ];
 
+// Access defaults Kaylee has already decided on. Anything in homeNav that
+// ISN'T listed here defaults to 'hidden' — safe-by-default, so a brand new
+// Home section never silently becomes visible to Adam before she's had a
+// chance to decide. Since moduleMeta is built FROM homeNav below, adding a
+// new page to homeNav is all that's needed for it to show up in Settings —
+// nothing else to remember to wire up.
+const homeAccessDefaults: Partial<Record<Page, AccessLevel>> = {
+  dashboard: 'edit',
+  calendar: 'edit',
+  inventory: 'edit',
+  chores: 'edit',
+  vehicles: 'view',
+  jules: 'edit',
+  migraine: 'edit',
+  budget: 'view',
+  contacts: 'view',
+  books: 'view',
+};
+
 const moduleMeta: { page: Page; module_name: string; label: string; default_access: AccessLevel }[] = [
-  { page: 'dashboard', module_name: 'dashboard', label: 'Dashboard', default_access: 'edit' },
-  { page: 'calendar', module_name: 'calendar', label: 'Calendar', default_access: 'edit' },
-  { page: 'inventory', module_name: 'inventory', label: 'Inventory', default_access: 'edit' },
-  { page: 'chores', module_name: 'chores', label: 'Chores & Tasks', default_access: 'edit' },
-  { page: 'vehicles', module_name: 'vehicles', label: 'Vehicles', default_access: 'view' },
-  { page: 'jules', module_name: 'jules', label: 'Jules', default_access: 'edit' },
-  { page: 'migraine', module_name: 'migraine', label: 'Migraine Tracker', default_access: 'edit' },
-  { page: 'budget', module_name: 'budget', label: 'Budget', default_access: 'view' },
-  { page: 'contacts', module_name: 'contacts', label: 'Contacts', default_access: 'view' },
-  { page: 'books', module_name: 'books', label: 'Library', default_access: 'view' },
+  ...homeNav.map(([page, label]) => ({
+    page,
+    module_name: page as string,
+    label,
+    default_access: homeAccessDefaults[page] ?? ('hidden' as AccessLevel),
+  })),
+  // Work-mode modules. These are never offered to Adam (Settings filters
+  // them out — see SettingsPage), but are tracked here for consistency.
   { page: 'students', module_name: 'students', label: 'Students', default_access: 'hidden' },
   { page: 'outreach', module_name: 'outreach', label: 'Outreach Drafts', default_access: 'hidden' },
   { page: 'team_chat', module_name: 'team_chat', label: 'Team Chat Assistant', default_access: 'hidden' },
@@ -5944,7 +5961,7 @@ function SettingsPage({ permissions, updatePermission }: { permissions: ModulePe
     </section>
   );
 
-  return <><Header title="Settings" sub="Control Adam's Home-side access as the app grows." /><section className="panel"><h2>Google Connection</h2><p className="settings-intro">Reconnect Google to pick up new permissions (like Contacts). You'll see Google's consent screen and be returned here automatically.</p><button className="btn primary" onClick={reconnectGoogle}>Reconnect Google Account</button></section>{pushSection}<section className="panel"><h2>Adam section access</h2><p className="settings-intro">Adam never sees Work mode or Students. For Home sections, choose Hidden, View Only, or Edit. This avoids confusing combinations like edit without view.</p><div className="permission-list">{moduleMeta.filter((item) => item.page !== 'students').map((item) => {
+  return <><Header title="Settings" sub="Control Adam's Home-side access as the app grows." /><section className="panel"><h2>Google Connection</h2><p className="settings-intro">Reconnect Google to pick up new permissions (like Contacts). You'll see Google's consent screen and be returned here automatically.</p><button className="btn primary" onClick={reconnectGoogle}>Reconnect Google Account</button></section>{pushSection}<section className="panel"><h2>Adam section access</h2><p className="settings-intro">Adam never sees Work mode or Students. For Home sections, choose Hidden, View Only, or Edit. This avoids confusing combinations like edit without view.</p><div className="permission-list">{moduleMeta.filter((item) => homeNav.some(([navPage]) => navPage === item.page)).map((item) => {
     const current = accessFor(item.module_name);
     return <div className="permission-row" key={item.module_name}><div><strong>{item.label}</strong><p>{current === 'hidden' ? 'Hidden from Adam' : current === 'view' ? 'Visible · View-only' : 'Visible · Editable'}</p></div><label className="switch-row"><Eye size={15} /> Adam Access <select value={current} onChange={(e) => updatePermission(item.module_name, e.target.value as AccessLevel)}><option value="hidden">Hidden</option><option value="view">View Only</option><option value="edit">Edit</option></select></label></div>;
   })}</div></section><section className="panel"><h2>Access rules</h2><div className="brief-item"><strong>Kaylee:</strong> admin, full Home + Work access.</div><div className="brief-item"><strong>Adam:</strong> Home only. Hidden means no sidebar item. View Only means no add/save/edit buttons. Edit means full access.</div><div className="brief-item"><strong>Students:</strong> always admin-only and FERPA-safe.</div></section></>;

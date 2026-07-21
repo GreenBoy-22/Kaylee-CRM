@@ -164,7 +164,7 @@ interface UseGoogleCalendarDataOptions {
 const AUTO_REFRESH_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 export function useGoogleCalendarData(options: UseGoogleCalendarDataOptions = {}) {
-  const { daysForward = 60, daysBack = 14 } = options;
+  const { daysForward = 180, daysBack = 35 } = options;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<CalendarFetchResult | null>(null);

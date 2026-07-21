@@ -91,7 +91,7 @@ const BUSY_BORDER: Record<string, string> = {
 
 export default function GoogleCalendar() {
   const { loading, refreshing, data, daySummaries, syncedAt, refresh, connect, dateKeyOf } =
-    useGoogleCalendarData({ daysForward: 60, daysBack: 35 });
+    useGoogleCalendarData({ daysForward: 180, daysBack: 35 });
 
   const [view, setView] = useState<ViewMode>('month');
   const [anchor, setAnchor] = useState<Date>(new Date());

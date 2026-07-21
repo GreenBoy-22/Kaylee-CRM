@@ -154,6 +154,12 @@ export default function DogSitter() {
 
   useEffect(() => {
     loadCoverage();
+    // Background sync already scans for new coverage candidates every time
+    // the calendar refreshes (every ~6 hours), but also run it here so
+    // opening the page always reflects the latest, without waiting on
+    // that cycle or a manual click.
+    scanCalendar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadCoverage() {
