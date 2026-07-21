@@ -2785,14 +2785,20 @@ function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, 
             : student.next_call_at
               ? new Date(student.next_call_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
               : 'Today';
+          const reasonText = student.is_weekly_appointment && student.weekly_appointment_day_of_week === todayDow
+            ? 'Weekly appointment'
+            : isSameDay(student.next_call_at, today)
+              ? 'Scheduled call today'
+              : student.next_appointment_date === today
+                ? 'Appointment today'
+                : 'Following up today';
           return (
             <button className="mentor-queue-row" key={student.id} onClick={() => setPage('students')}>
               <span className="queue-rank">{timeText}</span>
               <div>
                 <strong>{student.display_name}</strong>
-                <p>{student.course || 'No course'}</p>
+                <p>{reasonText}</p>
               </div>
-              <span className={`risk-pill ${String(student.risk).toLowerCase().replace(' ', '-')}`}>{student.risk}</span>
             </button>
           );
         })}
