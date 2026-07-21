@@ -1,7 +1,8 @@
 {
   "rewrites": [
-    { "source": "/rate/(.*)", "destination": "/index.html" },
-    { "source": "/sit/(.*)", "destination": "/sit.html" }
+    { "source": "/rate/(.*)", "destination": "/rate.html" },
+    { "source": "/sit/(.*)", "destination": "/sit.html" },
+    { "source": "/watch/(.*)", "destination": "/watch.html" }
   ],
   "headers": [
     {
@@ -18,6 +19,18 @@
     },
     {
       "source": "/sit.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/rate.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/watch.html",
       "headers": [
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
       ]
