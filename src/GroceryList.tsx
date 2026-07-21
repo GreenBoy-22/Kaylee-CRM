@@ -20,7 +20,7 @@ const SOURCE_LABEL: Record<GroceryItem['source'], string> = {
   recipe: 'From a recipe',
 };
 
-export default function GroceryList() {
+export default function GroceryList({ onCountChange, embedded }: { onCountChange?: (uncheckedCount: number) => void; embedded?: boolean } = {}) {
   const [items, setItems] = useState<GroceryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [newItem, setNewItem] = useState('');
@@ -29,6 +29,11 @@ export default function GroceryList() {
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    onCountChange?.(items.filter((i) => !i.is_checked).length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
 
   async function load() {
     if (!supabase) return;
@@ -91,7 +96,7 @@ export default function GroceryList() {
   }, [items]);
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto', padding: '1.5rem' }}>
+    <div style={{ maxWidth: embedded ? '100%' : 700, margin: embedded ? 0 : '0 auto', padding: embedded ? 0 : '1.5rem' }}>
       <style>{`
         @media print {
           .no-print { display: none !important; }
@@ -103,9 +108,11 @@ export default function GroceryList() {
 
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', flexWrap: 'wrap', gap: 10 }}>
         <div>
-          <h1 style={{ color: ARMY_GREEN, fontSize: '1.5rem', margin: '0 0 0.25rem', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <ShoppingCart size={22} /> Grocery List
-          </h1>
+          {!embedded && (
+            <h1 style={{ color: ARMY_GREEN, fontSize: '1.5rem', margin: '0 0 0.25rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ShoppingCart size={22} /> Grocery List
+            </h1>
+          )}
           <p style={{ color: '#666', fontSize: '0.9rem', margin: 0 }}>
             {grouped.unchecked.length} to get{grouped.checked.length > 0 ? ` · ${grouped.checked.length} checked off` : ''}
           </p>

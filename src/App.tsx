@@ -5,7 +5,7 @@ import {
   Activity, Cloud, Home, Users, LayoutDashboard, ClipboardCheck, Sparkles, CalendarDays, WalletCards,
   Inbox, ListTodo, ShieldCheck, Car, Gamepad2, Film, Plane, Plus, Copy, RefreshCw, Settings, LogOut,
   Lock, Eye, EyeOff, Save, Minus, Archive, Mail, Phone, MessageSquare, FileText, AlertTriangle, Edit3, Upload, Search, Send, Trash2,
-  CheckCircle2, Check, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope, TrendingUp, NotebookText, ChefHat, Bell, PawPrint, Ghost as GhostIcon, ShoppingCart
+  CheckCircle2, Check, Circle, Clock, Zap, Wrench, Flower2, Bone, Snowflake, Sun, Moon, ChevronRight, ChevronDown, ExternalLink, Repeat, Hash, Heart, Brain, BookOpen, Menu, X as XIcon, MoreHorizontal, Clock as ClockIcon, Stethoscope, TrendingUp, NotebookText, ChefHat, Bell, PawPrint, Ghost as GhostIcon
 } from 'lucide-react';
 import { supabase, hasSupabase } from './lib/supabase';
 import GoogleCalendar from './GoogleCalendar';
@@ -40,7 +40,7 @@ import Appointments from './Appointments';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'team_chat' | 'team_notes' | 'term_enrollment' | 'mood' | 'weather' | 'plants' | 'recipes' | 'dog_sitter' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'essential_actions' | 'grocery' | 'settings';
+type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'team_chat' | 'team_notes' | 'term_enrollment' | 'mood' | 'weather' | 'plants' | 'recipes' | 'dog_sitter' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'essential_actions' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -289,7 +289,6 @@ const homeNav: readonly NavEntry[] = [
   ['media', 'Movies & TV', Film],
   ['packages', 'Packages', Inbox],
   ['plants', 'Plant Catalog', Flower2],
-  ['grocery', 'Grocery List', ShoppingCart],
   ['recipes', 'Recipe Book', ChefHat],
   ['travel', 'Travel', Plane],
   ['vehicles', 'Vehicles', Car],
@@ -2179,7 +2178,6 @@ Kaylee`;
           {page === 'mood' && <MoodTracker />}
           {page === 'plants' && <PlantCatalog />}
           {page === 'recipes' && <RecipeBook key={deepLinkRecipeId || 'default'} initialRecipeId={deepLinkRecipeId} inventory={inventory} />}
-          {page === 'grocery' && <GroceryList />}
           {page === 'dog_sitter' && <DogSitter />}
           {page === 'packages' && session && <PackageTracking userId={session.user.id} />}
           {page === 'games' && <Games />}
@@ -3775,7 +3773,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   const [items, setItems] = useState<InvItem[]>([]);
   const [txs, setTxs] = useState<InvTx[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'items'|'expiring'|'scan'|'add'|'history'>('items');
+  const [tab, setTab] = useState<'items'|'expiring'|'scan'|'add'|'history'|'grocery'>('items');
   const [searchQ, setSearchQ] = useState('');
   const [filterCat, setFilterCat] = useState('all');
   const [filterLoc, setFilterLoc] = useState('all');
@@ -3799,6 +3797,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   const [newLinkMultiplier, setNewLinkMultiplier] = useState(1);
   const [scanMode,setScanMode]=useState<'in'|'out'>('in');const [scanInput,setScanInput]=useState('');const [scanLog,setScanLog]=useState<{barcode:string;name:string;qty:number;action:string;time:string}[]>([]);const [scanStatus,setScanStatus]=useState('');
   const [aiRecipes,setAiRecipes]=useState('');const [aiLoading,setAiLoading]=useState(false);
+  const [groceryCount, setGroceryCount] = useState(0);
 
   // Scanner Review Queue — every barcode scan lands here first; nothing
   // touches inventory until it's reviewed and applied from the Inbox.
@@ -3830,17 +3829,19 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   const loadInv = useCallback(async()=>{
     if(!supabase)return;setLoading(true);
     const{data:sd}=await supabase.auth.getSession();const uid=sd.session?.user?.id;if(!uid){setLoading(false);return;}
-    const[ir,tr,ovr,sq]=await Promise.all([
+    const[ir,tr,ovr,sq,gc]=await Promise.all([
       supabase.from('inventory_items').select('*').eq('user_id',uid).order('name'),
       supabase.from('inventory_transactions').select('*').eq('user_id',uid).order('created_at',{ascending:false}).limit(100),
       supabase.from('barcode_overrides').select('barcode,category').eq('user_id',uid),
       supabase.from('scan_queue').select('*').eq('user_id',uid).eq('status','pending').order('scanned_at',{ascending:false}),
+      supabase.from('grocery_list_items').select('id',{count:'exact',head:true}).eq('is_checked',false),
     ]);
     setItems((ir.data as InvItem[])??[]);setTxs((tr.data as InvTx[])??[]);setLoading(false);
     const overrideMap: Record<string,string> = {};
     for (const row of (ovr.data ?? []) as {barcode:string;category:string}[]) overrideMap[row.barcode] = row.category;
     setCategoryOverrides(overrideMap);
     setQueueRows((sq.data as ScanQueueRow[]) ?? []);
+    setGroceryCount(gc.count ?? 0);
   },[]);
   useEffect(()=>{loadInv();},[loadInv]);
   useEffect(()=>{if(tab==='scan'&&scanRef.current)scanRef.current.focus();},[tab]);
@@ -4469,6 +4470,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
         {label:'Out of Stock', value:items.filter(i=>i.quantity<=0&&needsStockTracking(i)).length, color:'#0891b2', active: tab==='items'&&showOutOfStockOnly, onClick:()=>{setTab('items');setShowOutOfStockOnly(true);}},
         {label:'Scanner', value:queueRows.length, color:'#16a34a', active: tab==='scan', onClick:()=>setTab('scan')},
         {label:'History', value:txs.length, color:'#4B5320', active: tab==='history', onClick:()=>setTab('history')},
+        {label:'Grocery List', value:groceryCount, color:'#0e7490', active: tab==='grocery', onClick:()=>setTab('grocery')},
       ].map(s=>(
         <section key={s.label} className="panel" onClick={s.onClick} style={{textAlign:'center',padding:'10px 8px',cursor:'pointer',border:s.active?`2px solid ${s.color}`:'1px solid var(--border)'}}>
           <div style={{fontSize:11,color:'var(--muted)',marginBottom:4}}>{s.label}</div>
@@ -4788,6 +4790,10 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
           )}
         </div>;
       })}
+    </section>}
+
+    {tab==='grocery'&&<section className="panel">
+      <GroceryList embedded onCountChange={setGroceryCount} />
     </section>}
 
     {/* ── Scanner Inbox modal (portaled to document.body so it always covers the full viewport, regardless of any parent layout transforms) ── */}

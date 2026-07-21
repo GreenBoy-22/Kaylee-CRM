@@ -45,15 +45,56 @@ function humanDuration(iso: string | null): string {
   return h > 0 ? `${h}h ${m > 0 ? `${m}m` : ''}`.trim() : `${m} min`;
 }
 
-// Loosely matches a free-text ingredient line ("2 cups all-purpose flour")
-// against an inventory item's name ("Flour") — inventory names are
-// usually short, so checking whether the ingredient line CONTAINS the
-// item name (both lowercased, item name trimmed) catches most real
-// matches without needing a full parser for quantities/units.
+// Strips the leading quantity/unit off an ingredient line so it reads
+// better as a grocery list item and matches more cleanly — e.g.
+// "2 cups all-purpose flour" becomes "all-purpose flour". Falls back to
+// the original line if nothing obvious to strip.
+function groceryNameFromIngredientLine(line: string): string {
+  const cleaned = line
+    .replace(/^[\d\s./½¼¾⅓⅔-]+/, '') // leading numbers/fractions
+    .replace(/^(cups?|tbsp|tbs|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|cans?|jars?|cloves?|packages?|pkg|pinch(es)?|large|small|medium)\b\.?\s*/i, '')
+    .trim();
+  return cleaned || line.trim();
+}
+
+const INGREDIENT_STOPWORDS = new Set([
+  'to', 'taste', 'and', 'or', 'of', 'a', 'an', 'the', 'for', 'with',
+  'fresh', 'freshly', 'halved', 'diced', 'chopped', 'sliced', 'minced',
+  'grated', 'shredded', 'crushed', 'peeled', 'cooked', 'raw',
+  'large', 'small', 'medium', 'extra', 'virgin', 'organic', 'optional',
+]);
+
+// Pulls out the meaningful words from a phrase — lowercased, punctuation
+// stripped, short/filler words dropped — so two differently-worded names
+// ("Kirkland Extra Virgin Olive Oil" vs "olive oil") can still be
+// compared for real overlap instead of needing an exact substring match.
+function significantWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !INGREDIENT_STOPWORDS.has(w));
+}
+
+// Loosely matches a free-text ingredient line against an inventory item's
+// name. Inventory names are often branded/specific ("Kirkland Extra
+// Virgin Olive Oil") while ingredient lines are generic ("2 tbs olive
+// oil"), so a plain "does the line contain the full item name" check
+// misses almost everything in practice. This checks, in order: a direct
+// substring match either direction, then falls back to real word overlap
+// between the two (ignoring units/qualifiers/stopwords) — e.g. both
+// mentioning "chicken" or "basil" is enough to count as a match.
 function ingredientMatchesInventoryName(ingredientLine: string, invName: string): boolean {
   const name = invName.trim().toLowerCase();
   if (name.length < 3) return false; // too short to match reliably (e.g. "oz")
-  return ingredientLine.toLowerCase().includes(name);
+  const core = groceryNameFromIngredientLine(ingredientLine).toLowerCase();
+  const lineLower = ingredientLine.toLowerCase();
+
+  if (lineLower.includes(name) || name.includes(core)) return true;
+
+  const ingredientWords = new Set(significantWords(core));
+  if (ingredientWords.size === 0) return false;
+  return significantWords(name).some((w) => ingredientWords.has(w));
 }
 
 interface IngredientMatch {
@@ -70,18 +111,6 @@ function matchRecipeAgainstInventory(recipe: Recipe, inStockNames: string[]): In
     else missing.push(line);
   }
   return { matched, missing };
-}
-
-// Strips the leading quantity/unit off an ingredient line so it reads
-// better as a grocery list item — e.g. "2 cups all-purpose flour" becomes
-// "all-purpose flour". Falls back to the original line if nothing obvious
-// to strip.
-function groceryNameFromIngredientLine(line: string): string {
-  const cleaned = line
-    .replace(/^[\d\s./½¼¾⅓⅔-]+/, '') // leading numbers/fractions
-    .replace(/^(cups?|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|cans?|jars?|cloves?|packages?|pkg|pinch(es)?|large|small|medium)\b\.?\s*/i, '')
-    .trim();
-  return cleaned || line.trim();
 }
 
 export default function RecipeBook({ initialRecipeId, inventory = [] }: { initialRecipeId?: string | null; inventory?: { name: string; quantity: number }[] }) {
