@@ -159,6 +159,16 @@ export default function PhoneDirectory() {
     });
   }, [departments, contacts, search]);
 
+  const grouped = useMemo(() => {
+    const groups: Record<string, Department[]> = {};
+    for (const dept of filtered) {
+      const letter = dept.department.trim().charAt(0).toUpperCase();
+      const key = /[A-Z]/.test(letter) ? letter : '#';
+      (groups[key] ||= []).push(dept);
+    }
+    return Object.keys(groups).sort().map((letter) => ({ letter, depts: groups[letter] }));
+  }, [filtered]);
+
   return (
     <div>
       <div className="page-header">
@@ -185,25 +195,44 @@ export default function PhoneDirectory() {
         </p>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '0.9rem' }}>
-        {filtered.map((dept) => {
-          const contactCount = (contacts[dept.id] || []).length;
-          return (
-            <button
-              key={dept.id}
-              onClick={() => setOpenDept(dept)}
-              style={{
-                textAlign: 'left', border: `1px solid ${NAVY}22`, borderRadius: 10, padding: '1rem',
-                background: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6,
-              }}
-            >
-              <Building2 size={22} color={NAVY} />
-              <h3 style={{ margin: 0, fontSize: '0.95rem', color: NAVY }}>{dept.department}</h3>
-              {dept.phone && <span style={{ fontSize: '0.78rem', color: '#666', display: 'flex', alignItems: 'center', gap: 4 }}><Phone size={11} /> {dept.phone}</span>}
-              {contactCount > 0 && <span style={{ fontSize: '0.72rem', color: '#999' }}>{contactCount} contact{contactCount !== 1 ? 's' : ''}</span>}
-            </button>
-          );
-        })}
+      <div>
+        {grouped.map(({ letter, depts }) => (
+          <div key={letter} style={{ marginBottom: '1rem' }}>
+            <div style={{
+              position: 'sticky', top: 0, zIndex: 1,
+              fontSize: '0.8rem', fontWeight: 800, color: 'white',
+              padding: '4px 10px', borderRadius: 5, display: 'inline-block', marginBottom: 6,
+              backgroundColor: NAVY,
+            }}>
+              {letter}
+            </div>
+            <div style={{ borderTop: `1px solid ${NAVY}22` }}>
+              {depts.map((dept) => {
+                const contactCount = (contacts[dept.id] || []).length;
+                return (
+                  <button
+                    key={dept.id}
+                    onClick={() => setOpenDept(dept)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
+                      border: 'none', borderBottom: `1px solid ${NAVY}14`, background: 'white',
+                      padding: '0.7rem 0.6rem', cursor: 'pointer',
+                    }}
+                  >
+                    <Building2 size={17} color={NAVY} style={{ flexShrink: 0 }} />
+                    <span style={{ fontSize: '0.92rem', color: NAVY, fontWeight: 600, flex: 1, minWidth: 0 }}>{dept.department}</span>
+                    {dept.phone && (
+                      <span style={{ fontSize: '0.78rem', color: '#666', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                        <Phone size={11} /> {dept.phone}
+                      </span>
+                    )}
+                    {contactCount > 0 && <span style={{ fontSize: '0.7rem', color: '#999', flexShrink: 0 }}>{contactCount} contact{contactCount !== 1 ? 's' : ''}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Department detail popup */}
