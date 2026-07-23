@@ -195,12 +195,20 @@ export default function DogSitter() {
 
       const alwaysCheck = new Set(['Places To Be/To Do', 'Vacation']);
 
+      // These recurring events never mean Jules needs a sitter — matched
+      // case-insensitively against the full title, exact match (not a
+      // substring), so it doesn't accidentally swallow unrelated events
+      // that happen to share a word.
+      const NEVER_NEEDS_SITTER = new Set(['DND NIGHT', "ADAM GAME NIGHT & STREAMING", 'ZAC IS OVER']);
+      const isExcluded = (title: string) => NEVER_NEEDS_SITTER.has(title.trim().toUpperCase());
+
       const autoEvents = events.filter((e) => {
         if (!alwaysCheck.has(e.calendarName)) return false;
         // Events like "Watch Maple & Leela" or "Watch Sean's Doggos" are the
         // reverse direction — Kaylee/Adam are the ones pet-sitting, so Jules
         // doesn't need separate coverage for those.
         if (/^watch\s/i.test(e.title.trim())) return false;
+        if (isExcluded(e.title)) return false;
         const start = new Date(e.start);
         return start >= now && start <= sixMonthsOut;
       });
@@ -213,6 +221,7 @@ export default function DogSitter() {
         if (alwaysCheck.has(e.calendarName)) return false;
         if (e.allDay) return false;
         if (/^watch\s/i.test(e.title.trim())) return false;
+        if (isExcluded(e.title)) return false;
         const start = new Date(e.start);
         return start >= now && start <= sixMonthsOut;
       });

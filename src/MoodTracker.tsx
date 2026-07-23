@@ -12,7 +12,7 @@ import { supabase } from './lib/supabase';
 
 type Severity = 'low' | 'medium' | 'high';
 type TrackedPerson = 'dad' | 'kaylee' | 'adam';
-type Mood = 'great' | 'good' | 'meh' | 'tired' | 'stressed' | 'anxious' | 'sad' | 'depressed' | 'angry' | 'sick';
+export type Mood = 'great' | 'good' | 'meh' | 'tired' | 'stressed' | 'anxious' | 'sad' | 'depressed' | 'angry' | 'sick';
 
 interface MoodEntry {
   id: string;
@@ -33,7 +33,7 @@ interface MoodEntry {
 // Adam and Kaylee use this general mood log instead.
 const MOOD_ONLY_PEOPLE: TrackedPerson[] = ['kaylee', 'adam'];
 
-const MOOD_OPTIONS: { key: Mood; label: string; emoji: string; color: string; bg: string }[] = [
+export const MOOD_OPTIONS: { key: Mood; label: string; emoji: string; color: string; bg: string }[] = [
   { key: 'great',     label: 'Great / All Good',    emoji: '😄', color: '#16a34a', bg: '#dcfce7' },
   { key: 'good',      label: 'Good',                emoji: '🙂', color: '#65a30d', bg: '#ecfccb' },
   { key: 'meh',       label: 'Meh',                 emoji: '😐', color: '#71717a', bg: '#f4f4f5' },

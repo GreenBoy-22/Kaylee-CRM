@@ -30,7 +30,7 @@ import DogSitter from './DogSitter';
 import GroceryList from './GroceryList';
 import { addGroceryItems } from './lib/groceryList';
 import { isAutoEaHandled } from './lib/eaAutoDetect';
-import MoodTracker from './MoodTracker';
+import MoodTracker, { MOOD_OPTIONS, type Mood } from './MoodTracker';
 import PlantCatalog from './PlantCatalog';
 import WeatherWidget from './WeatherWidget';
 import WorkCalendar from './WorkCalendar';
@@ -577,6 +577,84 @@ function getNameFromEmail(email = '') {
   return email.split('@')[0] || 'User';
 }
 
+function MoodCheckInPopup({ person, onClose }: { person: 'kaylee' | 'adam'; onClose: () => void }) {
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const yesterdayLabel = new Date(`${yesterday}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const [mood, setMood] = useState<Mood | null>(null);
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  async function submit() {
+    if (!mood || !supabase) return;
+    setSaving(true);
+    const { data: existing } = await supabase.from('mood_log').select('id').eq('person', person).eq('entry_date', yesterday).maybeSingle();
+    const payload = { person, entry_date: yesterday, mood, additional_notes: notes.trim() || null };
+    if (existing) await supabase.from('mood_log').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', existing.id);
+    else await supabase.from('mood_log').insert(payload);
+    setSaving(false);
+    setSaved(true);
+    setTimeout(onClose, 1200);
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '1.5rem' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'white', borderRadius: 14, padding: '1.5rem', maxWidth: 420, width: '100%', maxHeight: '85vh', overflowY: 'auto' }}>
+        {saved ? (
+          <div style={{ textAlign: 'center', padding: '1rem 0' }}>
+            <div style={{ fontSize: '2.5rem' }}>✅</div>
+            <p style={{ marginTop: 8, fontWeight: 600 }}>Logged — thanks!</p>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '1.15rem' }}>Mood Check-In</h2>
+                <p style={{ margin: '2px 0 0', fontSize: '0.85rem', color: 'var(--muted)' }}>How was yesterday, {yesterdayLabel}?</p>
+              </div>
+              <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><XIcon size={18} /></button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, margin: '1rem 0' }}>
+              {MOOD_OPTIONS.map((m) => (
+                <button
+                  key={m.key}
+                  onClick={() => setMood(m.key)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '0.6rem 0.7rem', borderRadius: 8,
+                    border: mood === m.key ? `2px solid ${m.color}` : '1px solid var(--border)',
+                    background: mood === m.key ? m.bg : 'white', cursor: 'pointer', fontSize: '0.85rem', textAlign: 'left',
+                  }}
+                >
+                  <span style={{ fontSize: '1.2rem' }}>{m.emoji}</span>
+                  <span style={{ color: mood === m.key ? m.color : 'var(--text)', fontWeight: mood === m.key ? 700 : 500 }}>{m.label}</span>
+                </button>
+              ))}
+            </div>
+
+            <textarea
+              placeholder="Anything you want to note? (optional)"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              style={{ width: '100%', padding: '0.5rem', borderRadius: 8, border: '1px solid var(--border)', fontSize: '0.88rem', fontFamily: 'inherit', boxSizing: 'border-box', marginBottom: 12 }}
+            />
+
+            <button
+              className="btn primary"
+              onClick={submit}
+              disabled={!mood || saving}
+              style={{ width: '100%', opacity: !mood || saving ? 0.5 : 1 }}
+            >
+              {saving ? 'Saving...' : 'Log It'}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -621,6 +699,13 @@ function App() {
       return new URLSearchParams(window.location.search).get('media');
     } catch {
       return null;
+    }
+  });
+  const [showMoodPopup, setShowMoodPopup] = useState<boolean>(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('openMoodLog') === '1';
+    } catch {
+      return false;
     }
   });
   const [inventory, setInventory] = useState<InventoryItem[]>(seedInventory);
@@ -2115,6 +2200,9 @@ Kaylee`;
   return (
     <div className="app-shell">
       <style>{COMPACT_ROW_CSS}</style>
+      {showMoodPopup && (
+        <MoodCheckInPopup person={activeRole === 'admin' ? 'kaylee' : 'adam'} onClose={() => setShowMoodPopup(false)} />
+      )}
       <header className="topbar">
         <div className="logo"><span className="logo-mark">KH</span><span>Kaylee's Hub</span></div>
         <div className="toggle-wrap">
@@ -4217,6 +4305,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
       netChange[r.matched_item_id as string] = (netChange[r.matched_item_id as string] ?? 0) + delta;
     }
     let updatedCount = 0;
+    const newlyOutOfStock: InvItem[] = [];
     for(const [itemId, delta] of Object.entries(netChange)){
       const current = items.find(i=>i.id===itemId);
       if(!current) continue;
@@ -4227,6 +4316,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
         await supabase.from('inventory_items').delete().eq('id',itemId);
       } else {
         await supabase.from('inventory_items').update({quantity:newQty,updated_at:new Date().toISOString()}).eq('id',itemId);
+        if(newQty<=0 && tracked) newlyOutOfStock.push(current);
       }
       await supabase.from('inventory_transactions').insert({
         item_id:itemId, user_id:uid,
@@ -4235,6 +4325,10 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
         notes: 'Applied from Scanner Inbox',
       });
       updatedCount++;
+    }
+    if(newlyOutOfStock.length>0){
+      await addGroceryItems(newlyOutOfStock.map(i=>({name:i.name,note:'Out of stock',source:'inventory' as const,source_label:'Out of stock'})));
+      setGroceryMsg(`${newlyOutOfStock.length} item${newlyOutOfStock.length!==1?'s':''} just went out of stock — added to the grocery list.`);
     }
 
     const matchedIds = matched.map(r=>r.id);
@@ -4555,6 +4649,10 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
                 }else{
                   await supabase.from('inventory_items').update({quantity:nq,updated_at:new Date().toISOString()}).eq('id',item.id);
                   setItems(p=>p.map(i=>i.id===item.id?{...i,quantity:nq}:i));
+                  if(nq<=0&&tracked){
+                    await addGroceryItems([{name:item.name,note:'Out of stock',source:'inventory',source_label:'Out of stock'}]);
+                    setGroceryMsg(`${item.name} is out of stock — added to the grocery list.`);
+                  }
                 }
               }}>−</button>
               <span style={{fontSize:13,fontWeight:700,minWidth:24,textAlign:'center'}}>{item.quantity}</span>
@@ -4564,6 +4662,8 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
                   if(!supabase)return;
                   await supabase.from('inventory_items').update({quantity:0,updated_at:new Date().toISOString()}).eq('id',item.id);
                   setItems(p=>p.map(i=>i.id===item.id?{...i,quantity:0}:i));
+                  await addGroceryItems([{name:item.name,note:'Out of stock',source:'inventory',source_label:'Out of stock'}]);
+                  setGroceryMsg(`${item.name} is out of stock — added to the grocery list.`);
                 }}>Out</button>
               )}
               <button className="qty-button" onClick={()=>{
