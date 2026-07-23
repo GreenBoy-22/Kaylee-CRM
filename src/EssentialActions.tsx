@@ -16,14 +16,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ClipboardCheck, Plus, Check, ChevronDown, ChevronRight, Clock, AlertTriangle } from 'lucide-react';
-import { supabase } from './lib/supabase';
 
 interface StudentRow {
   id: string;
   display_name: string;
-  momentum: string | null;
+  momentum?: string | null;
   last_contact_date: string | null;
-  last_academic_activity_date: string | null;
+  last_academic_activity_date?: string | null;
   course: string | null;
   risk: string | null;
   on_term_break?: boolean | null;
@@ -278,14 +277,23 @@ type ActiveEa = {
   logRow?: EaLogRow; // present only for manually-logged EAs
 };
 
-export default function EssentialActions({ onEaChange }: { onEaChange?: () => void } = {}) {
-  const [students, setStudents] = useState<StudentRow[]>([]);
-  const [touchpoints, setTouchpoints] = useState<TouchpointRow[]>([]);
-  const [eaLog, setEaLog] = useState<EaLogRow[]>([]);
-  const [recentlyClosed, setRecentlyClosed] = useState<EaLogRow[]>([]);
-  const [allClosedLog, setAllClosedLog] = useState<EaLogRow[]>([]);
+export default function EssentialActions({ students: allStudents, touchpoints, eaLog: fullEaLog, createEaLog, closeEaLog }: {
+  students: StudentRow[];
+  touchpoints: TouchpointRow[];
+  eaLog: EaLogRow[];
+  createEaLog: (input: { student_id: string; ea_type: string; momentum_at_fire: string | null; fired_at: string; sla_hours: number; status: 'open' | 'closed'; snippet_used?: string | null }) => void;
+  closeEaLog: (id: string, snippetUsed: string | null) => void;
+}) {
+  // Same single students/touchpoints/eaLog state the Students page reads
+  // and writes through — no separate fetch, no separate copy, so marking
+  // something handled (or logging something new) here shows up there
+  // instantly and vice versa. There used to be an independent fetch here
+  // that only refreshed on mount or via a manual callback, which was the
+  // root of "I marked it handled and the other page didn't know."
+  const students = useMemo(() => allStudents.filter((st) => !st.on_term_break), [allStudents]);
+  const openEaLog = useMemo(() => fullEaLog.filter((e) => e.status === 'open'), [fullEaLog]);
+  const closedEaLog = useMemo(() => fullEaLog.filter((e) => e.status === 'closed'), [fullEaLog]);
   const [selectedSnippet, setSelectedSnippet] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showLogForm, setShowLogForm] = useState(false);
   const [showReference, setShowReference] = useState(false);
@@ -293,28 +301,6 @@ export default function EssentialActions({ onEaChange }: { onEaChange?: () => vo
   const [formStudentId, setFormStudentId] = useState('');
   const [formEaType, setFormEaType] = useState(MANUAL_EA_TYPES[0]);
   const [formFiredAt, setFormFiredAt] = useState(new Date().toISOString().slice(0, 10));
-
-  async function load() {
-    if (!supabase) { setLoading(false); return; }
-    setLoading(true);
-    const [s, tp, log, allLog] = await Promise.all([
-      supabase.from('students').select('id, display_name, momentum, last_contact_date, last_academic_activity_date, course, risk, on_term_break, missed_call_count, term_start_date').eq('archived', false),
-      supabase.from('student_touchpoints').select('id, student_id, touchpoint_date, touchpoint_type, note').order('touchpoint_date', { ascending: false }),
-      supabase.from('work_ea_log').select('*').eq('status', 'open').order('created_at', { ascending: false }),
-      // Full history, not just a short window — pacing checkpoints need to
-      // check "was this logged at all since the term started," which can
-      // mean looking back months, not just the last day.
-      supabase.from('work_ea_log').select('*').eq('status', 'closed'),
-    ]);
-    setStudents(((s.data as StudentRow[]) ?? []).filter((st) => !st.on_term_break));
-    setTouchpoints((tp.data as TouchpointRow[]) ?? []);
-    setEaLog((log.data as EaLogRow[]) ?? []);
-    setAllClosedLog((allLog.data as EaLogRow[]) ?? []);
-    setRecentlyClosed(((allLog.data as EaLogRow[]) ?? []).filter((r) => r.closed_at && hoursSince(r.closed_at) < 24));
-    setLoading(false);
-  }
-
-  useEffect(() => { load(); }, []);
 
   const touchpointsByStudent = useMemo(() => {
     const map = new Map<string, TouchpointRow[]>();
@@ -330,7 +316,6 @@ export default function EssentialActions({ onEaChange }: { onEaChange?: () => vo
   // in the Hub. These aren't stored anywhere — they naturally disappear once
   // last_contact_date / last_academic_activity_date update via a new touchpoint.
   const autoEAs: ActiveEa[] = useMemo(() => {
-    const recentlyHandled = new Set(recentlyClosed.map((r) => `${r.student_id}::${r.ea_type}`));
     // Cohort cutoff: at Kaylee's request, auto-detected EAs (No Contact,
     // Not Engaged, and pacing checkpoints) only fire for students whose
     // term started on or after this date. Older cohorts are considered
@@ -347,7 +332,7 @@ export default function EssentialActions({ onEaChange }: { onEaChange?: () => vo
       // checking the full closed-log history since this term started,
       // not just the last 24 hours.
       if (s.term_start_date) {
-        const loggedThisTerm = (eaType: string) => allClosedLog.some((r) =>
+        const loggedThisTerm = (eaType: string) => closedEaLog.some((r) =>
           r.student_id === s.id && r.ea_type === eaType && new Date(r.created_at) >= new Date(s.term_start_date as string)
         );
         const daysIntoTerm = daysSince(s.term_start_date);
@@ -368,10 +353,10 @@ export default function EssentialActions({ onEaChange }: { onEaChange?: () => vo
       }
     }
     return results;
-  }, [students, recentlyClosed, allClosedLog]);
+  }, [students, closedEaLog]);
 
   const manualEAs: ActiveEa[] = useMemo(() => {
-    return eaLog.map((row) => {
+    return openEaLog.map((row) => {
       const student = students.find((s) => s.id === row.student_id);
       if (!student) return null;
       return {
@@ -380,7 +365,7 @@ export default function EssentialActions({ onEaChange }: { onEaChange?: () => vo
         logRow: row,
       } as ActiveEa;
     }).filter(Boolean) as ActiveEa[];
-  }, [eaLog, students]);
+  }, [openEaLog, students]);
 
   const allActive = useMemo(() => {
     const combined = [...autoEAs, ...manualEAs];
@@ -400,16 +385,12 @@ export default function EssentialActions({ onEaChange }: { onEaChange?: () => vo
     });
   }
 
-  async function logEa() {
-    if (!supabase || !formStudentId) return;
+  function logEa() {
+    if (!formStudentId) return;
     const student = students.find((s) => s.id === formStudentId);
     const tier = momentumTier(student?.momentum);
     const def = EA_DEFS[formEaType];
-    const { data: sessionData } = await supabase.auth.getSession();
-    const uid = sessionData?.session?.user?.id;
-    if (!uid) { alert('Could not confirm your login — try refreshing the page and logging this again.'); return; }
-    const { error } = await supabase.from('work_ea_log').insert({
-      user_id: uid,
+    createEaLog({
       student_id: formStudentId,
       ea_type: formEaType,
       momentum_at_fire: student?.momentum || null,
@@ -417,45 +398,29 @@ export default function EssentialActions({ onEaChange }: { onEaChange?: () => vo
       sla_hours: slaHoursFor(def, tier),
       status: 'open',
     });
-    if (error) { alert(`EA log failed: ${error.message}`); return; }
     setShowLogForm(false);
     setFormStudentId('');
     setStudentSearch('');
-    await load();
-    onEaChange?.();
   }
 
-  async function markManualHandled(row: EaLogRow, snippetUsed: string | null) {
-    if (!supabase) return;
-    const { error } = await supabase.from('work_ea_log').update({ status: 'closed', closed_at: new Date().toISOString(), snippet_used: snippetUsed }).eq('id', row.id);
-    if (error) { alert(`EA update failed: ${error.message}`); return; }
-    await load();
-    onEaChange?.();
+  function markManualHandled(row: EaLogRow, snippetUsed: string | null) {
+    closeEaLog(row.id, snippetUsed);
   }
 
   // Auto-detected EAs don't have a DB row of their own — marking one handled
   // creates a new closed log entry, both as a real record of what you did
-  // and to suppress it from resurfacing for a day even if the underlying
-  // date hasn't technically changed yet.
-  async function markAutoHandled(ea: ActiveEa, snippetUsed: string | null) {
-    if (!supabase) return;
-    const { data: sessionData } = await supabase.auth.getSession();
-    const uid = sessionData?.session?.user?.id;
-    if (!uid) { alert('Could not confirm your login — try refreshing the page and marking this handled again.'); return; }
-    const { error } = await supabase.from('work_ea_log').insert({
-      user_id: uid,
+  // and (via isAutoEaHandled, shared with the Students page) to suppress it
+  // from resurfacing until the underlying date actually changes.
+  function markAutoHandled(ea: ActiveEa, snippetUsed: string | null) {
+    createEaLog({
       student_id: ea.student.id,
       ea_type: ea.eaType,
       momentum_at_fire: ea.student.momentum || null,
       fired_at: new Date().toISOString().slice(0, 10),
       sla_hours: ea.slaHours,
       status: 'closed',
-      closed_at: new Date().toISOString(),
       snippet_used: snippetUsed,
     });
-    if (error) { alert(`EA log failed: ${error.message}`); return; }
-    await load();
-    onEaChange?.();
   }
 
   const filteredStudentsForForm = useMemo(() => {
@@ -463,8 +428,6 @@ export default function EssentialActions({ onEaChange }: { onEaChange?: () => vo
     if (!q) return students.slice(0, 8);
     return students.filter((s) => s.display_name.toLowerCase().includes(q)).slice(0, 8);
   }, [students, studentSearch]);
-
-  if (loading) return <div style={{ padding: 20 }}>Loading Essential Actions...</div>;
 
   return (
     <div>

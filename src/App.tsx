@@ -29,6 +29,7 @@ import RecipeBook from './RecipeBook';
 import DogSitter from './DogSitter';
 import GroceryList from './GroceryList';
 import { addGroceryItems } from './lib/groceryList';
+import { isAutoEaHandled } from './lib/eaAutoDetect';
 import MoodTracker from './MoodTracker';
 import PlantCatalog from './PlantCatalog';
 import WeatherWidget from './WeatherWidget';
@@ -1625,18 +1626,15 @@ Kaylee`;
     if (error) setMessage(`EA update failed: ${error.message}`);
   }
 
-  // The Essential Actions page manages its own EA data independently
-  // (auto-detected pacing checkpoints, its own open/closed queries) rather
-  // than going through createEaLog/closeEaLog above. It calls this after
-  // any write of its own so the shared `eaLog` state — the one the
-  // Students page's "mark complete" reads from — stays in sync with
-  // whatever just changed on the Essential Actions page, and vice versa
-  // (Students already writes through closeEaLog/createEaLog directly).
-  async function refreshEaLog() {
-    if (!supabase) return;
-    const { data, error } = await supabase.from('work_ea_log').select('*').order('created_at', { ascending: false });
-    if (!error && data) setEaLog(data as EaLogEntry[]);
-  }
+  // NOTE: Essential Actions used to manage its own separate copy of
+  // students/touchpoints/eaLog (fetched independently) and call a
+  // refreshEaLog() round-trip after writes to keep the Students page in
+  // sync. That was the root of a real bug — marking something handled in
+  // one place wouldn't reliably show as handled in the other. Essential
+  // Actions now receives students/touchpoints/eaLog as props from here
+  // and writes through createEaLog/closeEaLog directly, so both pages
+  // are always looking at the exact same state — nothing to keep in sync
+  // because there's only one copy.
 
   function buildDraftForStudent(student: Student, kind: string, cohortLabel: string): { subject: string; body: string } {
     const name = student.display_name || 'there';
@@ -2178,7 +2176,7 @@ Kaylee`;
           {page === 'contacts' && <Contacts />}
           {page === 'books' && <Books />}
           {page === 'work_performance' && <WorkPerformance />}
-          {page === 'essential_actions' && <EssentialActions onEaChange={refreshEaLog} />}
+          {page === 'essential_actions' && <EssentialActions students={students} touchpoints={touchpoints} eaLog={eaLog} createEaLog={createEaLog} closeEaLog={closeEaLog} />}
           {page === 'students' && activeRole === 'admin' && <Students students={students} touchpoints={touchpoints} appointments={appointments} eaLog={eaLog} createEaLog={createEaLog} closeEaLog={closeEaLog} importStudentsFromCsv={importStudentsFromCsv} createStudent={createStudent} updateStudent={updateStudent} archiveStudent={archiveStudent} unarchiveStudent={unarchiveStudent} createTouchpoint={createTouchpoint} updateTouchpoint={updateTouchpoint} deleteTouchpoint={deleteTouchpoint} createAppointment={createAppointment} updateAppointment={updateAppointment} deleteAppointment={deleteAppointment} copyText={copyStudentText} ferpaWarnings={ferpaWarnings} generateSingleDraft={generateSingleDraft} drafts={drafts} setPage={setPage} setMessage={setMessage} />}
           {page === 'fto' && activeRole === 'admin' && <FTOTracker />}
           {page === 'course_notes' && activeRole === 'admin' && <CourseNotes />}
@@ -5289,20 +5287,16 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
   const selectedActiveEAs: ActiveEa[] = useMemo(() => {
     if (!selected) return [];
     const list: ActiveEa[] = [];
-    const recentlyHandled = new Set(
-      eaLog.filter((e) => e.student_id === selected.id && e.status === 'closed' && e.closed_at && eaHoursSince(e.closed_at) < 24)
-        .map((e) => e.ea_type)
-    );
     if (!selected.on_term_break) {
       const tier = eaMomentumTier(selected.momentum);
       const contactDays = eaDaysSince(selected.last_contact_date);
       const contactThreshold = tier === 'high' ? 21 : 16;
-      if (contactDays >= contactThreshold && !recentlyHandled.has('no_contact')) {
+      if (contactDays >= contactThreshold && !isAutoEaHandled('no_contact', selected.last_contact_date, eaLog, selected.id)) {
         list.push({ key: 'auto-no_contact', eaType: 'no_contact', firedAt: selected.last_contact_date || '', slaHours: eaSlaHoursFor(EA_DEFS.no_contact, tier) });
       }
       const engagedDays = eaDaysSince(selected.last_academic_activity_date);
       const engagedThreshold = tier === 'high' ? 15 : 10;
-      if (engagedDays >= engagedThreshold && !recentlyHandled.has('not_engaged')) {
+      if (engagedDays >= engagedThreshold && !isAutoEaHandled('not_engaged', selected.last_academic_activity_date, eaLog, selected.id)) {
         list.push({ key: 'auto-not_engaged', eaType: 'not_engaged', firedAt: selected.last_academic_activity_date || '', slaHours: eaSlaHoursFor(EA_DEFS.not_engaged, tier) });
       }
       // Pacing checkpoints are one-time-per-term, not daily-recurring like
