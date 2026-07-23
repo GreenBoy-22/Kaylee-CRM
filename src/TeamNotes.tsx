@@ -285,6 +285,19 @@ export default function TeamNotes() {
     );
   }, [topics, search, categoryFilter, annotations]);
 
+  const groupedTopics = useMemo(() => {
+    const groups: Record<string, Topic[]> = {};
+    for (const topic of visibleTopics) {
+      const letter = topic.title.trim().charAt(0).toUpperCase();
+      const key = /[A-Z]/.test(letter) ? letter : '#';
+      (groups[key] ||= []).push(topic);
+    }
+    for (const key of Object.keys(groups)) {
+      groups[key].sort((a, b) => a.title.localeCompare(b.title));
+    }
+    return Object.keys(groups).sort().map((letter) => ({ letter, topics: groups[letter] }));
+  }, [visibleTopics]);
+
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '1.5rem' }}>
       <h1 style={{ color: ARMY_GREEN, fontSize: '1.5rem', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -372,34 +385,43 @@ export default function TeamNotes() {
             </p>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: '0.9rem' }}>
-            {visibleTopics.map((topic) => {
-              const count = (annotations[topic.id] || []).length;
-              return (
-                <button
-                  key={topic.id}
-                  onClick={() => setOpenTopic(topic)}
-                  style={{
-                    textAlign: 'left', border: '1px solid #e2ddd0', borderRadius: 10, padding: '1rem',
-                    background: '#fdfbf6', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
-                    transition: 'box-shadow 0.15s, transform 0.15s',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'none'; }}
-                >
-                  <Folder size={26} color={GOLD} fill={GOLD} fillOpacity={0.15} />
-                  <div>
-                    <span style={{ fontSize: '0.66rem', textTransform: 'uppercase', color: ARMY_GREEN, fontWeight: 700, letterSpacing: 0.3 }}>
-                      {CATEGORIES.find((c) => c.value === topic.category)?.label || topic.category}
-                    </span>
-                    <h3 style={{ margin: '0.25rem 0 0', fontSize: '0.95rem', lineHeight: 1.3 }}>{topic.title}</h3>
-                  </div>
-                  <span style={{ fontSize: '0.72rem', color: '#999', marginTop: 'auto' }}>
-                    {count} note{count !== 1 ? 's' : ''}
-                  </span>
-                </button>
-              );
-            })}
+          <div>
+            {groupedTopics.map(({ letter, topics: letterTopics }) => (
+              <div key={letter} style={{ marginBottom: '1rem' }}>
+                <div style={{
+                  fontSize: '0.8rem', fontWeight: 800, color: 'white',
+                  padding: '4px 10px', borderRadius: 5, display: 'inline-block', marginBottom: 6,
+                  backgroundColor: ARMY_GREEN,
+                }}>
+                  {letter}
+                </div>
+                <div style={{ borderTop: '1px solid #e2ddd0' }}>
+                  {letterTopics.map((topic) => {
+                    const count = (annotations[topic.id] || []).length;
+                    return (
+                      <button
+                        key={topic.id}
+                        onClick={() => setOpenTopic(topic)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
+                          border: 'none', borderBottom: '1px solid #ece7da', background: '#fdfbf6',
+                          padding: '0.7rem 0.6rem', cursor: 'pointer',
+                        }}
+                      >
+                        <Folder size={17} color={GOLD} fill={GOLD} fillOpacity={0.15} style={{ flexShrink: 0 }} />
+                        <span style={{ fontSize: '0.92rem', fontWeight: 600, flex: 1, minWidth: 0 }}>{topic.title}</span>
+                        <span style={{ fontSize: '0.66rem', textTransform: 'uppercase', color: ARMY_GREEN, fontWeight: 700, letterSpacing: 0.3, flexShrink: 0 }}>
+                          {CATEGORIES.find((c) => c.value === topic.category)?.label || topic.category}
+                        </span>
+                        <span style={{ fontSize: '0.72rem', color: '#999', flexShrink: 0 }}>
+                          {count} note{count !== 1 ? 's' : ''}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </>
       )}
