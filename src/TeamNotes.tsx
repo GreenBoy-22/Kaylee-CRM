@@ -136,6 +136,11 @@ export default function TeamNotes() {
   const [manualContent, setManualContent] = useState('');
   const [manualPerson, setManualPerson] = useState('');
   const [manualDate, setManualDate] = useState('');
+  const [showNewTopicForm, setShowNewTopicForm] = useState(false);
+  const [newTopicTitleField, setNewTopicTitleField] = useState('');
+  const [newTopicCategory, setNewTopicCategory] = useState(CATEGORIES[0].value);
+  const [newTopicContent, setNewTopicContent] = useState('');
+  const [savingNewTopic, setSavingNewTopic] = useState(false);
 
   useEffect(() => {
     loadAll();
@@ -227,6 +232,27 @@ export default function TeamNotes() {
     setPending((cur) => cur.filter((n) => n.id !== id));
   }
 
+  async function createStandaloneTopic() {
+    if (!supabase || !newTopicTitleField.trim() || !newTopicContent.trim()) return;
+    setSavingNewTopic(true);
+    const { data: topic, error } = await supabase
+      .from('sop_topics')
+      .insert({ category: newTopicCategory, title: newTopicTitleField.trim(), summary: newTopicContent.trim() })
+      .select()
+      .single();
+    if (error || !topic) { setSavingNewTopic(false); return; }
+    const { data: anno } = await supabase
+      .from('sop_annotations')
+      .insert({ topic_id: topic.id, content: newTopicContent.trim(), added_manually: true })
+      .select()
+      .single();
+    setTopics((cur) => [topic as Topic, ...cur]);
+    if (anno) setAnnotations((cur) => ({ ...cur, [topic.id]: [anno as Annotation] }));
+    setNewTopicTitleField(''); setNewTopicContent(''); setNewTopicCategory(CATEGORIES[0].value);
+    setShowNewTopicForm(false);
+    setSavingNewTopic(false);
+  }
+
   async function addManualAnnotation(topic: Topic) {
     if (!supabase || !manualContent.trim()) return;
     const { data, error } = await supabase
@@ -282,7 +308,7 @@ export default function TeamNotes() {
 
       {!loading && view === 'guide' && (
         <>
-          <div style={{ display: 'flex', gap: 8, marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: '1.25rem', flexWrap: 'wrap', alignItems: 'center' }}>
             <div style={{ position: 'relative', flex: '1 1 220px' }}>
               <Search size={14} style={{ position: 'absolute', left: 9, top: 9, color: '#999' }} />
               <input
@@ -296,7 +322,49 @@ export default function TeamNotes() {
               <option value="">All categories</option>
               {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
             </select>
+            <button
+              onClick={() => setShowNewTopicForm((v) => !v)}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, background: ARMY_GREEN, color: 'white', border: 'none', borderRadius: 6, padding: '0.5rem 0.8rem', cursor: 'pointer', fontSize: '0.85rem' }}
+            >
+              <Plus size={14} /> Add Info
+            </button>
           </div>
+
+          {showNewTopicForm && (
+            <div style={{ background: '#f4f5f0', border: `1px solid ${ARMY_GREEN}`, borderRadius: 8, padding: '0.9rem', marginBottom: '1.25rem' }}>
+              <h3 style={{ margin: '0 0 8px', fontSize: '0.9rem', color: ARMY_GREEN }}>Add a new SOP topic</h3>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                <input
+                  placeholder='Title (e.g. "Late Withdrawal Process")'
+                  value={newTopicTitleField}
+                  onChange={(e) => setNewTopicTitleField(e.target.value)}
+                  style={{ flex: '1 1 220px', padding: '0.45rem', borderRadius: 6, border: '1px solid #ccc', boxSizing: 'border-box' }}
+                />
+                <select value={newTopicCategory} onChange={(e) => setNewTopicCategory(e.target.value)} style={{ padding: '0.45rem', borderRadius: 6, border: '1px solid #ccc' }}>
+                  {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
+              </div>
+              <textarea
+                placeholder="What do you need to remember about this?"
+                value={newTopicContent}
+                onChange={(e) => setNewTopicContent(e.target.value)}
+                rows={4}
+                style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid #ccc', fontSize: '0.88rem', fontFamily: 'inherit', boxSizing: 'border-box', marginBottom: 8 }}
+              />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  onClick={createStandaloneTopic}
+                  disabled={savingNewTopic || !newTopicTitleField.trim() || !newTopicContent.trim()}
+                  style={btnStyle(ARMY_GREEN, true)}
+                >
+                  {savingNewTopic ? 'Saving...' : 'Save Topic'}
+                </button>
+                <button onClick={() => { setShowNewTopicForm(false); setNewTopicTitleField(''); setNewTopicContent(''); }} style={btnStyle('#999', false)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           {visibleTopics.length === 0 && (
             <p style={{ color: '#999' }}>

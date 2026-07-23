@@ -23,6 +23,7 @@ import FTOTracker from './FTOTracker';
 import CourseNotes from './CourseNotes';
 import TeamChatAssistant from './TeamChatAssistant';
 import TeamNotes from './TeamNotes';
+import PhoneDirectory from './PhoneDirectory';
 import TermEnrollment from './TermEnrollment';
 import RecipeBook from './RecipeBook';
 import DogSitter from './DogSitter';
@@ -40,7 +41,7 @@ import Appointments from './Appointments';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'team_chat' | 'team_notes' | 'term_enrollment' | 'mood' | 'weather' | 'plants' | 'recipes' | 'dog_sitter' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'essential_actions' | 'settings';
+type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'team_chat' | 'team_notes' | 'term_enrollment' | 'mood' | 'weather' | 'plants' | 'recipes' | 'dog_sitter' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'essential_actions' | 'phone_directory' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -302,6 +303,7 @@ const workNav: readonly NavEntry[] = [
   ['fto', 'FTO Tracker', Clock],
   ['outreach', 'Outreach Drafts', Mail],
   ['team_notes', 'SOP Guide', NotebookText],
+  ['phone_directory', 'Phone Directory', Phone],
   ['students', 'Students', Users],
   ['team_chat', 'Team Chat Assistant', MessageSquare],
   ['term_enrollment', 'Term Enrollment', ClipboardCheck],
@@ -340,6 +342,7 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'outreach', module_name: 'outreach', label: 'Outreach Drafts', default_access: 'hidden' },
   { page: 'team_chat', module_name: 'team_chat', label: 'Team Chat Assistant', default_access: 'hidden' },
   { page: 'team_notes', module_name: 'team_notes', label: 'SOP Guide', default_access: 'hidden' },
+  { page: 'phone_directory', module_name: 'phone_directory', label: 'Phone Directory', default_access: 'hidden' },
   { page: 'term_enrollment', module_name: 'term_enrollment', label: 'Term Enrollment', default_access: 'hidden' },
   { page: 'work_performance', module_name: 'work_performance', label: 'Work Performance', default_access: 'hidden' },
   { page: 'essential_actions', module_name: 'essential_actions', label: 'Essential Actions', default_access: 'hidden' }
@@ -2181,6 +2184,7 @@ Kaylee`;
           {page === 'course_notes' && activeRole === 'admin' && <CourseNotes />}
           {page === 'team_chat' && activeRole === 'admin' && <TeamChatAssistant />}
           {page === 'team_notes' && activeRole === 'admin' && <TeamNotes />}
+          {page === 'phone_directory' && activeRole === 'admin' && <PhoneDirectory />}
           {page === 'term_enrollment' && activeRole === 'admin' && <TermEnrollment />}
           {page === 'mood' && <MoodTracker />}
           {page === 'plants' && <PlantCatalog />}
