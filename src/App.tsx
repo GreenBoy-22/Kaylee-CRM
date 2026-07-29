@@ -5677,9 +5677,76 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
               size={110}
               strokeWidth={1.5}
               aria-hidden="true"
-              style={{ position: 'absolute', top: 4, right: 8, opacity: 0.16, color: '#7c8ba1', pointerEvents: 'none' }}
+              style={{ position: 'absolute', top: 40, right: 8, opacity: 0.16, color: '#7c8ba1', pointerEvents: 'none' }}
             />
           )}
+
+          {/* Portal-style header — same overall look as the student's own
+              WGU portal (purple banner + term/program progress cards),
+              built from the fields already tracked here in the Hub. */}
+          <div style={{ margin: '-11px -13px 14px', background: 'var(--purple)', color: 'white', padding: '7px 16px', fontSize: 12, fontWeight: 600, borderRadius: '12px 12px 0 0' }}>
+            Currently viewing student: <strong>{selected.display_name}</strong>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+            <div style={{ background: '#f4f5f0', borderRadius: 10, padding: '12px 14px' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#555', textAlign: 'center', marginBottom: 8 }}>Term Progress</div>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, alignItems: 'flex-end' }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ background: '#1a2744', color: 'white', borderRadius: 6, minWidth: 44, padding: '6px 4px', fontSize: 22, fontWeight: 800 }}>
+                    {(() => {
+                      if (!selected.term_end_date) return '—';
+                      const days = Math.ceil((new Date(selected.term_end_date).getTime() - Date.now()) / 86400000);
+                      return Math.max(0, Math.ceil(days / 7));
+                    })()}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#777', marginTop: 3 }}>Weeks Left</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ background: 'var(--green-bg)', color: 'var(--green)', borderRadius: 6, minWidth: 44, padding: '6px 4px', fontSize: 22, fontWeight: 800 }}>
+                    {selected.term_completed_cu ?? '—'}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#777', marginTop: 3 }}>CUs Done</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ background: '#eee', color: '#555', borderRadius: 6, minWidth: 44, padding: '6px 4px', fontSize: 22, fontWeight: 800 }}>
+                    {selected.term_remaining_cu ?? '—'}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#777', marginTop: 3 }}>CUs Left</div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ background: '#f4f5f0', borderRadius: 10, padding: '12px 14px' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#555', textAlign: 'center', marginBottom: 8 }}>Program Progress</div>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 14, alignItems: 'center' }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--green)' }}>
+                    {(() => {
+                      const c = selected.term_completed_cu, r = selected.term_remaining_cu;
+                      if (c == null || r == null || c + r === 0) return '—';
+                      return `${Math.round((c / (c + r)) * 100)}%`;
+                    })()}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#777' }}>This Term</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: '#1a2744' }}>
+                    {selected.term_number ?? selected.contact_term ?? '—'}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#777' }}>Term #</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ background: '#1a2744', color: 'white', borderRadius: 6, padding: '4px 8px', fontSize: 12, fontWeight: 700 }}>
+                    {selected.graduation_goal_date
+                      ? new Date(`${selected.graduation_goal_date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+                      : '—'}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#777', marginTop: 3 }}>Grad Goal</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* student-top-zone header */}
           <div className="panel-head">
             <div>
