@@ -162,10 +162,38 @@ export default function TermEnrollment() {
     setGenerating(false);
   }
 
+  const [askingBreakDateId, setAskingBreakDateId] = useState<string | null>(null);
+  const [breakDateInput, setBreakDateInput] = useState('');
+
   async function updateEntry(id: string, patch: Partial<EnrollmentEntry>) {
     setEntries((current) => current.map((e) => (e.id === id ? { ...e, ...patch } : e)));
     if (!supabase) return;
     await supabase.from('term_enrollment_entries').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', id);
+  }
+
+  // Marking a student "Term Break" here should behave exactly like
+  // marking it from their profile — flip on_term_break on the actual
+  // student record, and immediately ask when they're expected back so
+  // that date is ready and waiting in "Verify Term Starts" instead of
+  // showing up blank. Moving them OFF term break status clears both.
+  async function handleStatusChange(entry: EnrollmentEntry, newStatus: string) {
+    updateEntry(entry.id, { row_status: newStatus });
+    if (!supabase || !entry.student_id) return;
+    if (newStatus === 'term_break') {
+      await supabase.from('students').update({ on_term_break: true }).eq('id', entry.student_id);
+      setAskingBreakDateId(entry.id);
+      setBreakDateInput('');
+    } else {
+      await supabase.from('students').update({ on_term_break: false, term_break_expected_back: null }).eq('id', entry.student_id);
+      if (askingBreakDateId === entry.id) { setAskingBreakDateId(null); setBreakDateInput(''); }
+    }
+  }
+
+  async function saveBreakDate(entry: EnrollmentEntry) {
+    if (!supabase || !entry.student_id || !breakDateInput) return;
+    await supabase.from('students').update({ term_break_expected_back: breakDateInput }).eq('id', entry.student_id);
+    setAskingBreakDateId(null);
+    setBreakDateInput('');
   }
 
   async function addStudentToList(student: RosterStudent) {
@@ -335,13 +363,30 @@ export default function TermEnrollment() {
                     <td style={{ padding: '5px 8px' }}>
                       <select
                         value={e.row_status}
-                        onChange={(ev) => updateEntry(e.id, { row_status: ev.target.value })}
+                        onChange={(ev) => handleStatusChange(e, ev.target.value)}
                         style={{ width: '100%', fontSize: '0.8rem', padding: '2px 4px', background: 'transparent', border: '1px solid #ccc', borderRadius: 4 }}
                       >
                         {Object.entries(STATUS_LABELS).map(([val, label]) => (
                           <option key={val} value={val}>{label}</option>
                         ))}
                       </select>
+                      {askingBreakDateId === e.id && (
+                        <div style={{ marginTop: 4, display: 'flex', gap: 4, alignItems: 'center' }}>
+                          <input
+                            type="date"
+                            value={breakDateInput}
+                            onChange={(ev) => setBreakDateInput(ev.target.value)}
+                            style={{ fontSize: '0.75rem', padding: '2px 4px', border: '1px solid #ccc', borderRadius: 3 }}
+                          />
+                          <button
+                            onClick={() => saveBreakDate(e)}
+                            disabled={!breakDateInput}
+                            style={{ fontSize: '0.7rem', padding: '2px 8px', background: ARMY_GREEN, color: 'white', border: 'none', borderRadius: 3, cursor: 'pointer', opacity: breakDateInput ? 1 : 0.5 }}
+                          >
+                            Save
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
