@@ -42,7 +42,7 @@ import Appointments from './Appointments';
 
 type Mode = 'home' | 'work';
 type Role = 'admin' | 'limited';
-type Page = 'dashboard' | 'briefing' | 'calendar' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'team_chat' | 'team_notes' | 'term_enrollment' | 'mood' | 'weather' | 'plants' | 'recipes' | 'dog_sitter' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'essential_actions' | 'phone_directory' | 'settings';
+type Page = 'dashboard' | 'briefing' | 'calendar' | 'daily_schedule' | 'budget' | 'inventory' | 'chores' | 'vehicles' | 'jules' | 'migraine' | 'suggestions' | 'contacts' | 'books' | 'students' | 'outreach' | 'fto' | 'course_notes' | 'team_chat' | 'team_notes' | 'term_enrollment' | 'mood' | 'weather' | 'plants' | 'recipes' | 'dog_sitter' | 'packages' | 'games' | 'media' | 'travel' | 'appointments' | 'work_performance' | 'essential_actions' | 'phone_directory' | 'settings';
 type Priority = 'urgent' | 'warning' | 'normal' | 'good';
 type InventoryAction = 'none' | 'scanAdd' | 'manual' | 'scanUse';
 
@@ -299,6 +299,7 @@ const homeNav: readonly NavEntry[] = [
 
 const workNav: readonly NavEntry[] = [
   ['calendar', 'Calendar', CalendarDays],
+  ['daily_schedule', 'Daily Schedule', ListTodo],
   ['course_notes', 'Course Notes', BookOpen],
   ['essential_actions', 'Essential Actions', ClipboardCheck],
   ['fto', 'FTO Tracker', Clock],
@@ -344,6 +345,7 @@ const moduleMeta: { page: Page; module_name: string; label: string; default_acce
   { page: 'team_chat', module_name: 'team_chat', label: 'Team Chat Assistant', default_access: 'hidden' },
   { page: 'team_notes', module_name: 'team_notes', label: 'SOP Guide', default_access: 'hidden' },
   { page: 'phone_directory', module_name: 'phone_directory', label: 'Phone Directory', default_access: 'hidden' },
+  { page: 'daily_schedule', module_name: 'daily_schedule', label: 'Daily Schedule', default_access: 'hidden' },
   { page: 'term_enrollment', module_name: 'term_enrollment', label: 'Term Enrollment', default_access: 'hidden' },
   { page: 'work_performance', module_name: 'work_performance', label: 'Work Performance', default_access: 'hidden' },
   { page: 'essential_actions', module_name: 'essential_actions', label: 'Essential Actions', default_access: 'hidden' }
@@ -1387,34 +1389,6 @@ Kaylee`;
     return 'Medium';
   }
 
-  function buildNextConversationFocus(row: Record<string, string>) {
-    const course = row.coursecode || 'current course';
-    const momentum = row.momentum || 'not set';
-    const courseEnd = row.courseenddate || '';
-    const note = row.latestcoursenote || '';
-    const pieces = [
-      `Review progress in ${course}.`,
-      courseEnd ? `Confirm the plan to complete by ${courseEnd}.` : 'Confirm the next course milestone and target date.',
-      `Check whether momentum is still ${momentum}.`
-    ];
-    if (note) pieces.push('Follow up on the latest course note and ask what support is needed next.');
-    return pieces.join(' ');
-  }
-
-  function buildImportedNextCallPrep(row: Record<string, string>) {
-    const course = row.coursecode || 'the current course';
-    const momentum = row.momentum || 'not set';
-    const lastActivity = row.lastacademicactivitydate || 'not available';
-    const termRemaining = row.termremainingcu || '';
-    const termCompleted = row.termcompletedcu || '';
-    return [
-      `Current course: ${course}.`,
-      `Momentum: ${momentum}. Last academic activity: ${lastActivity}.`,
-      termRemaining || termCompleted ? `Term CUs: ${termCompleted || '0'} completed, ${termRemaining || 'unknown'} remaining.` : '',
-      'Suggested questions: What progress did you make since our last touchpoint? What is your next measurable course action? What blocker could keep you from completing that action before our next call? What support do you need from me this week?'
-    ].filter(Boolean).join(' ');
-  }
-
   async function importStudentsFromCsv(text: string) {
     if (!isAdmin()) return setMessage('CSV import is admin-only.');
     const rows = parseCsv(text);
@@ -1446,8 +1420,8 @@ Kaylee`;
           copied: false,
           grow_note: '',
           admin_notes: latestNote ? `Latest course note: ${latestNote}` : '',
-          next_call_prep: buildImportedNextCallPrep(row),
-          constructive_note: 'Use GROW: confirm the goal, clarify current reality, offer options, and end with one measurable commitment.',
+          next_call_prep: null,
+          constructive_note: null,
           last_contact_date: null,
           next_appointment_date: null,
           graduation_goal_date: csvDate(row.studentgraduationgoal),
@@ -1463,7 +1437,7 @@ Kaylee`;
           contact_term: csvNumber(row.contactterm),
           weeks_in_course: csvNumber(row.weeksincourse),
           latest_course_note: latestNote,
-          next_conversation_focus: buildNextConversationFocus(row),
+          next_conversation_focus: null,
           known_blockers: '',
           preferred_contact_method: '',
           student_timezone: row.timezone || ''
@@ -1474,9 +1448,20 @@ Kaylee`;
 
     // Update-only mode: match by student_id. Skip any CSV row whose ID isn't already in the DB.
     // Only update fields that come from Salesforce; preserve everything Kaylee has edited in the UI.
+    //
+    // WGU/Salesforce IDs always include a leading zero (e.g. "012549754"),
+    // but many records already in the Hub lost theirs somewhere along the
+    // way (manual entry, an earlier import, etc.) and are stored as
+    // 8-digit numbers instead. Matching on the raw string meant those
+    // never matched anything from a fresh CSV, so the update silently did
+    // nothing for most of the roster while still reporting "success."
+    // Stripping leading zeros on both sides before comparing fixes that
+    // regardless of which format any given student's ID happens to be in.
+    const normalizeStudentId = (id: string) => id.trim().replace(/^0+(?=\d)/, '');
+
     const existingById = new Map<string, Student>();
     for (const s of students) {
-      const sid = String(s.student_id || '').trim();
+      const sid = normalizeStudentId(String(s.student_id || ''));
       if (sid) existingById.set(sid, s);
     }
 
@@ -1488,7 +1473,7 @@ Kaylee`;
     let skippedNoId = 0;
     let skippedNotFound = 0;
     for (const row of cleaned) {
-      const sid = String(row.student_id || '').trim();
+      const sid = normalizeStudentId(String(row.student_id || ''));
       if (!sid) { skippedNoId++; continue; }
       const match = existingById.get(sid);
       if (!match) { skippedNotFound++; continue; }
@@ -1579,19 +1564,12 @@ Kaylee`;
     if (!isAdmin()) return setMessage('Touchpoint logs are admin-only.');
     const student = students.find((s) => s.id === input.student_id);
     const pastForStudent = touchpoints.filter((t) => t.student_id === input.student_id);
-    // Only spend on an AI call when the student was actually reached — a
-    // missed call, no-show, or voicemail-only entry has no real
-    // conversation to ground a script in, so skip straight to the free
-    // fallback rather than pay for a generation with nothing to work with.
-    const hadRealConversation = !input.missed &&
-      input.touchpoint_type !== 'No-show / missed call' &&
-      !input.touchpoint_type.toLowerCase().includes('voicemail');
-    if (hadRealConversation) setMessage('Generating a personalized call prep script...');
-    const aiGenerated = hadRealConversation
-      ? await generateStudentSupportAI(input.note, input.course, input.momentum, student, pastForStudent)
-      : null;
-    const generated = aiGenerated || generateStudentSupport(input.note, input.course, input.momentum, student, pastForStudent);
-    const touchpoint: Touchpoint = { ...input, ...generated, copied: false, id: crypto.randomUUID() };
+    // No AI-generated call scripts or GROW prompts anymore — this just
+    // logs what actually happened (dropdown/checkbox selections only).
+    const touchpoint: Touchpoint = {
+      ...input, copied: false, id: crypto.randomUUID(),
+      next_call_prep: null, constructive_note: null, follow_up_email: null, follow_up_text: null,
+    };
     setTouchpoints((current) => [touchpoint, ...current]);
 
     // Ghost status is about missed CALLS IN A ROW, right now — not a
@@ -1614,19 +1592,17 @@ Kaylee`;
       last_contact_date: input.touchpoint_date,
       missed_call_count,
       status,
-      next_call_prep: generated.next_call_prep,
-      constructive_note: generated.constructive_note
     });
 
     if (!supabase) return setMessage('Touchpoint saved locally.');
     const { data, error } = await supabase.from('student_touchpoints').insert({
-      ...input, ...generated, copied: false,
+      ...input, next_call_prep: null, constructive_note: null, follow_up_email: null, follow_up_text: null, copied: false,
       missed: Boolean(input.missed), missed_email_sent: Boolean(input.missed_email_sent),
       voicemail_left: Boolean(input.voicemail_left), is_weekly: Boolean(input.is_weekly)
     }).select().single();
     if (error) return setMessage(`Touchpoint save failed: ${error.message}`);
     setTouchpoints((current) => [data as Touchpoint, ...current.filter((t) => t.id !== touchpoint.id)]);
-    setMessage('Touchpoint saved and next-call prep generated.');
+    setMessage('Touchpoint saved.');
   }
 
   async function updateTouchpoint(id: string, patch: Partial<Touchpoint>) {
@@ -2253,8 +2229,9 @@ Kaylee`;
           {page === 'dashboard' && <Dashboard mode={activeRole === 'limited' ? 'home' : mode} inventory={inventory} students={students} touchpoints={touchpoints} tasks={tasks} choreTasks={choreTasks} householdUsers={householdUsers} role={activeRole} setPage={setPage} />}
           {page === 'calendar' && (mode === 'home' || activeRole === 'limited'
             ? <GoogleCalendar />
-            : <WorkCalendar students={students} />
+            : <WorkCalendar students={students} onOpenDailySchedule={() => setPage('daily_schedule')} />
           )}
+          {page === 'daily_schedule' && activeRole === 'admin' && <DailySchedule students={students} touchpoints={touchpoints} createTouchpoint={createTouchpoint} setPage={setPage} />}
           {page === 'budget' && <Budget />}
           {page === 'inventory' && <Inventory inventory={inventory} createItem={createInventoryItem} updateQuantity={updateInventoryQuantity} editable={canEdit('inventory')} />}
           {page === 'chores' && <Chores choreTasks={choreTasks} choreSuggestions={choreSuggestions} syncState={syncState} syncing={syncing} householdUsers={householdUsers} currentUserName={activeName} syncTodoistNow={syncTodoistNow} completeChore={completeChore} uncompleteChore={uncompleteChore} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} approveSuggestionForAdam={approveSuggestionForAdam} approveSuggestionForSelf={approveSuggestionForSelf} reassignChore={reassignChore} editable={canEdit('chores')} />}
@@ -2911,45 +2888,160 @@ function NotificationBell({ setPage, setDeepLinkRecipeId, setDeepLinkMediaId }: 
   );
 }
 
+// ── Daily Schedule: checkbox-only version of "who do I need to call today" ──
+// Pulls from each student's weekly appointment time (or a one-off
+// next_call_at/next_appointment_date set for today) and lets Kaylee log
+// what happened with dropdowns/checkboxes only — no free text, no
+// AI-generated scripts. Communicated? -> Live Call or Email. Not
+// communicated? -> Left voicemail? Sent missed-call email?
+function DailySchedule({ students, touchpoints, createTouchpoint, setPage }: {
+  students: Student[]; touchpoints: Touchpoint[];
+  createTouchpoint: (input: Omit<Touchpoint, 'id' | 'next_call_prep' | 'constructive_note' | 'follow_up_email' | 'follow_up_text' | 'copied'>) => Promise<void>;
+  setPage: (page: Page) => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const todayDow = new Date().getDay();
+  const isSameDay = (iso: string | null | undefined, ymd: string) => !!iso && iso.slice(0, 10) === ymd;
+
+  const scheduledToday = useMemo(() => students
+    .filter((s) => !s.archived && !s.on_term_break)
+    .filter((s) =>
+      (s.is_weekly_appointment && s.weekly_appointment_day_of_week === todayDow) ||
+      isSameDay(s.next_call_at, today) || s.next_appointment_date === today
+    )
+    .sort((a, b) => {
+      const timeOf = (s: Student) => (s.is_weekly_appointment ? s.weekly_appointment_time : null) || (s.next_call_at ? s.next_call_at.slice(11, 16) : '99:99');
+      return timeOf(a).localeCompare(timeOf(b));
+    }), [students, today, todayDow]);
+
+  type Choice = { communicated: '' | 'yes' | 'no'; method: '' | 'call' | 'email'; voicemail: boolean; missedEmail: boolean };
+  const [choices, setChoices] = useState<Record<string, Choice>>({});
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
+
+  function getChoice(id: string): Choice {
+    return choices[id] || { communicated: '', method: '', voicemail: false, missedEmail: false };
+  }
+  function setChoice(id: string, patch: Partial<Choice>) {
+    setChoices((cur) => ({ ...cur, [id]: { ...getChoice(id), ...patch } }));
+  }
+
+  const loggedTodayIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of touchpoints) if (t.touchpoint_date === today) set.add(t.student_id);
+    return set;
+  }, [touchpoints, today]);
+
+  async function logRow(student: Student) {
+    const choice = getChoice(student.id);
+    if (!choice.communicated) return;
+    setSaving((cur) => ({ ...cur, [student.id]: true }));
+    const touchpoint_type = choice.communicated === 'yes'
+      ? (choice.method === 'email' ? 'Email to student' : 'Call to student')
+      : 'No-show / missed call';
+    await createTouchpoint({
+      student_id: student.id,
+      touchpoint_type,
+      touchpoint_date: today,
+      course: student.course || '',
+      momentum: student.momentum || '',
+      note: '',
+      missed: choice.communicated === 'no',
+      missed_email_sent: choice.communicated === 'no' ? choice.missedEmail : false,
+      voicemail_left: choice.communicated === 'no' ? choice.voicemail : false,
+      is_weekly: !!(student.is_weekly_appointment && student.weekly_appointment_day_of_week === todayDow),
+    });
+    setSaving((cur) => ({ ...cur, [student.id]: false }));
+  }
+
+  return (
+    <div>
+      <Header title="Daily Schedule" sub={`${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} — ${scheduledToday.length} scheduled`}>
+        <button className="btn ghost" onClick={() => setPage('students')}><Users size={15} /> Students</button>
+      </Header>
+
+      {scheduledToday.length === 0 && (
+        <div className="brief-item">Nobody has a weekly appointment or scheduled call today.</div>
+      )}
+
+      {scheduledToday.map((student) => {
+        const choice = getChoice(student.id);
+        const alreadyLogged = loggedTodayIds.has(student.id);
+        const timeLabel = (student.is_weekly_appointment ? student.weekly_appointment_time : null) ||
+          (student.next_call_at ? new Date(student.next_call_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'Today');
+        return (
+          <section key={student.id} className="panel" style={{ marginBottom: 10, opacity: alreadyLogged ? 0.6 : 1 }}>
+            <div className="panel-head">
+              <div>
+                <strong>{student.display_name}</strong>
+                <p style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 0' }}>
+                  {timeLabel} · {student.course || 'No course'}
+                  {alreadyLogged && <span style={{ color: 'var(--green)', fontWeight: 700 }}> · ✓ Logged today</span>}
+                </p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+              <button
+                className={choice.communicated === 'yes' ? 'btn primary' : 'btn ghost'}
+                onClick={() => setChoice(student.id, { communicated: 'yes' })}
+              >
+                ✅ Communicated
+              </button>
+              <button
+                className={choice.communicated === 'no' ? 'btn warning' : 'btn ghost'}
+                onClick={() => setChoice(student.id, { communicated: 'no' })}
+              >
+                ❌ Missed
+              </button>
+            </div>
+
+            {choice.communicated === 'yes' && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8, paddingLeft: 4 }}>
+                <button
+                  className={choice.method === 'call' ? 'btn primary tiny' : 'btn ghost tiny'}
+                  onClick={() => setChoice(student.id, { method: 'call' })}
+                >
+                  <Phone size={12} /> Live Call
+                </button>
+                <button
+                  className={choice.method === 'email' ? 'btn primary tiny' : 'btn ghost tiny'}
+                  onClick={() => setChoice(student.id, { method: 'email' })}
+                >
+                  <Mail size={12} /> Email
+                </button>
+              </div>
+            )}
+
+            {choice.communicated === 'no' && (
+              <div style={{ paddingLeft: 4, marginBottom: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 6 }}>
+                  <input type="checkbox" checked={choice.voicemail} onChange={(e) => setChoice(student.id, { voicemail: e.target.checked })} />
+                  Left voicemail
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                  <input type="checkbox" checked={choice.missedEmail} onChange={(e) => setChoice(student.id, { missedEmail: e.target.checked })} />
+                  Sent missed-call email
+                </label>
+              </div>
+            )}
+
+            <button
+              className="btn primary tiny"
+              disabled={!choice.communicated || (choice.communicated === 'yes' && !choice.method) || saving[student.id]}
+              onClick={() => logRow(student)}
+            >
+              <Check size={13} /> {saving[student.id] ? 'Logging...' : alreadyLogged ? 'Log Another' : 'Log It'}
+            </button>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function Dashboard({ mode, inventory, students, touchpoints, tasks, choreTasks, householdUsers, role, setPage }: { mode: Mode; inventory: InventoryItem[]; students: Student[]; touchpoints: Touchpoint[]; tasks: TaskItem[]; choreTasks: ChoreTask[]; householdUsers: HouseholdUser[]; role: Role; setPage: (page: Page) => void }) {
   const expiring = inventory.filter((item) => item.expires && item.quantity > 0).length;
   const pending = tasks.filter((task) => task.status === 'pending_approval').length;
-  const activeStudents = students.filter((student) => !student.archived && !student.on_term_break);
-  // Matches the Students tab's definition exactly (risk === 'High Risk',
-  // excluding archived/term-break students) — the dashboard previously used
-  // a looser substring check that also matched "Med High" and ghost/portal
-  // students, which is why this number and the Students tab disagreed.
-  const highRiskStudents = activeStudents.filter((student) => student.risk === 'High Risk');
-  const ghostRiskStudents = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).isGhost);
-  const supportStudents = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).isSupport);
-  const followUpsDue = activeStudents.filter((student) => studentStatusSignals(student, touchpoints).needsFollowUp);
-  const today = new Date().toISOString().slice(0, 10);
-  const isSameDay = (iso: string | null | undefined, ymd: string) => !!iso && iso.slice(0, 10) === ymd;
-  const callsToday = activeStudents
-    .filter((student) => isSameDay(student.next_call_at, today) || student.next_appointment_date === today)
-    .sort((a, b) => {
-      const at = a.next_call_at ? new Date(a.next_call_at).getTime() : Number.MAX_SAFE_INTEGER;
-      const bt = b.next_call_at ? new Date(b.next_call_at).getTime() : Number.MAX_SAFE_INTEGER;
-      return at - bt;
-    });
-  const nowMs = Date.now();
-  const sevenDaysMs = nowMs + 7 * 24 * 60 * 60 * 1000;
-  const callsThisWeek = activeStudents
-    .filter((student) => {
-      if (!student.next_call_at) return false;
-      const t = new Date(student.next_call_at).getTime();
-      return t > nowMs && t <= sevenDaysMs && !isSameDay(student.next_call_at, today);
-    })
-    .sort((a, b) => new Date(a.next_call_at!).getTime() - new Date(b.next_call_at!).getTime());
-  const priorityQueue = [...activeStudents].sort((a, b) => priorityScore(b, touchpoints) - priorityScore(a, touchpoints)).slice(0, 6);
-  const todayDow = new Date().getDay();
-  const todaysCallsRanked = activeStudents
-    .filter((student) =>
-      (student.is_weekly_appointment && student.weekly_appointment_day_of_week === todayDow) ||
-      isSameDay(student.next_call_at, today) || student.next_appointment_date === today
-    )
-    .sort((a, b) => priorityScore(b, touchpoints) - priorityScore(a, touchpoints))
-    .slice(0, 5);
 
   // Work mode no longer has its own dashboard — the Work nav lands on
   // Students directly (see the redirect effect above).
@@ -5359,14 +5451,17 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
   const archivedStudents = students.filter((student) => student.archived);
   const [showArchived, setShowArchived] = useState(false);
   const [termBreakOnly, setTermBreakOnly] = useState(false);
-  const [statFilter, setStatFilter] = useState<'high_risk' | 'ghost' | null>(null);
+  const [statFilter, setStatFilter] = useState<'high_risk' | 'ghost' | 'no_weekly_time' | null>(null);
   const [search, setSearch] = useState('');
   const baseList = showArchived ? archivedStudents : activeStudents;
   const filteredByBreak = termBreakOnly ? baseList.filter((s) => s.on_term_break) : baseList;
+  const needsWeeklyTime = (s: Student) => !s.on_term_break && (!s.is_weekly_appointment || s.weekly_appointment_day_of_week == null || !s.weekly_appointment_time);
   const filteredByStat = statFilter === 'high_risk'
     ? filteredByBreak.filter((s) => s.risk === 'High Risk' && !s.on_term_break)
     : statFilter === 'ghost'
     ? filteredByBreak.filter((s) => studentStatusSignals(s, touchpoints).isGhost && !s.on_term_break)
+    : statFilter === 'no_weekly_time'
+    ? filteredByBreak.filter(needsWeeklyTime)
     : filteredByBreak;
   const visibleStudents = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -5660,6 +5755,7 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
       ["Archived", String(archivedStudents.length), undefined, () => { setShowArchived(true); setStatFilter(null); }, showArchived],
       ["High risk", String(students.filter((s) => s.risk === 'High Risk' && !s.archived && !s.on_term_break).length), undefined, () => { setShowArchived(false); setStatFilter('high_risk'); }, statFilter === 'high_risk'],
       ["Ghost flags", String(students.filter((s) => !s.archived && !s.on_term_break && studentStatusSignals(s, touchpoints).isGhost).length), undefined, () => { setShowArchived(false); setStatFilter('ghost'); }, statFilter === 'ghost'],
+      ["Needs weekly time", String(activeStudents.filter(needsWeeklyTime).length), undefined, () => { setShowArchived(false); setStatFilter('no_weekly_time'); }, statFilter === 'no_weekly_time'],
       ["Term Break", String(students.filter((s) => s.on_term_break && !s.archived).length), undefined, () => { setShowArchived(false); setStatFilter(null); setTermBreakOnly(!termBreakOnly); }, termBreakOnly]
     ]} />
     {addingStudent && <section className="panel"><h2>Add student</h2><p className="settings-intro">Use first name, nickname, or initial only. Avoid student IDs, email addresses, phone numbers, and last names.</p><div className="form-grid"><input placeholder="Display name" value={studentForm.display_name} onChange={(e) => setStudentForm({ ...studentForm, display_name: e.target.value })} /><input placeholder="Student ID (WGU)" value={studentForm.student_id} onChange={(e) => setStudentForm({ ...studentForm, student_id: e.target.value })} /><CourseCombobox value={studentForm.course} onChange={(v) => setStudentForm({ ...studentForm, course: v })} /><input placeholder="Goal" value={studentForm.goal} onChange={(e) => setStudentForm({ ...studentForm, goal: e.target.value })} /><input placeholder="Email (for outreach drafts)" type="email" value={studentForm.email} onChange={(e) => setStudentForm({ ...studentForm, email: e.target.value })} /><select value={studentForm.risk} onChange={(e) => setStudentForm({ ...studentForm, risk: e.target.value })}>{riskLevels.map((risk) => <option key={risk}>{risk}</option>)}</select><select value={studentForm.status} onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value })}>{studentStatuses.filter((status) => status !== 'Archived').map((status) => <option key={status}>{status}</option>)}</select><label className="date-field"><span>Next appointment</span><input type="date" value={studentForm.next_appointment_date} onChange={(e) => setStudentForm({ ...studentForm, next_appointment_date: e.target.value })} /></label><label className="date-field"><span>Graduation goal</span><input type="date" value={studentForm.graduation_goal_date} onChange={(e) => setStudentForm({ ...studentForm, graduation_goal_date: e.target.value })} /></label></div><textarea placeholder="Admin notes for Kaylee only" value={studentForm.admin_notes} onChange={(e) => setStudentForm({ ...studentForm, admin_notes: e.target.value })} />{ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`).length > 0 && <FerpaWarning warnings={ferpaWarnings(`${studentForm.display_name} ${studentForm.goal} ${studentForm.admin_notes}`)} />}<div className="form-actions"><button className="btn primary" onClick={submitStudent}><Save size={15} /> Save Student</button></div></section>}
@@ -6043,7 +6139,12 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
                 <select value={touchForm.touchpoint_type} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_type: e.target.value })}>{touchpointTypes.map((type) => <option key={type}>{type}</option>)}</select>
                 <input type="date" value={touchForm.touchpoint_date} onChange={(e) => setTouchForm({ ...touchForm, touchpoint_date: e.target.value, next_call_at: addDays(new Date(`${e.target.value}T00:00`), 7).toISOString().slice(0, 10) })} />
                 <CourseCombobox value={touchForm.course || selected.course || ''} onChange={(v) => setTouchForm({ ...touchForm, course: v })} />
-                <input placeholder="Momentum" value={touchForm.momentum} onChange={(e) => setTouchForm({ ...touchForm, momentum: e.target.value })} />
+                <select value={touchForm.momentum} onChange={(e) => setTouchForm({ ...touchForm, momentum: e.target.value })}>
+                  <option value="">Momentum...</option>
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                </select>
               </div>
               <label className="date-field"><span>Next touchpoint date (auto-set one week out, editable)</span><input type="date" value={touchForm.next_call_at} onChange={(e) => setTouchForm({ ...touchForm, next_call_at: e.target.value })} /></label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '8px 0' }}>
@@ -6066,9 +6167,7 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
                   </label>
                 </div>
               )}
-              <textarea placeholder={touchForm.touchpoint_type === 'Email thread' ? 'Paste the full email thread here (all back-and-forth messages in one entry)...' : 'What happened? What did the student say? What is the next step?'} style={touchForm.touchpoint_type === 'Email thread' ? { minHeight: 200 } : undefined} value={touchForm.note} onChange={(e) => setTouchForm({ ...touchForm, note: e.target.value })} />
-              {ferpaWarnings(touchForm.note).length > 0 && <FerpaWarning warnings={ferpaWarnings(touchForm.note)} />}
-              <div className="form-actions"><button className="btn primary" onClick={submitTouchpoint} disabled={savingTouchpoint}><Save size={15} /> {savingTouchpoint ? 'Generating personalized prep...' : 'Save Touchpoint + Generate Prep'}</button></div>
+              <div className="form-actions"><button className="btn primary" onClick={submitTouchpoint} disabled={savingTouchpoint}><Save size={15} /> {savingTouchpoint ? 'Saving...' : 'Save Touchpoint'}</button></div>
             </section>
 
             <section className="panel">

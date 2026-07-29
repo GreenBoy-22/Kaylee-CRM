@@ -11,7 +11,7 @@
 // Each day cell shows a large call count number front and center.
 
 import { useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Phone } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Phone, ListTodo } from 'lucide-react';
 
 export interface WorkCalendarStudent {
   id: string;
@@ -93,6 +93,7 @@ type ViewMode = 'month' | 'week';
 
 interface Props {
   students: WorkCalendarStudent[];
+  onOpenDailySchedule?: () => void;
 }
 
 // Busy level → background color mapping (inline styles to guarantee rendering)
@@ -117,7 +118,7 @@ const LEVEL_BORDER: Record<BusyLevel, string> = {
   high: 'var(--red)',
 };
 
-export default function WorkCalendar({ students }: Props) {
+export default function WorkCalendar({ students, onOpenDailySchedule }: Props) {
   const [view, setView] = useState<ViewMode>('month');
   const [anchor, setAnchor] = useState<Date>(new Date());
   const [selectedKey, setSelectedKey] = useState<string>(toKey(new Date()));
@@ -211,6 +212,11 @@ export default function WorkCalendar({ students }: Props) {
           <button className="gcal-today-btn" onClick={goToday}>Today</button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {onOpenDailySchedule && (
+            <button className="gcal-today-btn" onClick={onOpenDailySchedule} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <ListTodo size={14} /> Daily Schedule
+            </button>
+          )}
           <div className="gcal-view-toggle">
             <button className={view === 'week' ? 'active' : ''} onClick={() => setView('week')}>Week</button>
             <button className={view === 'month' ? 'active' : ''} onClick={() => setView('month')}>Month</button>
