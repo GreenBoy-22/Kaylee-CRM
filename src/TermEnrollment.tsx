@@ -59,16 +59,24 @@ export default function TermEnrollment() {
   const [entries, setEntries] = useState<EnrollmentEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [confirmGenerate, setConfirmGenerate] = useState(false);
   const [roster, setRoster] = useState<RosterStudent[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [addSearch, setAddSearch] = useState('');
   const [adding, setAdding] = useState<string | null>(null);
 
+  // Which month's list is currently being viewed — defaults to the
+  // current calendar month, but Kaylee can pick any month directly
+  // (not locked to "whichever list was generated most recently").
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string>(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  });
+
   useEffect(() => {
-    load();
+    load(selectedMonthKey);
     loadRoster();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMonthKey]);
 
   async function loadRoster() {
     if (!supabase) return;
@@ -80,13 +88,13 @@ export default function TermEnrollment() {
     setRoster((data as RosterStudent[]) || []);
   }
 
-  async function load() {
+  async function load(monthKey: string) {
     if (!supabase) return;
     setLoading(true);
     const { data: lists } = await supabase
       .from('term_enrollment_lists')
       .select('*')
-      .eq('is_active', true)
+      .eq('target_month', monthKey)
       .order('created_at', { ascending: false })
       .limit(1);
     const list = (lists?.[0] as EnrollmentList) || null;
@@ -104,53 +112,60 @@ export default function TermEnrollment() {
     setLoading(false);
   }
 
-  function targetWindow(): { start: string; end: string; newTermLabel: string; newTermStart: string } {
+  // Options for the month picker: 3 months back through 6 months ahead
+  // of today, so both "catching up on a past month" and "getting ahead
+  // on an upcoming one" are just a click away.
+  const monthOptions = (() => {
     const now = new Date();
-    // Students transitioning show up by their CURRENT term_end_date falling
-    // in this window — term_start_date for the new term isn't filled in
-    // until the new term actually begins, so it can't be used to predict
-    // who's coming up next.
-    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
-    const newTermStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    const newTermLabel = newTermStart.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    return { start, end, newTermLabel, newTermStart: newTermStart.toISOString().slice(0, 10) };
-  }
+    const opts: { key: string; label: string }[] = [];
+    for (let i = -3; i <= 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+      opts.push({ key, label: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) });
+    }
+    return opts;
+  })();
 
-  async function generateList() {
+  // Finds (or creates) the list for the selected month, then adds any
+  // student whose CURRENT term_end_date falls within that SAME month —
+  // merged in alongside whatever's already there (e.g. students added
+  // via "Verify Term Starts"), never duplicating or wiping existing rows.
+  async function populateSelectedMonth() {
     if (!supabase) return;
     setGenerating(true);
-    setConfirmGenerate(false);
 
-    const { start, end, newTermLabel, newTermStart } = targetWindow();
+    const monthStart = new Date(`${selectedMonthKey}T00:00:00`);
+    const start = selectedMonthKey;
+    const end = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).toISOString().slice(0, 10);
+    const label = monthStart.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
-    // Retire the current active list, if any
-    if (activeList) {
-      await supabase.from('term_enrollment_lists').update({ is_active: false }).eq('id', activeList.id);
+    let list = activeList;
+    if (!list) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const uid = sessionData?.session?.user?.id;
+      const { data: newList, error: listError } = await supabase
+        .from('term_enrollment_lists')
+        .insert({ user_id: uid, label: `Term Enrollment: ${label}`, target_month: selectedMonthKey, is_active: true })
+        .select()
+        .single();
+      if (listError || !newList) { setGenerating(false); return; }
+      list = newList as EnrollmentList;
     }
 
-    // Pull students whose CURRENT term ends within this window — they're
-    // the ones rolling into a new term next.
-    const { data: sessionData } = await supabase.auth.getSession();
-    const uid = sessionData?.session?.user?.id;
-    const { data: students } = await supabase
+    // Students whose current term ends within the selected month.
+    const { data: matchingStudents } = await supabase
       .from('students')
       .select('id, display_name, contact_term, term_end_date')
       .eq('archived', false)
       .gte('term_end_date', start)
       .lte('term_end_date', end);
 
-    const { data: newList, error: listError } = await supabase
-      .from('term_enrollment_lists')
-      .insert({ user_id: uid, label: `Term Enrollment: ${newTermLabel}`, target_month: newTermStart, is_active: true })
-      .select()
-      .single();
+    const alreadyOnList = new Set(entries.map((e) => e.student_id).filter(Boolean));
+    const toInsert = (matchingStudents || []).filter((s) => !alreadyOnList.has(s.id));
 
-    if (listError || !newList) { setGenerating(false); return; }
-
-    if (students && students.length > 0) {
-      const rows = students.map((s) => ({
-        list_id: newList.id,
+    if (toInsert.length > 0) {
+      const rows = toInsert.map((s) => ({
+        list_id: list!.id,
         student_id: s.id,
         student_name: s.display_name,
         term_number: s.contact_term,
@@ -158,7 +173,7 @@ export default function TermEnrollment() {
       await supabase.from('term_enrollment_entries').insert(rows);
     }
 
-    await load();
+    await load(selectedMonthKey);
     setGenerating(false);
   }
 
@@ -210,7 +225,7 @@ export default function TermEnrollment() {
       student_name: student.display_name,
       term_number: student.contact_term,
     });
-    await load();
+    await load(selectedMonthKey);
     await loadRoster();
     setAdding(null);
     setAddSearch('');
@@ -236,31 +251,32 @@ export default function TermEnrollment() {
             Digital version of your OTP / registration tracking sheet.
           </p>
         </div>
-        {!confirmGenerate ? (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <select
+            value={selectedMonthKey}
+            onChange={(e) => setSelectedMonthKey(e.target.value)}
+            style={{ padding: '0.5rem 0.7rem', borderRadius: 8, border: `1px solid ${NAVY}`, fontSize: '0.9rem', fontWeight: 600, color: NAVY }}
+          >
+            {monthOptions.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+          </select>
           <button
-            onClick={() => setConfirmGenerate(true)}
+            onClick={populateSelectedMonth}
+            disabled={generating}
+            title="Adds any student whose current term ends in this month, and anyone new who isn't on the list yet — never removes or duplicates what's already here."
             style={{ background: GOLD, color: '#1a1a1a', border: 'none', borderRadius: 8, padding: '0.6rem 1.1rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            <RefreshCw size={15} /> Generate Next Month's List
+            <RefreshCw size={15} /> {generating ? 'Populating...' : 'Populate This Month'}
           </button>
-        ) : (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#fff3cd', padding: '0.5rem 0.75rem', borderRadius: 8 }}>
-            <span style={{ fontSize: 13 }}>This closes the current list and starts a new one. Sure?</span>
-            <button onClick={generateList} disabled={generating} style={{ background: ARMY_GREEN, color: 'white', border: 'none', borderRadius: 6, padding: '0.35rem 0.75rem', cursor: 'pointer' }}>
-              {generating ? 'Generating...' : 'Yes, generate'}
-            </button>
-            <button onClick={() => setConfirmGenerate(false)} style={{ background: 'white', border: '1px solid #ccc', borderRadius: 6, padding: '0.35rem 0.75rem', cursor: 'pointer' }}>
-              Cancel
-            </button>
-          </div>
-        )}
+        </div>
       </div>
 
       {loading && <p style={{ marginTop: 24 }}>Loading...</p>}
 
       {!loading && !activeList && (
         <div style={{ marginTop: 24, padding: '1.5rem', background: '#f4f5f0', borderRadius: 10, textAlign: 'center' }}>
-          <p style={{ margin: 0, color: '#555' }}>No list running yet. Click "Generate Next Month's List" to pull in students whose current term ends this month.</p>
+          <p style={{ margin: 0, color: '#555' }}>
+            No list for {monthOptions.find((m) => m.key === selectedMonthKey)?.label} yet. Click "Populate This Month" to pull in students whose current term ends this month — anyone already added via Verify Term Starts will show up here too once it's created.
+          </p>
         </div>
       )}
 
