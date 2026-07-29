@@ -44,6 +44,7 @@ function formatEventTime(event: GCalEvent): string {
   const time = start.toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
+    timeZone: "America/New_York",
   });
 
   if (isToday) return `Today, ${time}`;

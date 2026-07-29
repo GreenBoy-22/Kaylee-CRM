@@ -8,7 +8,7 @@ import { Calendar } from 'lucide-react';
 import { useGoogleCalendarData, busyLevelFromHours, type BusyLevel } from './useGoogleCalendarData';
 
 function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
 }
 
 const BUSY_LABEL: Record<BusyLevel, string> = {

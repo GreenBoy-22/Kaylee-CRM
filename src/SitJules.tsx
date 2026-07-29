@@ -25,7 +25,7 @@ function fmtRange(startIso: string, endIso: string, allDay: boolean): string {
   const end = new Date(endIso);
   const dateOpts: Intl.DateTimeFormatOptions = { weekday: 'long', month: 'long', day: 'numeric' };
   if (allDay) return `${start.toLocaleDateString('en-US', dateOpts)} \u2013 ${end.toLocaleDateString('en-US', dateOpts)}`;
-  const timeOpts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
+  const timeOpts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' };
   return `${start.toLocaleDateString('en-US', dateOpts)}, ${start.toLocaleTimeString('en-US', timeOpts)} \u2013 ${end.toLocaleTimeString('en-US', timeOpts)}`;
 }
 

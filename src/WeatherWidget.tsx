@@ -193,7 +193,7 @@ export default function WeatherWidget() {
         })));
       }
 
-      setLastUpdated(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
+      setLastUpdated(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }));
     } catch (err: any) {
       setError('Could not load weather data. NWS may be temporarily unavailable.');
     } finally {

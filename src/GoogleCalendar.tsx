@@ -57,7 +57,7 @@ const MONTH_NAMES = [
 ];
 
 function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
 }
 
 function buildMonthGrid(anchor: Date): Date[] {
@@ -173,7 +173,7 @@ export default function GoogleCalendar() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {syncedAt && (
             <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-              Updated {new Date(syncedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+              Updated {new Date(syncedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })}
             </span>
           )}
           <button className="gcal-nav-btn" onClick={refresh} aria-label="Refresh" disabled={refreshing}>
