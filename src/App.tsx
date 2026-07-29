@@ -366,8 +366,8 @@ const seedInventory: InventoryItem[] = [
 ];
 
 const seedStudents: Student[] = [
-  { id: 's1', display_name: 'Andrea', course: 'D316', goal: 'Finish current study plan checkpoint', risk: 'Medium', status: 'Active', copied: false, grow_note: 'Goal: complete D316 checkpoint. Reality: already on study plan. Options: keep steady pace and use course resources. Will: send update by Friday.', admin_notes: '', next_call_prep: 'Ask about the study plan checkpoint and what resource helped most this week.', constructive_note: 'Ask one concrete pacing question before giving advice.', last_contact_date: null, next_appointment_date: null, graduation_goal_date: null, missed_call_count: 0, archived: false },
-  { id: 's2', display_name: 'A.', course: 'Current course', goal: 'Increase weekly study time', risk: 'High', status: 'Support', copied: true, grow_note: 'Goal: get back on track. Reality: progress slowed. Options: block study time and ask for help early. Will: set aside focused study this week.', admin_notes: '', next_call_prep: 'Start with encouragement, then ask what study block worked best.', constructive_note: 'Keep questions open-ended and end with one small commitment.', last_contact_date: null, next_appointment_date: null, graduation_goal_date: null, missed_call_count: 1, archived: false }
+  { id: 's1', display_name: 'Andrea', course: 'D316', goal: 'Finish current study plan checkpoint', risk: 'Medium', status: 'Active', copied: false, grow_note: '', admin_notes: '', next_call_prep: null, constructive_note: null, last_contact_date: null, next_appointment_date: null, graduation_goal_date: null, missed_call_count: 0, archived: false },
+  { id: 's2', display_name: 'A.', course: 'Current course', goal: 'Increase weekly study time', risk: 'High', status: 'Support', copied: true, grow_note: '', admin_notes: '', next_call_prep: null, constructive_note: null, last_contact_date: null, next_appointment_date: null, graduation_goal_date: null, missed_call_count: 1, archived: false }
 ];
 
 const seedTouchpoints: Touchpoint[] = [];
@@ -904,317 +904,6 @@ function App() {
     }));
   }
 
-  // Pulls the "Goal for the Next Week:" section out of a touchpoint note,
-  // since Kaylee's own note format already includes one — this lets call
-  // prep hold the student accountable to their own stated commitment
-  // instead of guessing at a generic goal.
-  function extractStatedGoal(note: string | null | undefined): string | null {
-    if (!note) return null;
-    const match = note.match(/goal for (?:the )?next week:?\**\s*\n*([\s\S]*?)(?:\n+\*\*|\n+[A-Z][a-zA-Z ]*:|$)/i);
-    if (!match) return null;
-    const goal = match[1].replace(/\*\*/g, '').trim();
-    return goal || null;
-  }
-
-  // Pulls the "Call Summary" section if present, otherwise falls back to
-  // the first ~2 sentences of the note, for a short "what we talked about
-  // last time" recap.
-  function extractLastSummary(note: string | null | undefined): string | null {
-    if (!note) return null;
-    const match = note.match(/call summary:?\**\s*\n*([\s\S]*?)(?:\n+\*\*|\n+goal for|$)/i);
-    const text = (match ? match[1] : note).replace(/\*\*/g, '').trim();
-    if (!text) return null;
-    const sentences = text.split(/(?<=[.!?])\s+/).slice(0, 2).join(' ');
-    return sentences.length < text.length ? `${sentences}..` : sentences;
-  }
-
-  // Pulls the actual sentence(s) mentioning an OA/PA/assessment/exam out of
-  // a note, verbatim — rather than just flagging "an assessment was
-  // mentioned," this surfaces exactly what was said so the call prep can
-  // ask a specific, grounded follow-up instead of a generic one. Sentences
-  // that also carry a date/scheduling detail (postponed, this week, a
-  // weekday, etc.) are prioritized, since those are the most actionable.
-  // Shared sentence-extraction helper: strips section headers so they can't
-  // get glued onto adjacent sentences, then returns sentences matching the
-  // given keyword pattern, optionally sorted to prioritize ones that also
-  // carry a timing/date detail.
-  function extractSentencesMatching(text: string | null | undefined, kw: RegExp, timingKw?: RegExp): string[] {
-    if (!text) return [];
-    const cleaned = text.replace(/^\**\s*(call summary|goal for (?:the )?next week)\s*:?\**\s*$/gim, '');
-    const sentences = cleaned.split(/(?<=[.!?])\s+/).map((s) => s.replace(/\n+/g, ' ').trim()).filter((s) => kw.test(s) && s.length < 300);
-    if (timingKw) return sentences.sort((a, b) => Number(timingKw.test(b)) - Number(timingKw.test(a)));
-    return sentences;
-  }
-
-  function extractAssessmentMentions(text: string | null | undefined): string[] {
-    const kw = /\b(objective assessment|performance assessment|\bOA\b|\bPA\b|certification exam|the exam\b|proctored|voucher|assessment date)/i;
-    const timing = /\b(scheduled|reschedul|postpon|this week|next week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|by [A-Z][a-z]+ \d|on [A-Z][a-z]+ \d|\d{1,2}\/\d{1,2})/i;
-    return extractSentencesMatching(text, kw, timing).slice(0, 2);
-  }
-
-  // A practice-exam score or percentage mentioned — genuinely specific,
-  // worth checking whether it's moved since last time.
-  function extractScoreMentions(text: string | null | undefined): string[] {
-    const kw = /\d{1,3}\s?%|scored|practice (exam|test)|score of/i;
-    return extractSentencesMatching(text, kw).slice(0, 2);
-  }
-
-  // A named struggle or specific weak spot — not just "they seemed stuck,"
-  // but whatever they or Kaylee actually described.
-  function extractStruggleMentions(text: string | null | undefined): string[] {
-    const kw = /\b(struggl\w*|difficult\w*|challeng\w*|errors?|mistakes?|weak (spot|area)s?|rushing|confus\w*|overwhelm\w*|stuck)\b/i;
-    return extractSentencesMatching(text, kw).slice(0, 2);
-  }
-
-  // Advice Kaylee actually gave last time — first-person, past-tense
-  // coaching language. Worth following up on whether it landed.
-  function extractAdviceGiven(text: string | null | undefined): string[] {
-    const kw = /\bI (encouraged|emphasized|reinforced|recommended|suggested|reminded|advised|explained|walked (the student|them))\b/i;
-    return extractSentencesMatching(text, kw).slice(0, 2);
-  }
-
-  // Personal/life mentions — only ever used to build a warm, specific
-  // check-in when a student has actually shared something personal.
-  // Never forced or generic; this section simply doesn't appear if
-  // nothing real was said.
-  function extractPersonalMentions(text: string | null | undefined): string[] {
-    const kw = /\b(family|spouse|husband|wife|kids?|children|son|daughter|parent|mom|dad|sick|illness|hospital|surger\w*|injur\w*|mov(e|ing|ed)|relocat\w*|funeral|passed away|died|childcare|daycare|wedding|marri\w*|engage\w*|birthday|vacation|travel\w*|financ\w*|laid off|promotion|new job|stress\w*|overwhelm\w*|exhaust\w*|baby|pregnan\w*|newborn|deploy\w*|military|divorce|breakup)\b/i;
-    return extractSentencesMatching(text, kw).slice(0, 2);
-  }
-
-  async function generateStudentSupportAI(
-    note: string,
-    course?: string | null,
-    momentum?: string | null,
-    student?: Student | null,
-    pastTouchpoints?: Touchpoint[]
-  ): Promise<{ next_call_prep: string; constructive_note: string; follow_up_email: string; follow_up_text: string } | null> {
-    if (!supabase) return null;
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const authToken = sessionData?.session?.access_token;
-      if (!authToken) return null;
-
-      const courseText = course || student?.course || 'their current course';
-      const firstName = (student?.display_name || '').trim().split(/\s+/)[0] || 'there';
-      const recent = (pastTouchpoints || []).slice(0, 3);
-      const history = recent.length
-        ? recent.map((t) => `[${t.touchpoint_date}, ${t.touchpoint_type}]: ${t.note}`).join('\n\n')
-        : '(no prior touchpoints logged)';
-
-      const prompt = `You are Kaylee, a WGU Program Mentor, prepping for your NEXT call with a student, right after logging today's touchpoint note. Write a genuinely personal call-prep script grounded in the SPECIFIC things said in the note below and in recent touchpoint history — not generic template language. Quote or closely paraphrase real details (a specific worry, a specific course blocker, a specific personal life mention, a specific score or assessment) rather than vague placeholders. If nothing personal was actually shared, don't invent a personal check-in section — leave it out.
-
-STUDENT: ${firstName}, course: ${courseText}, momentum: ${momentum || student?.momentum || 'not set'}, missed calls: ${student?.missed_call_count || 0}, course end: ${student?.course_end_date || 'unknown'}, graduation goal: ${student?.graduation_goal_date || 'unknown'}
-
-TODAY'S TOUCHPOINT NOTE (just logged):
-${note}
-
-RECENT TOUCHPOINT HISTORY (most recent first):
-${history}
-
-Respond with ONLY a raw JSON object, no markdown fences, no preamble. Shape:
-{
-  "next_call_prep": "formatted script using this EXACT header style, only include PERSONAL CHECK-IN if something real was actually shared:\\n\\nGOAL — what today's call is for:\\n• \\\"...\\\"\\n\\nPERSONAL CHECK-IN — a softer opening, before the coursework:\\n• \\\"...\\\"\\n\\nREALITY — where things actually stand:\\n• \\\"...\\\"\\n\\nOPTIONS — brainstorm the path forward together:\\n• \\\"...\\\"\\n\\nWILL — lock in one dated commitment:\\n• \\\"...\\\"",
-  "constructive_note": "3-6 short GROW-aligned coaching reminders for Kaylee herself, one per line prefixed with '• ', grounded in this specific student's situation",
-  "follow_up_email": "a short follow-up email, use {first_name} as a placeholder, referencing the SPECIFIC thing discussed",
-  "follow_up_text": "a short follow-up text message, use {first_name} as a placeholder, referencing the SPECIFIC thing discussed"
-}`;
-
-      const response = await fetch(
-        'https://uccehajbwxzqdzvexzuc.supabase.co/functions/v1/ai-proxy',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 1500,
-            messages: [{ role: 'user', content: prompt }],
-          }),
-        }
-      );
-      const data = await response.json();
-      if (data.error) return null;
-      const raw = (data.content?.[0]?.text ?? '').trim();
-      if (!raw) return null;
-      const clean = raw.replace(/^```(?:json)?|```$/gm, '').trim();
-      const objStart = clean.indexOf('{');
-      const objEnd = clean.lastIndexOf('}');
-      const parsed = JSON.parse(clean.slice(objStart, objEnd + 1));
-      if (!parsed.next_call_prep) return null;
-      return parsed;
-    } catch {
-      return null;
-    }
-  }
-
-  function generateStudentSupport(
-    note: string,
-    course?: string | null,
-    momentum?: string | null,
-    student?: Student | null,
-    pastTouchpoints?: Touchpoint[]
-  ) {
-    const lower = note.toLowerCase();
-    const courseText = course ? course : (student?.course || 'their current course');
-    const m = (momentum || student?.momentum || '').toLowerCase();
-    const missedCount = Number(student?.missed_call_count || 0);
-    const courseEnd = student?.course_end_date || '';
-    const gradGoal = student?.graduation_goal_date || '';
-
-    // Pull recent touchpoint history (most recent 3, excluding this note)
-    const recent = (pastTouchpoints || []).slice(0, 3);
-    const lastGoal = extractStatedGoal(recent[0]?.note);
-    const lastRecap = extractLastSummary(recent[0]?.note);
-
-    // Theme detection from current + past notes
-    const allText = [note, ...recent.map((t) => t.note || '')].join(' ').toLowerCase();
-    const hasAssessment = /\b(assessment|oa\b|pa\b|exam|test|proctored)/.test(allText);
-    const hasZyBooks = /\bzy ?books?|labs?\b/.test(allText);
-    const hasBlocked = /\b(block|stuck|behind|struggl|overwhelm|hard time|confus|fail)/.test(allText);
-    const hasLife = /\b(work|job|family|kid|sick|health|move|moving|loss|funeral|childcare)/.test(allText);
-    const hasGhost = missedCount >= 2 || /\b(no answer|voicemail|no reply|no response|haven.?t heard)/.test(allText);
-    const isLowMomentum = m.includes('low');
-    const isHighMomentum = m.includes('high') && !m.includes('low');
-
-    const firstName = (student?.display_name || '').trim().split(/\s+/)[0] || 'there';
-
-    // ===== GOAL — opener + what today's call is for =====
-    const goalSection: string[] = [];
-    if (hasGhost) {
-      goalSection.push(`"Hey ${firstName}, I've been trying to reach you — I just want you to know I'm not chasing you down, I genuinely want to check in on how you're doing."`);
-    } else {
-      goalSection.push(`"Hi ${firstName}! Good to connect again."`);
-    }
-    goalSection.push(`"What would you like to walk away from our call today with?"`);
-
-    // ===== PERSONAL CHECK-IN — only appears when a student has actually
-    // shared something personal in a recent note. Never forced, never
-    // generic — this is specifically for the softer, caring opening that
-    // shows you remembered something real about their life, not just
-    // their coursework.
-    const personalMentions = [
-      ...extractPersonalMentions(note),
-      ...extractPersonalMentions(recent[0]?.note),
-    ].filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 2);
-    const personalSection: string[] = personalMentions.map((mention) =>
-      `"Before we dive into coursework — last time you mentioned: '${mention}' — how are things going with that now?"`
-    );
-
-    // ===== REALITY — where things actually stand, grounded in what was said last time =====
-    const realitySection: string[] = [];
-    if (lastGoal) {
-      const spokenGoal = lastGoal.replace(/^the student\s+/i, '').replace(/^will\s+/i, 'plans to ');
-      realitySection.push(`"Last time, here's what we talked about you working on: '${spokenGoal}' — how did that go this week?"`);
-      realitySection.push(`If they made progress: "That's great — what worked well, so we can keep doing more of that?"`);
-      realitySection.push(`If they didn't get to it: "No worries at all — what got in the way this week?"`);
-    } else if (recent[0]) {
-      realitySection.push(`"How have things been going in ${courseText} since we last talked${lastRecap ? `? Last time we touched on ${lastRecap.charAt(0).toLowerCase()}${lastRecap.slice(1)}` : ''}"`);
-    } else {
-      realitySection.push(`"I'd love to hear how things are going in ${courseText} so far."`);
-    }
-
-    // OA/PA/assessment status — grounded in exactly what was said
-    const assessmentMentions = [
-      ...extractAssessmentMentions(note),
-      ...extractAssessmentMentions(recent[0]?.note),
-    ].filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 2);
-    if (assessmentMentions.length) {
-      realitySection.push(`"Last time you mentioned: '${assessmentMentions[0]}' — has that happened yet, or is it still coming up?"`);
-      realitySection.push(`If it's already happened: "How did it go? If it wasn't a pass, what's the plan for the retake?"`);
-    } else {
-      realitySection.push(`"Do you have an assessment or exam coming up for ${courseText}? I want to make sure we're planning ahead for it${courseEnd ? ` before your course ends ${fmtDateShort(courseEnd)}` : ''}."`);
-    }
-
-    // A practice score/percentage mentioned last time — worth checking whether it's moved
-    const scoreMentions = [
-      ...extractScoreMentions(note),
-      ...extractScoreMentions(recent[0]?.note),
-    ].filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 1);
-    if (scoreMentions.length) {
-      realitySection.push(`"Last time you mentioned: '${scoreMentions[0]}' — how are your practice scores looking now?"`);
-    }
-
-    if (hasZyBooks) realitySection.push(`"How's it going with ZyBooks — which module or lab are you on right now?"`);
-
-    // Named struggle/weak spot — quote it specifically instead of a generic "anything slowing you down"
-    const struggleMentions = [
-      ...extractStruggleMentions(note),
-      ...extractStruggleMentions(recent[0]?.note),
-    ].filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 1);
-    if (struggleMentions.length) {
-      realitySection.push(`"Last time you mentioned: '${struggleMentions[0]}' — is that still giving you trouble, or has it gotten easier?"`);
-    } else if (hasBlocked) {
-      realitySection.push(`"Is there anything specific that's been slowing you down lately?"`);
-    }
-
-    // Advice Kaylee actually gave last time — follow up on whether it landed
-    const adviceMentions = [
-      ...extractAdviceGiven(note),
-      ...extractAdviceGiven(recent[0]?.note),
-    ].filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 1);
-    if (adviceMentions.length) {
-      realitySection.push(`"Last time I mentioned: '${adviceMentions[0]}' — were you able to try that? Did it help?"`);
-    }
-
-    if (isHighMomentum) realitySection.push(`"You've had really strong momentum lately — what's been working so well for you?"`);
-    realitySection.push(`"On a scale of 1 to 10, where do you feel you are with ${courseText} right now?"`);
-
-    // ===== OPTIONS — brainstorm the actual path forward, out loud, together =====
-    const optionsSection: string[] = [];
-    if (assessmentMentions.length) {
-      optionsSection.push(`"Would it help to go ahead and pick a specific date right now, while we're on the phone?"`);
-    }
-    if (struggleMentions.length || hasBlocked || isLowMomentum) {
-      optionsSection.push(`"What have you already tried for this, and what's one thing you haven't tried yet?"`);
-      optionsSection.push(`"What would one small, doable win look like for you this week? Let's not stack too much on your plate."`);
-    } else {
-      optionsSection.push(`"What are a couple different ways you could get to your next milestone this week?"`);
-    }
-    if (hasLife || personalMentions.length) optionsSection.push(`"Is there a way we could adjust your plan to work better around what's going on right now?"`);
-    optionsSection.push(`"Which of these feels the most doable to you?"`);
-
-    // ===== WILL — the actual dated commitment =====
-    const willSection: string[] = [];
-    if (courseEnd) willSection.push(`"Your course wraps up ${fmtDateShort(courseEnd)} — let's count the weeks together out loud and make sure the pace still makes sense."`);
-    if (gradGoal) willSection.push(`"Thinking about your graduation goal of ${fmtDateShort(gradGoal)} — how does this week's plan move you toward that?"`);
-    willSection.push(`"Before we hang up — what's the ONE thing you'll get done before we talk again, and what day will you do it by?"`);
-    willSection.push(`"What could get in the way of that, and what's your plan if it does?"`);
-
-    const next_call_prep =
-      `GOAL — what today's call is for:\n• ${goalSection.join('\n• ')}\n\n` +
-      (personalSection.length ? `PERSONAL CHECK-IN — a softer opening, before the coursework:\n• ${personalSection.join('\n• ')}\n\n` : '') +
-      `REALITY — where things actually stand:\n• ${realitySection.join('\n• ')}\n\n` +
-      `OPTIONS — brainstorm the path forward together:\n• ${optionsSection.join('\n• ')}\n\n` +
-      `WILL — lock in one dated commitment:\n• ${willSection.join('\n• ')}`;
-
-    // ===== Coaching questions for Kaylee (specific, GROW-aligned) =====
-    const coachQuestions: string[] = [];
-    coachQuestions.push(`Goal — "What do you most want to walk away from today's call with?"`);
-    coachQuestions.push(`Reality — "On a scale of 1-10, where are you with ${courseText} this week, and what makes it that number?"`);
-    if (hasBlocked || isLowMomentum) {
-      coachQuestions.push(`Reality — "What is the one thing that has been hardest to make progress on lately?"`);
-      coachQuestions.push(`Options — "What have you already tried, and what is one thing you haven't tried yet?"`);
-    } else {
-      coachQuestions.push(`Options — "What are two or three different ways you could get to your next milestone?"`);
-    }
-    if (hasAssessment) coachQuestions.push(`Options — "If we mapped your study time backward from your assessment date, what does each week need to look like?"`);
-    if (hasLife) coachQuestions.push(`Reality — "How is your study time fitting around what is going on outside of school right now?"`);
-    coachQuestions.push(`Will — "By our next call, what is the ONE specific thing you will have completed, and what day?"`);
-    coachQuestions.push(`Will — "What could get in the way of that, and what is your plan if it does?"`);
-    coachQuestions.push(`Self-check for Kaylee: did I ask before I offered? Did I end with a commitment in the student's own words?`);
-
-    const constructive_note = '• ' + coachQuestions.join('\n• ');
-
-    const follow_up_email = `Hi {first_name},
-
-Thank you for connecting with me${recent[0] ? ` on ${recent[0].touchpoint_date}` : ''}. Based on our conversation, the next best step is to focus on one specific course action in ${courseText} before our next check-in${courseEnd ? ` (course end ${courseEnd})` : ''}. Please reply with what you plan to complete next and what support you need from me.
-
-Best,
-Kaylee`;
-    const follow_up_text = `Hi {first_name}, this is Kaylee checking in. Before our next call, what is the one ${courseText} task you plan to complete next?`;
-
-    return { next_call_prep, constructive_note, follow_up_email, follow_up_text };
-  }
 
   function ferpaWarnings(text: string) {
     const warnings: string[] = [];
@@ -5746,7 +5435,7 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
   const selectedIsHighRisk = selected ? String(selected.risk).toLowerCase().includes('high') : false;
 
   return <>
-    <Header title="Students" sub="FERPA-safe student history, touchpoints, next-call prep, and follow-up drafts.">
+    <Header title="Students" sub="FERPA-safe student history and touchpoints.">
       <button className="btn primary" onClick={() => setAddingStudent(!addingStudent)}><Plus size={15} /> Add Student</button>
       <label className="btn ghost upload-button" title="Updates existing students from Salesforce CSV by Student ID. Does not create new students or overwrite your notes."><Upload size={15} /> {importingCsv ? 'Updating...' : 'Update from Salesforce CSV'}<input type="file" accept=".csv,text/csv" onChange={(e) => handleCsvUpload(e.target.files?.[0])} /></label>
       <button className="btn ghost" onClick={() => setShowArchived(!showArchived)}><Archive size={15} /> {showArchived ? 'Active' : 'Archived'}</button>
@@ -5768,7 +5457,7 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
         ...(selectedIsHighRisk ? { background: 'linear-gradient(180deg, rgba(192,57,43,0.08), rgba(192,57,43,0.02) 260px, transparent 460px)', borderLeft: '4px solid #c0392b' } : {}),
       }}>
         {listCollapsed && <button className="btn ghost" style={{ marginBottom: 10 }} onClick={() => setListCollapsed(false)}>← Back to student list</button>}
-        {/* TOP ZONE: header + health + quick facts + next call prep — always visible without scrolling */}
+        {/* TOP ZONE: header + health + Essential Actions — always visible without scrolling */}
         <section className="panel student-top-zone" style={{ position: 'relative', overflow: 'hidden' }}>
           {selectedIsGhost && (
             <GhostIcon
@@ -6172,7 +5861,7 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
               </div>
             )}
           </section>
-      </section> : <section className="panel"><h2>Select a student</h2><p>Add or select a student to view their profile, touchpoints, and next-call prep.</p></section>}
+      </section> : <section className="panel"><h2>Select a student</h2><p>Add or select a student to view their profile and touchpoints.</p></section>}
     </div>
   </>;
 }
