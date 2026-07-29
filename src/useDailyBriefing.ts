@@ -31,7 +31,7 @@ function daysBetween(fromKey: string, toKeyStr: string): number {
   return Math.round((new Date(toKeyStr + 'T00:00:00').getTime() - new Date(fromKey + 'T00:00:00').getTime()) / 86400000);
 }
 function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
 }
 
 export function useDailyBriefing(role: Role = 'admin') {
