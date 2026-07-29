@@ -10,14 +10,25 @@ const STATUS_COLORS: Record<string, string> = {
   none: 'transparent',
   degree_plan_made: '#a8d5ba',
   term_break: '#f4a6a6',
+  term_break_requested: '#a6c8f4',
   registered: '#f5d76e',
+  new_student: '#c9d6f5',
+  returning_from_break: '#e0c8f0',
 };
 const STATUS_LABELS: Record<string, string> = {
   none: '—',
   degree_plan_made: 'Degree Plan Made',
-  term_break: 'Term Break',
+  term_break: 'Term Break (Approved)',
+  term_break_requested: 'Term Break Requested',
   registered: 'Registered',
+  new_student: '0 — New Student',
+  returning_from_break: 'Returning from Term Break',
 };
+// Students with either of these statuses weren't actually in a term last
+// term (brand new, or just coming back off a break), so there's no prior
+// coursework to have been on-time or behind on — they shouldn't count
+// toward the OTP percentage at all, in either direction.
+const OTP_EXCLUDED_STATUSES = new Set(['new_student', 'returning_from_break']);
 
 interface EnrollmentList {
   id: string;
@@ -237,7 +248,11 @@ export default function TermEnrollment() {
     .filter((s) => s.display_name.toLowerCase().includes(addSearch.trim().toLowerCase()))
     .slice(0, 8);
 
-  const otpCount = entries.filter((e) => e.otp_met).length;
+  // Only students who actually had a term to be on/off pace in count
+  // toward OTP — excludes anyone marked "0 — New Student" or "Returning
+  // from Term Break," since there's no prior coursework to measure.
+  const otpEligible = entries.filter((e) => !OTP_EXCLUDED_STATUSES.has(e.row_status));
+  const otpCount = otpEligible.filter((e) => e.otp_met).length;
   const degreePlanCount = entries.filter((e) => e.row_status === 'degree_plan_made').length;
   const registeredCount = entries.filter((e) => e.row_status === 'registered').length;
   const termBreakCount = entries.filter((e) => e.row_status === 'term_break').length;
@@ -415,7 +430,7 @@ export default function TermEnrollment() {
             <div style={{ border: `3px solid ${NAVY}`, borderRadius: 10, padding: '0.9rem', textAlign: 'center' }}>
               <div style={{ color: GOLD, fontWeight: 800, fontSize: '0.85rem', textTransform: 'uppercase', writingMode: 'vertical-rl', display: 'inline-block', marginRight: 8 }}>OTP</div>
               <div style={{ display: 'inline-block', verticalAlign: 'middle' }}>
-                <div style={{ fontSize: '1.6rem', fontWeight: 800, color: NAVY }}>{otpCount}/{entries.length}</div>
+                <div style={{ fontSize: '1.6rem', fontWeight: 800, color: NAVY }}>{otpCount}/{otpEligible.length}</div>
                 <div style={{ fontSize: '0.75rem', color: '#888' }}>OTP met</div>
               </div>
             </div>
@@ -431,13 +446,15 @@ export default function TermEnrollment() {
             <div style={{ border: `3px solid ${NAVY}`, borderRadius: 10, padding: '0.9rem' }}>
               <div style={{ color: GOLD, fontWeight: 800, fontSize: '0.9rem', textTransform: 'uppercase', textDecoration: 'underline', marginBottom: 8, textAlign: 'center' }}>Key</div>
               <div style={{ fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div><strong>TBR</strong> – Term Break Requested</div>
                 <div><Mail size={12} style={{ verticalAlign: 'middle' }} /> * – Email Sent</div>
                 <div><Check size={12} style={{ verticalAlign: 'middle' }} /> ✓ – Appt Email Sent</div>
                 <div><X size={12} style={{ verticalAlign: 'middle' }} /> ✗ – Appt Made</div>
                 <div style={{ background: STATUS_COLORS.degree_plan_made, padding: '2px 6px', borderRadius: 4, marginTop: 4 }}>Degree Plan Made</div>
-                <div style={{ background: STATUS_COLORS.term_break, padding: '2px 6px', borderRadius: 4 }}>Term Break</div>
+                <div style={{ background: STATUS_COLORS.term_break, padding: '2px 6px', borderRadius: 4 }}>Term Break (Approved)</div>
+                <div style={{ background: STATUS_COLORS.term_break_requested, padding: '2px 6px', borderRadius: 4 }}>Term Break Requested</div>
                 <div style={{ background: STATUS_COLORS.registered, padding: '2px 6px', borderRadius: 4 }}>Registered</div>
+                <div style={{ background: STATUS_COLORS.new_student, padding: '2px 6px', borderRadius: 4 }}>0 — New Student (not counted for OTP)</div>
+                <div style={{ background: STATUS_COLORS.returning_from_break, padding: '2px 6px', borderRadius: 4 }}>Returning from Term Break (not counted for OTP)</div>
               </div>
             </div>
           </div>
