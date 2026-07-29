@@ -1142,8 +1142,10 @@ function App() {
 
     if (!cleaned.length) return setMessage('No importable students found. Make sure the CSV includes Name and StudentID.');
 
-    // Update-only mode: match by student_id. Skip any CSV row whose ID isn't already in the DB.
-    // Only update fields that come from Salesforce; preserve everything Kaylee has edited in the UI.
+    // Match by student_id. Existing students get updated; a CSV row with
+    // no matching student_id gets created as a brand-new student instead.
+    // Only Salesforce-sourced fields get overwritten on updates; everything
+    // Kaylee has edited in the UI (notes, goals, manual status, etc.) is preserved.
     //
     // WGU/Salesforce IDs always include a leading zero (e.g. "012549754"),
     // but many records already in the Hub lost theirs somewhere along the
@@ -1166,13 +1168,21 @@ function App() {
       patch: Partial<Student>;
     };
     const updates: UpdateRow[] = [];
+    const toCreate: typeof cleaned = [];
     let skippedNoId = 0;
-    let skippedNotFound = 0;
     for (const row of cleaned) {
       const sid = normalizeStudentId(String(row.student_id || ''));
       if (!sid) { skippedNoId++; continue; }
       const match = existingById.get(sid);
-      if (!match) { skippedNotFound++; continue; }
+      if (!match) {
+        // No existing student has this ID — a genuinely new student on
+        // the roster. Create them rather than silently dropping the row;
+        // `row` is already a full Student-shaped object (course, goal,
+        // risk, status, all the Salesforce fields), so it can be
+        // inserted directly.
+        toCreate.push(row);
+        continue;
+      }
       // Salesforce-sourced fields ONLY. Manual fields (admin_notes, goal, status,
       // missed_call_count, next_appointment_date, last_contact_date, next_call_prep,
       // next_conversation_focus, constructive_note, grow_note, display_name) are preserved.
@@ -1195,19 +1205,23 @@ function App() {
       updates.push({ id: match.id, patch });
     }
 
-    if (!updates.length) {
+    if (!updates.length && !toCreate.length) {
       const parts = [];
-      if (skippedNotFound) parts.push(`${skippedNotFound} student${skippedNotFound === 1 ? '' : 's'} not in system (skipped)`);
       if (skippedNoId) parts.push(`${skippedNoId} row${skippedNoId === 1 ? '' : 's'} missing Student ID (skipped)`);
       return setMessage(`No updates applied. ${parts.join(', ') || 'CSV had no matching rows.'}`);
     }
 
     if (!supabase) {
-      setStudents((current) => current.map((s) => {
-        const u = updates.find((u) => u.id === s.id);
-        return u ? { ...s, ...u.patch } : s;
-      }));
-      return setMessage(`Updated ${updates.length} students locally${skippedNotFound ? ` · ${skippedNotFound} not in system, skipped` : ''}.`);
+      setStudents((current) => {
+        const updated = current.map((s) => {
+          const u = updates.find((u) => u.id === s.id);
+          return u ? { ...s, ...u.patch } : s;
+        });
+        const created = toCreate.map((row) => ({ ...row, id: crypto.randomUUID() } as Student));
+        return [...created, ...updated];
+      });
+      const createMsg = toCreate.length ? ` · ${toCreate.length} new student${toCreate.length === 1 ? '' : 's'} added` : '';
+      return setMessage(`Updated ${updates.length} students locally${createMsg}.`);
     }
 
     // Apply updates in parallel (small batch, fine for ~150 students).
@@ -1216,16 +1230,33 @@ function App() {
       return { id: u.id, data: data as Student | null, error };
     }));
     const errors = results.filter((r) => r.error);
-    if (errors.length === results.length) {
-      return setMessage(`CSV update failed: ${errors[0].error?.message || 'unknown error'}`);
-    }
-    setStudents((current) => current.map((s) => {
-      const r = results.find((r) => r.id === s.id && r.data);
-      return r && r.data ? r.data : s;
+
+    // Insert brand-new students for anything that didn't match.
+    const createResults = await Promise.all(toCreate.map(async (row) => {
+      const { data, error } = await supabase.from('students').insert(row).select().single();
+      return { data: data as Student | null, error };
     }));
-    const skipMsg = skippedNotFound ? ` · ${skippedNotFound} not in system, skipped` : '';
-    const errMsg = errors.length ? ` · ${errors.length} failed` : '';
-    setMessage(`Updated ${results.length - errors.length} students from CSV${skipMsg}${errMsg}.`);
+    const createErrors = createResults.filter((r) => r.error);
+    const createdStudents = createResults.filter((r) => r.data).map((r) => r.data as Student);
+
+    if (errors.length === results.length && createdStudents.length === 0 && toCreate.length > 0) {
+      return setMessage(`CSV import failed: ${errors[0]?.error?.message || createErrors[0]?.error?.message || 'unknown error'}`);
+    }
+
+    setStudents((current) => {
+      const updated = current.map((s) => {
+        const r = results.find((r) => r.id === s.id && r.data);
+        return r && r.data ? r.data : s;
+      });
+      return [...createdStudents, ...updated];
+    });
+
+    const parts = [`Updated ${results.length - errors.length} students`];
+    if (createdStudents.length > 0) parts.push(`${createdStudents.length} new student${createdStudents.length === 1 ? '' : 's'} added`);
+    if (errors.length) parts.push(`${errors.length} update${errors.length === 1 ? '' : 's'} failed`);
+    if (createErrors.length) parts.push(`${createErrors.length} new student${createErrors.length === 1 ? '' : 's'} failed to add`);
+    if (skippedNoId) parts.push(`${skippedNoId} row${skippedNoId === 1 ? '' : 's'} missing Student ID (skipped)`);
+    setMessage(`${parts.join(' · ')} from CSV.`);
   }
 
   async function createStudent(student: Omit<Student, 'id' | 'copied' | 'archived'>) {
@@ -5445,7 +5476,7 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
   return <>
     <Header title="Students" sub="FERPA-safe student history and touchpoints.">
       <button className="btn primary" onClick={() => setAddingStudent(!addingStudent)}><Plus size={15} /> Add Student</button>
-      <label className="btn ghost upload-button" title="Updates existing students from Salesforce CSV by Student ID. Does not create new students or overwrite your notes."><Upload size={15} /> {importingCsv ? 'Updating...' : 'Update from Salesforce CSV'}<input type="file" accept=".csv,text/csv" onChange={(e) => handleCsvUpload(e.target.files?.[0])} /></label>
+      <label className="btn ghost upload-button" title="Updates existing students from Salesforce CSV by Student ID, and adds any student on the CSV who isn't in the Hub yet. Never overwrites your own notes, goals, or call history."><Upload size={15} /> {importingCsv ? 'Updating...' : 'Update from Salesforce CSV'}<input type="file" accept=".csv,text/csv" onChange={(e) => handleCsvUpload(e.target.files?.[0])} /></label>
       <button className="btn ghost" onClick={() => setShowArchived(!showArchived)}><Archive size={15} /> {showArchived ? 'Active' : 'Archived'}</button>
       <button className={`btn ${termBreakOnly ? 'warning' : 'ghost'}`} onClick={() => setTermBreakOnly(!termBreakOnly)}>☕ {termBreakOnly ? 'Showing Break Only' : 'Term Break'}</button>
     </Header>
