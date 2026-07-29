@@ -109,6 +109,7 @@ type Student = {
   term_remaining_cu?: number | null;
   term_completed_cu?: number | null;
   contact_term?: number | null;
+  total_completed_cu?: number | null;
   weeks_in_course?: number | null;
   latest_course_note?: string | null;
   next_conversation_focus?: string | null;
@@ -891,6 +892,7 @@ function App() {
       enrolled_cu: row.enrolled_cu ?? null,
       term_remaining_cu: row.term_remaining_cu ?? null,
       term_completed_cu: row.term_completed_cu ?? null,
+      total_completed_cu: row.total_completed_cu ?? null,
       contact_term: row.contact_term ?? null,
       weeks_in_course: row.weeks_in_course ?? null,
       latest_course_note: row.latest_course_note || '',
@@ -1093,7 +1095,11 @@ function App() {
         ...row,
         displayname: row.displayname || row.name || '',
         studentid: row.studentid || row.wguid || row.studentidnumber || '',
-        contactterm: row.contactterm || row.term || row.termnumber || row.currentterm || row.termno || row.termnum || ''
+        contactterm: row.contactterm || row.term || row.termnumber || row.currentterm || row.termno || row.termnum || '',
+        // Total CUs completed across the WHOLE program (not just this
+        // term) — used to calculate overall Program Progress %. Accepts
+        // a few plausible header spellings since this is a newer column.
+        totalcompletedcu: row.totalcompletedcu || row.totalcompletedcus || row.programcompletedcu || row.cumulativecompletedcu || ''
       }))
       .filter((row) => row.displayname)
       .map((row) => {
@@ -1123,6 +1129,7 @@ function App() {
           enrolled_cu: csvNumber(row.enrolledcu),
           term_remaining_cu: csvNumber(row.termremainingcu),
           term_completed_cu: csvNumber(row.termcompletedcu),
+          total_completed_cu: csvNumber(row.totalcompletedcu),
           contact_term: csvNumber(row.contactterm),
           weeks_in_course: csvNumber(row.weeksincourse),
           latest_course_note: latestNote,
@@ -1180,6 +1187,7 @@ function App() {
         enrolled_cu: row.enrolled_cu ?? match.enrolled_cu,
         term_remaining_cu: row.term_remaining_cu ?? match.term_remaining_cu,
         term_completed_cu: row.term_completed_cu ?? match.term_completed_cu,
+        total_completed_cu: row.total_completed_cu ?? match.total_completed_cu,
         contact_term: row.contact_term ?? match.contact_term,
         weeks_in_course: row.weeks_in_course ?? match.weeks_in_course,
         student_timezone: row.student_timezone || match.student_timezone
@@ -5509,16 +5517,19 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--green)' }}>
                     {(() => {
-                      const c = selected.term_completed_cu, r = selected.term_remaining_cu;
-                      if (c == null || r == null || c + r === 0) return '—';
-                      return `${Math.round((c / (c + r)) * 100)}%`;
+                      const PROGRAM_TOTAL_CU = 122;
+                      const total = selected.total_completed_cu;
+                      if (total == null) return '—';
+                      return `${Math.min(100, Math.round((total / PROGRAM_TOTAL_CU) * 100))}%`;
                     })()}
                   </div>
-                  <div style={{ fontSize: 10, color: '#777' }}>This Term</div>
+                  <div style={{ fontSize: 10, color: '#777' }}>
+                    {selected.total_completed_cu != null ? `${selected.total_completed_cu}/122 CUs` : 'Program'}
+                  </div>
                 </div>
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: 20, fontWeight: 800, color: '#1a2744' }}>
-                    {selected.term_number ?? selected.contact_term ?? '—'}
+                    {selected.contact_term ?? selected.term_number ?? '—'}
                   </div>
                   <div style={{ fontSize: 10, color: '#777' }}>Term #</div>
                 </div>
