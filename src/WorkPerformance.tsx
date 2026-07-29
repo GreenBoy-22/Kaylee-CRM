@@ -410,12 +410,63 @@ export default function WorkPerformance() {
   async function resolveStart(student: StudentRow, action: 'start' | 'defer', deferUntil?: string) {
     if (!supabase) return;
     if (action === 'start') {
-      const today = new Date().toISOString().slice(0, 10);
-      const sixMonthsOut = new Date(); sixMonthsOut.setMonth(sixMonthsOut.getMonth() + 6);
+      // The new term starts the day AFTER their term break ends, not
+      // whatever day Kaylee happens to click "Starting Now" — she often
+      // confirms these a few days ahead of the actual date. Falls back to
+      // today only if there was no break-end date on file at all (a
+      // brand-new student with no term_break_expected_back set).
+      let startDate: Date;
+      if (student.term_break_expected_back) {
+        startDate = new Date(`${student.term_break_expected_back}T00:00:00`);
+        startDate.setDate(startDate.getDate() + 1);
+      } else {
+        startDate = new Date();
+      }
+      const termStart = startDate.toISOString().slice(0, 10);
+      const sixMonthsOut = new Date(startDate); sixMonthsOut.setMonth(sixMonthsOut.getMonth() + 6);
+
       await supabase.from('students').update({
-        term_start_date: today, term_end_date: sixMonthsOut.toISOString().slice(0, 10), on_term_break: false, term_break_expected_back: null
+        term_start_date: termStart, term_end_date: sixMonthsOut.toISOString().slice(0, 10), on_term_break: false, term_break_expected_back: null
       }).eq('id', student.id);
       setAllStudents((cur) => cur.map(s => s.id === student.id ? { ...s, on_term_break: false, term_break_expected_back: null } : s));
+
+      // Also add them to the Term Enrollment list for whichever month
+      // their new term actually starts in — find that month's list (or
+      // create it if it doesn't exist yet), and add an entry if they're
+      // not already on it.
+      const { data: sd } = await supabase.auth.getSession();
+      const uid = sd.session?.user?.id;
+      const targetMonth = `${termStart.slice(0, 7)}-01`;
+      let { data: list } = await supabase
+        .from('term_enrollment_lists')
+        .select('id')
+        .eq('target_month', targetMonth)
+        .maybeSingle();
+      if (!list) {
+        const label = startDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        const { data: newList } = await supabase
+          .from('term_enrollment_lists')
+          .insert({ user_id: uid, label: `Term Enrollment: ${label}`, target_month: targetMonth, is_active: true })
+          .select('id')
+          .single();
+        list = newList;
+      }
+      if (list) {
+        const { data: existingEntry } = await supabase
+          .from('term_enrollment_entries')
+          .select('id')
+          .eq('list_id', list.id)
+          .eq('student_id', student.id)
+          .maybeSingle();
+        if (!existingEntry) {
+          await supabase.from('term_enrollment_entries').insert({
+            list_id: list.id,
+            student_id: student.id,
+            student_name: student.display_name,
+            term_number: student.term_number ?? null,
+          });
+        }
+      }
     } else {
       await supabase.from('students').update({ on_term_break: true, term_break_expected_back: deferUntil || null }).eq('id', student.id);
       setAllStudents((cur) => cur.map(s => s.id === student.id ? { ...s, on_term_break: true, term_break_expected_back: deferUntil || null } : s));
