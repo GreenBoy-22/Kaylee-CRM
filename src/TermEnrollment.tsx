@@ -47,6 +47,7 @@ interface EnrollmentEntry {
   appt_email_sent: boolean;
   appt_made: boolean;
   row_status: string;
+  degree_plan_made: boolean;
   notes: string | null;
 }
 
@@ -465,15 +466,53 @@ export default function TermEnrollment() {
                     <tr style={{ background: '#f4f5f0' }}>
                       <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: `2px solid ${GOLD}`, width: 50 }}>Term</th>
                       <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: `2px solid ${GOLD}` }}>Student Name</th>
-                      <th style={{ padding: '6px 8px', textAlign: 'center', borderBottom: `2px solid ${GOLD}`, width: 60 }}>OTP Met</th>
-                      <th title="Email sent" style={{ padding: '6px 8px', textAlign: 'center', borderBottom: `2px solid ${GOLD}`, width: 44 }}>*</th>
-                      <th title="Appt email sent" style={{ padding: '6px 8px', textAlign: 'center', borderBottom: `2px solid ${GOLD}`, width: 44 }}>✓</th>
-                      <th title="Appt made" style={{ padding: '6px 8px', textAlign: 'center', borderBottom: `2px solid ${GOLD}`, width: 44 }}>✗</th>
+                      <th title="Degree plan made" style={{ padding: '6px 8px', textAlign: 'center', borderBottom: `2px solid ${GOLD}`, width: 100 }}>Degree Plan</th>
                       <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: `2px solid ${GOLD}`, width: 150 }}>Status</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {specialEntries.map((e) => renderEntryRow(e))}
+                    {specialEntries.map((e) => (
+                      <tr key={e.id} style={{ borderBottom: '1px solid #eee' }}>
+                        <td style={{ padding: '5px 8px' }}>{e.term_number ?? ''}</td>
+                        <td style={{ padding: '5px 8px', fontWeight: 600 }}>{e.student_name}</td>
+                        <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                          <input
+                            type="checkbox"
+                            checked={e.degree_plan_made}
+                            onChange={(ev) => updateEntry(e.id, { degree_plan_made: ev.target.checked })}
+                            title="Degree plan made — stays in this section, still not counted for OTP"
+                          />
+                        </td>
+                        <td style={{ padding: '5px 8px' }}>
+                          <select
+                            value={e.row_status}
+                            onChange={(ev) => handleStatusChange(e, ev.target.value)}
+                            style={{ width: '100%', fontSize: '0.8rem', padding: '2px 4px', background: 'transparent', border: '1px solid #ccc', borderRadius: 4 }}
+                          >
+                            {Object.entries(STATUS_LABELS).map(([val, label]) => (
+                              <option key={val} value={val}>{label}</option>
+                            ))}
+                          </select>
+                          {askingBreakDateId === e.id && (
+                            <div style={{ marginTop: 4, display: 'flex', gap: 4, alignItems: 'center' }}>
+                              <input
+                                type="date"
+                                value={breakDateInput}
+                                onChange={(ev) => setBreakDateInput(ev.target.value)}
+                                style={{ fontSize: '0.75rem', padding: '2px 4px', border: '1px solid #ccc', borderRadius: 3 }}
+                              />
+                              <button
+                                onClick={() => saveBreakDate(e)}
+                                disabled={!breakDateInput}
+                                style={{ fontSize: '0.7rem', padding: '2px 8px', background: ARMY_GREEN, color: 'white', border: 'none', borderRadius: 3, cursor: 'pointer', opacity: breakDateInput ? 1 : 0.5 }}
+                              >
+                                Save
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
