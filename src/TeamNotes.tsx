@@ -235,12 +235,23 @@ export default function TeamNotes() {
   async function createStandaloneTopic() {
     if (!supabase || !newTopicTitleField.trim() || !newTopicContent.trim()) return;
     setSavingNewTopic(true);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const uid = sessionData?.session?.user?.id;
+    if (!uid) {
+      alert('Could not confirm your login — try refreshing the page and saving again.');
+      setSavingNewTopic(false);
+      return;
+    }
     const { data: topic, error } = await supabase
       .from('sop_topics')
-      .insert({ category: newTopicCategory, title: newTopicTitleField.trim(), summary: newTopicContent.trim() })
+      .insert({ user_id: uid, category: newTopicCategory, title: newTopicTitleField.trim(), summary: newTopicContent.trim() })
       .select()
       .single();
-    if (error || !topic) { setSavingNewTopic(false); return; }
+    if (error || !topic) {
+      alert(`Didn't save: ${error?.message || 'unknown error'}`);
+      setSavingNewTopic(false);
+      return;
+    }
     const { data: anno } = await supabase
       .from('sop_annotations')
       .insert({ topic_id: topic.id, content: newTopicContent.trim(), added_manually: true })
