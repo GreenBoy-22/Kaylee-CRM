@@ -12,8 +12,6 @@ const STATUS_COLORS: Record<string, string> = {
   term_break: '#f4a6a6',
   term_break_requested: '#a6c8f4',
   registered: '#f5d76e',
-  new_student: '#c9d6f5',
-  returning_from_break: '#e0c8f0',
 };
 const STATUS_LABELS: Record<string, string> = {
   none: '—',
@@ -253,6 +251,64 @@ export default function TermEnrollment() {
   // from Term Break," since there's no prior coursework to measure.
   const otpEligible = entries.filter((e) => !OTP_EXCLUDED_STATUSES.has(e.row_status));
   const otpCount = otpEligible.filter((e) => e.otp_met).length;
+  // Split into the main OTP-tracked roster and the "New / Returning"
+  // group — kept as a visually separate section instead of a color-coded
+  // row, since which section a student is in is exactly the signal that
+  // matters (not a color to remember). Changing a row's status via the
+  // SAME dropdown in either section moves it between sections
+  // automatically — no separate "move back" action needed.
+  const mainEntries = entries.filter((e) => !OTP_EXCLUDED_STATUSES.has(e.row_status));
+  const specialEntries = entries.filter((e) => OTP_EXCLUDED_STATUSES.has(e.row_status));
+
+  function renderEntryRow(e: EnrollmentEntry) {
+    return (
+      <tr key={e.id} style={{ background: STATUS_COLORS[e.row_status], borderBottom: '1px solid #eee' }}>
+        <td style={{ padding: '5px 8px' }}>{e.term_number ?? ''}</td>
+        <td style={{ padding: '5px 8px', fontWeight: 600 }}>{e.student_name}</td>
+        <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+          <input type="checkbox" checked={e.otp_met} onChange={(ev) => updateEntry(e.id, { otp_met: ev.target.checked })} />
+        </td>
+        <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+          <input type="checkbox" checked={e.email_sent} onChange={(ev) => updateEntry(e.id, { email_sent: ev.target.checked })} />
+        </td>
+        <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+          <input type="checkbox" checked={e.appt_email_sent} onChange={(ev) => updateEntry(e.id, { appt_email_sent: ev.target.checked })} />
+        </td>
+        <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+          <input type="checkbox" checked={e.appt_made} onChange={(ev) => updateEntry(e.id, { appt_made: ev.target.checked })} />
+        </td>
+        <td style={{ padding: '5px 8px' }}>
+          <select
+            value={e.row_status}
+            onChange={(ev) => handleStatusChange(e, ev.target.value)}
+            style={{ width: '100%', fontSize: '0.8rem', padding: '2px 4px', background: 'transparent', border: '1px solid #ccc', borderRadius: 4 }}
+          >
+            {Object.entries(STATUS_LABELS).map(([val, label]) => (
+              <option key={val} value={val}>{label}</option>
+            ))}
+          </select>
+          {askingBreakDateId === e.id && (
+            <div style={{ marginTop: 4, display: 'flex', gap: 4, alignItems: 'center' }}>
+              <input
+                type="date"
+                value={breakDateInput}
+                onChange={(ev) => setBreakDateInput(ev.target.value)}
+                style={{ fontSize: '0.75rem', padding: '2px 4px', border: '1px solid #ccc', borderRadius: 3 }}
+              />
+              <button
+                onClick={() => saveBreakDate(e)}
+                disabled={!breakDateInput}
+                style={{ fontSize: '0.7rem', padding: '2px 8px', background: ARMY_GREEN, color: 'white', border: 'none', borderRadius: 3, cursor: 'pointer', opacity: breakDateInput ? 1 : 0.5 }}
+              >
+                Save
+              </button>
+            </div>
+          )}
+        </td>
+      </tr>
+    );
+  }
+
   const degreePlanCount = entries.filter((e) => e.row_status === 'degree_plan_made').length;
   const registeredCount = entries.filter((e) => e.row_status === 'registered').length;
   const termBreakCount = entries.filter((e) => e.row_status === 'term_break').length;
@@ -372,57 +428,36 @@ export default function TermEnrollment() {
                 </tr>
               </thead>
               <tbody>
-                {entries.length === 0 && (
+                {mainEntries.length === 0 && (
                   <tr><td colSpan={7} style={{ padding: '1rem', textAlign: 'center', color: '#999' }}>No students have a term ending this month.</td></tr>
                 )}
-                {entries.map((e) => (
-                  <tr key={e.id} style={{ background: STATUS_COLORS[e.row_status], borderBottom: '1px solid #eee' }}>
-                    <td style={{ padding: '5px 8px' }}>{e.term_number ?? ''}</td>
-                    <td style={{ padding: '5px 8px', fontWeight: 600 }}>{e.student_name}</td>
-                    <td style={{ padding: '5px 8px', textAlign: 'center' }}>
-                      <input type="checkbox" checked={e.otp_met} onChange={(ev) => updateEntry(e.id, { otp_met: ev.target.checked })} />
-                    </td>
-                    <td style={{ padding: '5px 8px', textAlign: 'center' }}>
-                      <input type="checkbox" checked={e.email_sent} onChange={(ev) => updateEntry(e.id, { email_sent: ev.target.checked })} />
-                    </td>
-                    <td style={{ padding: '5px 8px', textAlign: 'center' }}>
-                      <input type="checkbox" checked={e.appt_email_sent} onChange={(ev) => updateEntry(e.id, { appt_email_sent: ev.target.checked })} />
-                    </td>
-                    <td style={{ padding: '5px 8px', textAlign: 'center' }}>
-                      <input type="checkbox" checked={e.appt_made} onChange={(ev) => updateEntry(e.id, { appt_made: ev.target.checked })} />
-                    </td>
-                    <td style={{ padding: '5px 8px' }}>
-                      <select
-                        value={e.row_status}
-                        onChange={(ev) => handleStatusChange(e, ev.target.value)}
-                        style={{ width: '100%', fontSize: '0.8rem', padding: '2px 4px', background: 'transparent', border: '1px solid #ccc', borderRadius: 4 }}
-                      >
-                        {Object.entries(STATUS_LABELS).map(([val, label]) => (
-                          <option key={val} value={val}>{label}</option>
-                        ))}
-                      </select>
-                      {askingBreakDateId === e.id && (
-                        <div style={{ marginTop: 4, display: 'flex', gap: 4, alignItems: 'center' }}>
-                          <input
-                            type="date"
-                            value={breakDateInput}
-                            onChange={(ev) => setBreakDateInput(ev.target.value)}
-                            style={{ fontSize: '0.75rem', padding: '2px 4px', border: '1px solid #ccc', borderRadius: 3 }}
-                          />
-                          <button
-                            onClick={() => saveBreakDate(e)}
-                            disabled={!breakDateInput}
-                            style={{ fontSize: '0.7rem', padding: '2px 8px', background: ARMY_GREEN, color: 'white', border: 'none', borderRadius: 3, cursor: 'pointer', opacity: breakDateInput ? 1 : 0.5 }}
-                          >
-                            Save
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {mainEntries.map((e) => renderEntryRow(e))}
               </tbody>
             </table>
+
+            {specialEntries.length > 0 && (
+              <div style={{ marginTop: '1.5rem' }}>
+                <h3 style={{ fontSize: '0.95rem', color: NAVY, margin: '0 0 6px' }}>
+                  New / Returning Students <span style={{ fontWeight: 400, color: '#888', fontSize: '0.8rem' }}>— not counted toward OTP</span>
+                </h3>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr style={{ background: '#f4f5f0' }}>
+                      <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: `2px solid ${GOLD}`, width: 50 }}>Term</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: `2px solid ${GOLD}` }}>Student Name</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'center', borderBottom: `2px solid ${GOLD}`, width: 60 }}>OTP Met</th>
+                      <th title="Email sent" style={{ padding: '6px 8px', textAlign: 'center', borderBottom: `2px solid ${GOLD}`, width: 44 }}>*</th>
+                      <th title="Appt email sent" style={{ padding: '6px 8px', textAlign: 'center', borderBottom: `2px solid ${GOLD}`, width: 44 }}>✓</th>
+                      <th title="Appt made" style={{ padding: '6px 8px', textAlign: 'center', borderBottom: `2px solid ${GOLD}`, width: 44 }}>✗</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: `2px solid ${GOLD}`, width: 150 }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {specialEntries.map((e) => renderEntryRow(e))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* Right sidebar */}
@@ -453,8 +488,7 @@ export default function TermEnrollment() {
                 <div style={{ background: STATUS_COLORS.term_break, padding: '2px 6px', borderRadius: 4 }}>Term Break (Approved)</div>
                 <div style={{ background: STATUS_COLORS.term_break_requested, padding: '2px 6px', borderRadius: 4 }}>Term Break Requested</div>
                 <div style={{ background: STATUS_COLORS.registered, padding: '2px 6px', borderRadius: 4 }}>Registered</div>
-                <div style={{ background: STATUS_COLORS.new_student, padding: '2px 6px', borderRadius: 4 }}>0 — New Student (not counted for OTP)</div>
-                <div style={{ background: STATUS_COLORS.returning_from_break, padding: '2px 6px', borderRadius: 4 }}>Returning from Term Break (not counted for OTP)</div>
+                <div style={{ marginTop: 4, color: '#666' }}>"0 — New Student" and "Returning from Term Break" move a student into their own section below the table, not counted toward OTP.</div>
               </div>
             </div>
           </div>

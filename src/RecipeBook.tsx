@@ -265,6 +265,28 @@ export default function RecipeBook({ initialRecipeId, inventory = [] }: { initia
     );
   }
 
+  // Adds every ingredient in the recipe, regardless of whether it looks
+  // like you already have it — a full backup option for when inventory
+  // matching isn't reliable enough to trust for a specific recipe.
+  async function addFullRecipeToGroceryList(recipe: Recipe) {
+    if (recipe.ingredients.length === 0) return;
+    setAddingToGrocery(true);
+    const result = await addGroceryItems(
+      recipe.ingredients.map((line) => ({
+        name: groceryNameFromIngredientLine(line),
+        note: line,
+        source: 'recipe',
+        source_label: recipe.title,
+      }))
+    );
+    setAddingToGrocery(false);
+    setGroceryAddedMsg(
+      result.added > 0
+        ? `Added all ${result.added} ingredient${result.added !== 1 ? 's' : ''} to the grocery list${result.skipped > 0 ? ` (${result.skipped} already on it)` : ''}.`
+        : "Everything's already on the grocery list."
+    );
+  }
+
   const courses = useMemo(() => {
     const set = new Set(recipes.map((r) => r.course).filter((c): c is string => !!c && c.trim() !== ''));
     return Array.from(set).sort();
@@ -430,6 +452,13 @@ export default function RecipeBook({ initialRecipeId, inventory = [] }: { initia
                     <ShoppingCart size={14} /> Add missing to Grocery List
                   </button>
                 )}
+                <button
+                  onClick={() => addFullRecipeToGroceryList(cookWhatIHaveResult!.recipe)}
+                  disabled={addingToGrocery}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'white', border: '1px solid #999', color: '#555', borderRadius: 6, padding: '0.5rem 0.9rem', fontSize: '0.85rem', cursor: 'pointer' }}
+                >
+                  <ShoppingCart size={14} /> Add full recipe
+                </button>
                 {cookResultIndex + 1 < cookWhatIHaveCandidates.length && (
                   <button
                     onClick={() => { setCookResultIndex((i) => i + 1); setGroceryAddedMsg(''); }}
@@ -512,17 +541,26 @@ export default function RecipeBook({ initialRecipeId, inventory = [] }: { initia
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, flexWrap: 'wrap', gap: 6 }}>
               <h3 style={{ fontSize: '0.9rem', color: ARMY_GREEN, margin: 0 }}>Ingredients</h3>
-              {inStockNames.length > 0 && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                {inStockNames.length > 0 && (
+                  <button
+                    onClick={() => addMissingToGroceryList(selected)}
+                    disabled={addingToGrocery}
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'white', border: `1px solid ${ARMY_GREEN}`, color: ARMY_GREEN, borderRadius: 6, padding: '0.3rem 0.65rem', fontSize: '0.75rem', cursor: 'pointer' }}
+                  >
+                    <ShoppingCart size={12} /> Add missing to Grocery List
+                  </button>
+                )}
                 <button
-                  onClick={() => addMissingToGroceryList(selected)}
+                  onClick={() => addFullRecipeToGroceryList(selected)}
                   disabled={addingToGrocery}
-                  style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'white', border: `1px solid ${ARMY_GREEN}`, color: ARMY_GREEN, borderRadius: 6, padding: '0.3rem 0.65rem', fontSize: '0.75rem', cursor: 'pointer' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'white', border: '1px solid #999', color: '#555', borderRadius: 6, padding: '0.3rem 0.65rem', fontSize: '0.75rem', cursor: 'pointer' }}
                 >
-                  <ShoppingCart size={12} /> Add missing to Grocery List
+                  <ShoppingCart size={12} /> Add full recipe
                 </button>
-              )}
+              </div>
             </div>
             <ul style={{ margin: '0 0 4px', paddingLeft: 2, fontSize: '0.88rem', listStyle: 'none' }}>
               {selected.ingredients.map((ing, i) => {

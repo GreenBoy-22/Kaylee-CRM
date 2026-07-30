@@ -2216,20 +2216,6 @@ function daysUntil(dateValue?: string | null) {
 // knowing the year actually matters. If the raw value is a full timestamp
 // (not just a bare date) and carries a real local time other than
 // midnight, that time is appended in 12-hour AM/PM form.
-// Converts a stored 24-hour "HH:MM" time string (e.g. weekly appointment
-// times) into 12-hour AM/PM for display — the underlying stored value and
-// the <input type="time"> editors stay 24-hour, only the read-only text
-// display changes.
-function fmtTime12(hhmm: string | null | undefined): string {
-  if (!hhmm) return '';
-  const [hStr, mStr] = hhmm.split(':');
-  const h = Number(hStr);
-  if (Number.isNaN(h)) return hhmm;
-  const period = h >= 12 ? 'PM' : 'AM';
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:${mStr} ${period}`;
-}
-
 function fmtDateShort(dateValue?: string | null, includeYear = false): string {
   if (!dateValue) return '—';
   const d = new Date(dateValue.length <= 10 ? `${dateValue}T00:00:00` : dateValue);
@@ -2239,7 +2225,7 @@ function fmtDateShort(dateValue?: string | null, includeYear = false): string {
     : { month: 'long', day: 'numeric' };
   let out = d.toLocaleDateString('en-US', opts);
   if (dateValue.length > 10 && (d.getHours() !== 0 || d.getMinutes() !== 0)) {
-    out += ` at ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })}`;
+    out += ` at ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
   }
   return out;
 }
@@ -2660,57 +2646,6 @@ function DailySchedule({ students, touchpoints, createTouchpoint, setPage }: {
   const [choices, setChoices] = useState<Record<string, Choice>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
 
-  type RescheduleChoice = { checked: boolean; mode: 'same' | 'other'; otherTime: string };
-  const [reschedule, setReschedule] = useState<Record<string, RescheduleChoice>>({});
-  const [rescheduleStatus, setRescheduleStatus] = useState<Record<string, 'saving' | 'done' | 'error'>>({});
-
-  function getReschedule(id: string): RescheduleChoice {
-    return reschedule[id] || { checked: false, mode: 'same', otherTime: '' };
-  }
-  function setRescheduleFor(id: string, patch: Partial<RescheduleChoice>) {
-    setReschedule((cur) => ({ ...cur, [id]: { ...getReschedule(id), ...patch } }));
-  }
-
-  // "Today" and "+7 days," computed in Eastern calendar terms specifically
-  // — not the browser's local date — so this can't drift by a day if
-  // whatever device this runs on isn't set to Eastern time.
-  function nextWeekEasternDate(): string {
-    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
-    const y = Number(parts.find((p) => p.type === 'year')!.value);
-    const m = Number(parts.find((p) => p.type === 'month')!.value);
-    const d = Number(parts.find((p) => p.type === 'day')!.value);
-    const base = new Date(y, m - 1, d);
-    base.setDate(base.getDate() + 7);
-    return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}-${String(base.getDate()).padStart(2, '0')}`;
-  }
-
-  async function rescheduleWeeklyCall(student: Student) {
-    const choice = getReschedule(student.id);
-    if (!choice.checked || !supabase) return;
-    const time = choice.mode === 'other' && choice.otherTime ? choice.otherTime : (student.weekly_appointment_time || '15:00');
-    const [h, m] = time.split(':').map(Number);
-    let endH = h, endM = m + 30;
-    if (endM >= 60) { endM -= 60; endH += 1; }
-    const dateStr = nextWeekEasternDate();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const startISO = `${dateStr}T${pad(h)}:${pad(m)}:00`;
-    const endISO = `${dateStr}T${pad(endH)}:${pad(endM)}:00`;
-
-    setRescheduleStatus((cur) => ({ ...cur, [student.id]: 'saving' }));
-    try {
-      const { data, error } = await supabase.functions.invoke('google-calendar-create-event', {
-        body: {
-          title: `Call: ${student.display_name}`,
-          startISO, endISO,
-          description: 'Weekly call — rescheduled from Kaylee\'s Hub Daily Schedule.',
-        },
-      });
-      setRescheduleStatus((cur) => ({ ...cur, [student.id]: (error || data?.error) ? 'error' : 'done' }));
-    } catch {
-      setRescheduleStatus((cur) => ({ ...cur, [student.id]: 'error' }));
-    }
-  }
-
   function getChoice(id: string): Choice {
     return choices[id] || { communicated: '', method: '', voicemail: false, missedEmail: false };
   }
@@ -2759,8 +2694,8 @@ function DailySchedule({ students, touchpoints, createTouchpoint, setPage }: {
       {scheduledToday.map((student) => {
         const choice = getChoice(student.id);
         const alreadyLogged = loggedTodayIds.has(student.id);
-        const timeLabel = (student.is_weekly_appointment && student.weekly_appointment_time ? fmtTime12(student.weekly_appointment_time) : null) ||
-          (student.next_call_at ? new Date(student.next_call_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : 'Today');
+        const timeLabel = (student.is_weekly_appointment ? student.weekly_appointment_time : null) ||
+          (student.next_call_at ? new Date(student.next_call_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'Today');
         return (
           <section key={student.id} className="panel" style={{ marginBottom: 10, opacity: alreadyLogged ? 0.6 : 1 }}>
             <div className="panel-head">
@@ -2770,51 +2705,6 @@ function DailySchedule({ students, touchpoints, createTouchpoint, setPage }: {
                   {timeLabel} · {student.course || 'No course'}
                   {alreadyLogged && <span style={{ color: 'var(--green)', fontWeight: 700 }}> · ✓ Logged today</span>}
                 </p>
-              </div>
-              <div style={{ textAlign: 'right', minWidth: 170 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, justifyContent: 'flex-end', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={getReschedule(student.id).checked}
-                    onChange={(e) => { setRescheduleFor(student.id, { checked: e.target.checked }); setRescheduleStatus((cur) => { const next = { ...cur }; delete next[student.id]; return next; }); }}
-                  />
-                  Reschedule weekly call
-                </label>
-                {getReschedule(student.id).checked && (
-                  <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button
-                        className={getReschedule(student.id).mode === 'same' ? 'btn primary tiny' : 'btn ghost tiny'}
-                        onClick={() => setRescheduleFor(student.id, { mode: 'same' })}
-                      >
-                        Same time next week
-                      </button>
-                      <button
-                        className={getReschedule(student.id).mode === 'other' ? 'btn primary tiny' : 'btn ghost tiny'}
-                        onClick={() => setRescheduleFor(student.id, { mode: 'other' })}
-                      >
-                        Other
-                      </button>
-                    </div>
-                    {getReschedule(student.id).mode === 'other' && (
-                      <input
-                        type="time"
-                        value={getReschedule(student.id).otherTime}
-                        onChange={(e) => setRescheduleFor(student.id, { otherTime: e.target.value })}
-                        style={{ fontSize: 12, padding: '3px 6px' }}
-                      />
-                    )}
-                    <button
-                      className="btn primary tiny"
-                      disabled={(getReschedule(student.id).mode === 'other' && !getReschedule(student.id).otherTime) || rescheduleStatus[student.id] === 'saving'}
-                      onClick={() => rescheduleWeeklyCall(student)}
-                    >
-                      <CalendarDays size={12} /> {rescheduleStatus[student.id] === 'saving' ? 'Adding...' : 'Add to Calendar'}
-                    </button>
-                    {rescheduleStatus[student.id] === 'done' && <span style={{ fontSize: 11, color: 'var(--green)' }}>✓ Added to calendar</span>}
-                    {rescheduleStatus[student.id] === 'error' && <span style={{ fontSize: 11, color: '#c0392b' }}>Couldn't add — try again</span>}
-                  </div>
-                )}
               </div>
             </div>
 
@@ -3466,7 +3356,7 @@ function choreToRowProps(chore: ChoreTask, showReason: boolean) {
   if (due) {
     const hasTime = chore.due_date && chore.due_date.includes('T');
     if (overdue) timeLabel = `Overdue · ${due.toLocaleDateString([], { month: 'long', day: 'numeric' })}`;
-    else if (dueToday && hasTime) timeLabel = due.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
+    else if (dueToday && hasTime) timeLabel = due.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     else if (dueToday) timeLabel = 'Today';
     else timeLabel = due.toLocaleDateString([], { month: 'long', day: 'numeric' });
   }
@@ -3798,6 +3688,27 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
   function invDays(iso:string){const e=new Date(iso+'T00:00:00'),n=new Date();n.setHours(0,0,0,0);return Math.round((e.getTime()-n.getTime())/(86400000));}
   function invFmt(iso:string){return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric'});}
   function invKey(d:Date){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+
+  // When an item that was at 0 gets restocked (scanned back in, or bumped
+  // up with the + button), that's a genuinely NEW purchase — the old
+  // purchase date and expiration date are stale and refer to the batch
+  // that's now gone. This recomputes both: purchase date becomes today,
+  // and the expiration date shifts by the SAME shelf-life duration
+  // (expires minus purchase date) that was set before, just re-applied
+  // starting from today instead of the original purchase date.
+  function computeRestockDates(item: InvItem): { import_date: string; expires: string | null } {
+    const todayKey = invKey(new Date());
+    if (!item.is_perishable || !item.expires || !item.import_date) {
+      return { import_date: todayKey, expires: item.expires };
+    }
+    const oldImport = new Date(item.import_date + 'T00:00:00');
+    const oldExpires = new Date(item.expires + 'T00:00:00');
+    const shelfLifeDays = Math.round((oldExpires.getTime() - oldImport.getTime()) / 86400000);
+    if (shelfLifeDays <= 0) return { import_date: todayKey, expires: item.expires };
+    const newExpires = new Date();
+    newExpires.setDate(newExpires.getDate() + shelfLifeDays);
+    return { import_date: todayKey, expires: invKey(newExpires) };
+  }
 
   const [items, setItems] = useState<InvItem[]>([]);
   const [txs, setTxs] = useState<InvTx[]>([]);
@@ -4144,7 +4055,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     });
 
     const displayName = existing?.name || suggested.name || `Unknown (${code})`;
-    setScanLog(prev=>[{barcode:code,name:displayName,qty:1,action:scanMode,time:new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })},...prev.slice(0,29)]);
+    setScanLog(prev=>[{barcode:code,name:displayName,qty:1,action:scanMode,time:new Date().toLocaleTimeString()},...prev.slice(0,29)]);
     setScanStatus(existing
       ? `📥 Queued: ${displayName} (already in inventory — review in Scanner Inbox)`
       : suggested.from_archive
@@ -4245,7 +4156,9 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
         await archiveItem(current);
         await supabase.from('inventory_items').delete().eq('id',itemId);
       } else {
-        await supabase.from('inventory_items').update({quantity:newQty,updated_at:new Date().toISOString()}).eq('id',itemId);
+        const restocking = current.quantity<=0 && newQty>0;
+        const dateFields = restocking ? computeRestockDates(current) : {};
+        await supabase.from('inventory_items').update({quantity:newQty,updated_at:new Date().toISOString(),...dateFields}).eq('id',itemId);
         if(newQty<=0 && tracked) newlyOutOfStock.push(current);
       }
       await supabase.from('inventory_transactions').insert({
@@ -4586,7 +4499,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
                 }
               }}>−</button>
               <span style={{fontSize:13,fontWeight:700,minWidth:24,textAlign:'center'}}>{item.quantity}</span>
-              <button className="qty-button" onClick={async()=>{if(!supabase)return;const nq=item.quantity+1;await supabase.from('inventory_items').update({quantity:nq,updated_at:new Date().toISOString()}).eq('id',item.id);setItems(p=>p.map(i=>i.id===item.id?{...i,quantity:nq}:i));}}>+</button>
+              <button className="qty-button" onClick={async()=>{if(!supabase)return;const nq=item.quantity+1;const restocking=item.quantity<=0&&nq>0;const dateFields=restocking?computeRestockDates(item):{};await supabase.from('inventory_items').update({quantity:nq,updated_at:new Date().toISOString(),...dateFields}).eq('id',item.id);setItems(p=>p.map(i=>i.id===item.id?{...i,quantity:nq,...dateFields}:i));}}>+</button>
               {tracked&&item.quantity>0&&(
                 <button className="qty-button" title="Mark out of stock" style={{color:'#dc2626',fontSize:10,fontWeight:700,width:'auto',padding:'0 8px'}} onClick={async()=>{
                   if(!supabase)return;
@@ -5990,7 +5903,7 @@ function Students({ students, touchpoints, appointments, eaLog, createEaLog, clo
               <h2 style={{ margin: 0 }}>Weekly Appointment</h2>
               <span style={{ fontSize: 13, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
                 {weeklyForm.is_weekly_appointment
-                  ? `${WEEKDAY_NAMES[Number(weeklyForm.weekly_appointment_day_of_week)]}${weeklyForm.weekly_appointment_time ? ` at ${fmtTime12(weeklyForm.weekly_appointment_time)}` : ''}`
+                  ? `${WEEKDAY_NAMES[Number(weeklyForm.weekly_appointment_day_of_week)]}${weeklyForm.weekly_appointment_time ? ` at ${weeklyForm.weekly_appointment_time}` : ''}`
                   : 'Not set'}
                 {weeklySettingsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               </span>
