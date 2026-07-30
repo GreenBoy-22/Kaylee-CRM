@@ -381,7 +381,7 @@ export default function Inventory() {
       setScanLog(prev => [{
         barcode: code, name: existing.name,
         qty: newQty, action: scanMode === 'in' ? 'Scanned In' : 'Scanned Out',
-        time: new Date().toLocaleTimeString(),
+        time: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }),
       }, ...prev.slice(0, 29)]);
     } else {
       // Unknown barcode — prompt to add, and try to auto-fill via UPC lookup

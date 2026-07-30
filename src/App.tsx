@@ -1959,7 +1959,7 @@ function App() {
             ? <GoogleCalendar />
             : <WorkCalendar students={students} onOpenDailySchedule={() => setPage('daily_schedule')} />
           )}
-          {page === 'daily_schedule' && activeRole === 'admin' && <DailySchedule students={students} touchpoints={touchpoints} createTouchpoint={createTouchpoint} setPage={setPage} />}
+          {page === 'daily_schedule' && activeRole === 'admin' && <DailySchedule students={students} touchpoints={touchpoints} createTouchpoint={createTouchpoint} updateStudent={updateStudent} setPage={setPage} />}
           {page === 'budget' && <Budget />}
           {page === 'inventory' && <Inventory inventory={inventory} createItem={createInventoryItem} updateQuantity={updateInventoryQuantity} editable={canEdit('inventory')} />}
           {page === 'chores' && <Chores choreTasks={choreTasks} choreSuggestions={choreSuggestions} syncState={syncState} syncing={syncing} householdUsers={householdUsers} currentUserName={activeName} syncTodoistNow={syncTodoistNow} completeChore={completeChore} uncompleteChore={uncompleteChore} markSuggestionDone={markSuggestionDone} snoozeSuggestion={snoozeSuggestion} dismissSuggestion={dismissSuggestion} restoreSuggestion={restoreSuggestion} addSuggestionToTodoist={addSuggestionToTodoist} approveSuggestionForAdam={approveSuggestionForAdam} approveSuggestionForSelf={approveSuggestionForSelf} reassignChore={reassignChore} editable={canEdit('chores')} />}
@@ -2216,6 +2216,20 @@ function daysUntil(dateValue?: string | null) {
 // knowing the year actually matters. If the raw value is a full timestamp
 // (not just a bare date) and carries a real local time other than
 // midnight, that time is appended in 12-hour AM/PM form.
+// Converts a stored 24-hour "HH:MM" time string (e.g. weekly appointment
+// times) into 12-hour AM/PM for display — the underlying stored value and
+// the <input type="time"> editors stay 24-hour, only the read-only text
+// display changes.
+function fmtTime12(hhmm: string | null | undefined): string {
+  if (!hhmm) return '';
+  const [hStr, mStr] = hhmm.split(':');
+  const h = Number(hStr);
+  if (Number.isNaN(h)) return hhmm;
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${mStr} ${period}`;
+}
+
 function fmtDateShort(dateValue?: string | null, includeYear = false): string {
   if (!dateValue) return '—';
   const d = new Date(dateValue.length <= 10 ? `${dateValue}T00:00:00` : dateValue);
@@ -2225,7 +2239,7 @@ function fmtDateShort(dateValue?: string | null, includeYear = false): string {
     : { month: 'long', day: 'numeric' };
   let out = d.toLocaleDateString('en-US', opts);
   if (dateValue.length > 10 && (d.getHours() !== 0 || d.getMinutes() !== 0)) {
-    out += ` at ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+    out += ` at ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })}`;
   }
   return out;
 }
@@ -2622,9 +2636,10 @@ function NotificationBell({ setPage, setDeepLinkRecipeId, setDeepLinkMediaId }: 
 // what happened with dropdowns/checkboxes only — no free text, no
 // AI-generated scripts. Communicated? -> Live Call or Email. Not
 // communicated? -> Left voicemail? Sent missed-call email?
-function DailySchedule({ students, touchpoints, createTouchpoint, setPage }: {
+function DailySchedule({ students, touchpoints, createTouchpoint, updateStudent, setPage }: {
   students: Student[]; touchpoints: Touchpoint[];
   createTouchpoint: (input: Omit<Touchpoint, 'id' | 'next_call_prep' | 'constructive_note' | 'follow_up_email' | 'follow_up_text' | 'copied'>) => Promise<void>;
+  updateStudent: (id: string, patch: Partial<Student>) => Promise<void>;
   setPage: (page: Page) => void;
 }) {
   const today = new Date().toISOString().slice(0, 10);
@@ -2645,6 +2660,49 @@ function DailySchedule({ students, touchpoints, createTouchpoint, setPage }: {
   type Choice = { communicated: '' | 'yes' | 'no'; method: '' | 'call' | 'email'; voicemail: boolean; missedEmail: boolean };
   const [choices, setChoices] = useState<Record<string, Choice>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
+
+  type RescheduleChoice = { checked: boolean; mode: 'same' | 'other'; otherTime: string };
+  const [reschedule, setReschedule] = useState<Record<string, RescheduleChoice>>({});
+  const [rescheduleStatus, setRescheduleStatus] = useState<Record<string, 'saving' | 'done' | 'error'>>({});
+
+  function getReschedule(id: string): RescheduleChoice {
+    return reschedule[id] || { checked: false, mode: 'same', otherTime: '' };
+  }
+  function setRescheduleFor(id: string, patch: Partial<RescheduleChoice>) {
+    setReschedule((cur) => ({ ...cur, [id]: { ...getReschedule(id), ...patch } }));
+  }
+
+  // "Today" and "+7 days," computed in Eastern calendar terms specifically
+  // — not the browser's local date — so this can't drift by a day if
+  // whatever device this runs on isn't set to Eastern time.
+  function nextWeekEasternDate(): string {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+    const y = Number(parts.find((p) => p.type === 'year')!.value);
+    const m = Number(parts.find((p) => p.type === 'month')!.value);
+    const d = Number(parts.find((p) => p.type === 'day')!.value);
+    const base = new Date(y, m - 1, d);
+    base.setDate(base.getDate() + 7);
+    return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}-${String(base.getDate()).padStart(2, '0')}`;
+  }
+
+  // This calendar is purely internal to the Hub — it's just a "how busy
+  // is my day" view built from next_call_at on each student record, not
+  // synced to Google or anything outside the Hub. So "rescheduling" just
+  // means updating that field on the student directly; nothing external
+  // to call out to.
+  async function rescheduleWeeklyCall(student: Student) {
+    const choice = getReschedule(student.id);
+    if (!choice.checked) return;
+    const time = choice.mode === 'other' && choice.otherTime ? choice.otherTime : (student.weekly_appointment_time || '15:00');
+    const dateStr = nextWeekEasternDate();
+    setRescheduleStatus((cur) => ({ ...cur, [student.id]: 'saving' }));
+    try {
+      await updateStudent(student.id, { next_call_at: `${dateStr}T${time}:00` });
+      setRescheduleStatus((cur) => ({ ...cur, [student.id]: 'done' }));
+    } catch {
+      setRescheduleStatus((cur) => ({ ...cur, [student.id]: 'error' }));
+    }
+  }
 
   function getChoice(id: string): Choice {
     return choices[id] || { communicated: '', method: '', voicemail: false, missedEmail: false };
@@ -2694,8 +2752,8 @@ function DailySchedule({ students, touchpoints, createTouchpoint, setPage }: {
       {scheduledToday.map((student) => {
         const choice = getChoice(student.id);
         const alreadyLogged = loggedTodayIds.has(student.id);
-        const timeLabel = (student.is_weekly_appointment ? student.weekly_appointment_time : null) ||
-          (student.next_call_at ? new Date(student.next_call_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'Today');
+        const timeLabel = (student.is_weekly_appointment && student.weekly_appointment_time ? fmtTime12(student.weekly_appointment_time) : null) ||
+          (student.next_call_at ? new Date(student.next_call_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : 'Today');
         return (
           <section key={student.id} className="panel" style={{ marginBottom: 10, opacity: alreadyLogged ? 0.6 : 1 }}>
             <div className="panel-head">
@@ -2705,6 +2763,51 @@ function DailySchedule({ students, touchpoints, createTouchpoint, setPage }: {
                   {timeLabel} · {student.course || 'No course'}
                   {alreadyLogged && <span style={{ color: 'var(--green)', fontWeight: 700 }}> · ✓ Logged today</span>}
                 </p>
+              </div>
+              <div style={{ textAlign: 'right', minWidth: 170 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, justifyContent: 'flex-end', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={getReschedule(student.id).checked}
+                    onChange={(e) => { setRescheduleFor(student.id, { checked: e.target.checked }); setRescheduleStatus((cur) => { const next = { ...cur }; delete next[student.id]; return next; }); }}
+                  />
+                  Reschedule weekly call
+                </label>
+                {getReschedule(student.id).checked && (
+                  <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        className={getReschedule(student.id).mode === 'same' ? 'btn primary tiny' : 'btn ghost tiny'}
+                        onClick={() => setRescheduleFor(student.id, { mode: 'same' })}
+                      >
+                        Same time next week
+                      </button>
+                      <button
+                        className={getReschedule(student.id).mode === 'other' ? 'btn primary tiny' : 'btn ghost tiny'}
+                        onClick={() => setRescheduleFor(student.id, { mode: 'other' })}
+                      >
+                        Other
+                      </button>
+                    </div>
+                    {getReschedule(student.id).mode === 'other' && (
+                      <input
+                        type="time"
+                        value={getReschedule(student.id).otherTime}
+                        onChange={(e) => setRescheduleFor(student.id, { otherTime: e.target.value })}
+                        style={{ fontSize: 12, padding: '3px 6px' }}
+                      />
+                    )}
+                    <button
+                      className="btn primary tiny"
+                      disabled={(getReschedule(student.id).mode === 'other' && !getReschedule(student.id).otherTime) || rescheduleStatus[student.id] === 'saving'}
+                      onClick={() => rescheduleWeeklyCall(student)}
+                    >
+                      <CalendarDays size={12} /> {rescheduleStatus[student.id] === 'saving' ? 'Saving...' : 'Reschedule'}
+                    </button>
+                    {rescheduleStatus[student.id] === 'done' && <span style={{ fontSize: 11, color: 'var(--green)' }}>✓ Updated in Work Calendar</span>}
+                    {rescheduleStatus[student.id] === 'error' && <span style={{ fontSize: 11, color: '#c0392b' }}>Couldn't save — try again</span>}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -3356,7 +3459,7 @@ function choreToRowProps(chore: ChoreTask, showReason: boolean) {
   if (due) {
     const hasTime = chore.due_date && chore.due_date.includes('T');
     if (overdue) timeLabel = `Overdue · ${due.toLocaleDateString([], { month: 'long', day: 'numeric' })}`;
-    else if (dueToday && hasTime) timeLabel = due.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    else if (dueToday && hasTime) timeLabel = due.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
     else if (dueToday) timeLabel = 'Today';
     else timeLabel = due.toLocaleDateString([], { month: 'long', day: 'numeric' });
   }
@@ -4055,7 +4158,7 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     });
 
     const displayName = existing?.name || suggested.name || `Unknown (${code})`;
-    setScanLog(prev=>[{barcode:code,name:displayName,qty:1,action:scanMode,time:new Date().toLocaleTimeString()},...prev.slice(0,29)]);
+    setScanLog(prev=>[{barcode:code,name:displayName,qty:1,action:scanMode,time:new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })},...prev.slice(0,29)]);
     setScanStatus(existing
       ? `📥 Queued: ${displayName} (already in inventory — review in Scanner Inbox)`
       : suggested.from_archive
