@@ -4120,6 +4120,76 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
     return null;
   }
 
+  // Scans that came back unknown were looked up against the free databases
+  // only (useAIFallback defaults off, since Claude web-search costs ~$0.02/
+  // lookup). Rather than requiring a full re-scan, this re-runs the lookup
+  // for a single already-queued row with AI forced on, and writes the
+  // result straight back into that scan_queue row.
+  async function retryLookupWithAI(row: ScanQueueRow) {
+    if (!supabase) return;
+    setScanStatus(`🔍 Asking AI about ${row.barcode}...`);
+    try {
+      const { data: d, error } = await supabase.functions.invoke('ai-proxy', {
+        body: { _upc_lookup: true, barcode: row.barcode, use_ai: true },
+      });
+      if (error || !d?.product?.name) {
+        setScanStatus(`Still couldn't identify ${row.barcode} — you'll need to enter it manually.`);
+        return;
+      }
+      const suggested: ScanQueueRow['suggested_data'] = {
+        name: d.product.name, brand: d.product.brand || '', category: d.product.category || 'Other',
+        expires: d.product.expires ?? null, avg_cost: d.product.avg_cost ?? null,
+        is_perishable: d.product.is_perishable ?? false,
+      };
+      await supabase.from('scan_queue').update({ suggested_data: suggested }).eq('id', row.id);
+      setQueueRows(prev => prev.map(r => r.id === row.id ? { ...r, suggested_data: suggested } : r));
+      setScanStatus(`✅ Identified: ${d.product.name}`);
+    } catch {
+      setScanStatus(`Lookup failed for ${row.barcode} — try again or enter it manually.`);
+    }
+  }
+
+  // Pending scans that came back "Unknown" at scan time can still be
+  // resolved for free, without hitting any outside API: check them again
+  // against current inventory (by barcode/alt_barcodes) and item_archive
+  // history, in case the item was added/re-added since the scan happened.
+  // Runs automatically whenever the Scanner Inbox opens, and via a manual
+  // button for whenever an item just got added.
+  async function recheckUnknownsAgainstInventory() {
+    if (!supabase) return;
+    const unknown = queueRows.filter(r => !r.matched_item_id && !r.suggested_data?.name);
+    if (unknown.length === 0) return;
+    const { data: sd } = await supabase.auth.getSession(); const uid = sd.session?.user?.id; if (!uid) return;
+    const barcodes = unknown.map(r => r.barcode);
+    const { data: archiveRows } = await supabase.from('item_archive').select('*').eq('user_id', uid).in('barcode', barcodes);
+    const archiveByBarcode: Record<string, any> = {};
+    for (const a of (archiveRows ?? []) as any[]) archiveByBarcode[a.barcode] = a;
+
+    let resolvedCount = 0;
+    for (const row of unknown) {
+      const invMatch = items.find(i => i.barcode === row.barcode || (i.alt_barcodes ?? []).includes(row.barcode));
+      if (invMatch) {
+        await supabase.from('scan_queue').update({ matched_item_id: invMatch.id }).eq('id', row.id);
+        setQueueRows(prev => prev.map(r => r.id === row.id ? { ...r, matched_item_id: invMatch.id } : r));
+        resolvedCount++;
+        continue;
+      }
+      const archived = archiveByBarcode[row.barcode];
+      if (archived) {
+        const suggested: ScanQueueRow['suggested_data'] = {
+          name: archived.name, brand: archived.brand ?? '', category: archived.category ?? 'Pantry',
+          avg_cost: archived.avg_cost_canton, location: archived.location, unit: archived.unit,
+          notes: archived.notes, is_perishable: archived.is_perishable, from_archive: true,
+        };
+        await supabase.from('scan_queue').update({ suggested_data: suggested }).eq('id', row.id);
+        setQueueRows(prev => prev.map(r => r.id === row.id ? { ...r, suggested_data: suggested } : r));
+        resolvedCount++;
+      }
+    }
+    if (resolvedCount > 0) setScanStatus(`✅ Matched ${resolvedCount} pending scan${resolvedCount !== 1 ? 's' : ''} to inventory/history — no outside lookup needed.`);
+  }
+  useEffect(() => { if (showInbox) recheckUnknownsAgainstInventory(); }, [showInbox]);
+
   // __ Main scan handler — builds receipt list _____________________________
   // __ Capture a scan into the review queue — NEVER touches inventory ______
   async function captureBarcode(barcode:string){
@@ -4909,7 +4979,10 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
               <div style={{fontSize:12,color:'var(--muted)'}}>{queueRows.length} pending scan{queueRows.length!==1?'s':''}</div>
             </div>
             {resolveQueue.length===0 && (
-              <button onClick={()=>{setShowInbox(false);setApplySummary('');}} style={{background:'none',border:'none',cursor:'pointer',color:'var(--muted)',fontSize:20,padding:4}}>✕</button>
+              <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <button onClick={recheckUnknownsAgainstInventory} title="Re-check unknown scans against current inventory and history — no outside lookup" style={{fontSize:11,fontWeight:700,padding:'5px 10px',borderRadius:999,border:'1px solid var(--border)',background:'var(--surface-1)',color:'var(--text)',cursor:'pointer'}}>🔎 Recheck</button>
+                <button onClick={()=>{setShowInbox(false);setApplySummary('');}} style={{background:'none',border:'none',cursor:'pointer',color:'var(--muted)',fontSize:20,padding:4}}>✕</button>
+              </div>
             )}
           </div>
 
@@ -4960,6 +5033,11 @@ function Inventory({ inventory: _inventory, createItem: _createItem, updateQuant
                           {matchedItem && <span style={{fontSize:10,fontWeight:700,color:'#0891b2',background:'#e0f2fe',padding:'1px 6px',borderRadius:999,marginLeft:6}}>IN INVENTORY</span>}
                         </div>
                         <div style={{fontSize:11,color:'var(--muted)'}}>{row.barcode} · {new Date(row.scanned_at).toLocaleString('en-US',{month:'long',day:'numeric',hour:'numeric',minute:'2-digit'})}</div>
+                        {!displayName && (
+                          <button onClick={()=>retryLookupWithAI(row)} style={{marginTop:4,fontSize:10,fontWeight:700,padding:'3px 8px',borderRadius:999,border:'1px solid var(--purple)',background:'var(--purple-bg)',color:'var(--purple)',cursor:'pointer'}}>
+                            ✨ Ask AI to identify this
+                          </button>
+                        )}
                       </div>
                       <div className="kh-scan-row-actions">
                         {(['in','out','undecided'] as const).map(a=>(
