@@ -513,8 +513,11 @@ export default function WorkPerformance() {
     if (!supabase || !kpiForm.month_date) return;
     const { data: sd } = await supabase.auth.getSession();
     const uid = sd.session?.user?.id;
-    if (!uid) return;
-    await supabase.from('work_kpi_monthly').upsert({
+    if (!uid) {
+      alert('Could not confirm your login — try refreshing the page and saving again.');
+      return;
+    }
+    const { error } = await supabase.from('work_kpi_monthly').upsert({
       user_id: uid,
       month_date: kpiForm.month_date + '-01',
       enrollment_total: n(kpiForm.enrollment_total),
@@ -542,6 +545,14 @@ export default function WorkPerformance() {
       notes: kpiForm.notes || null,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id,month_date' });
+    if (error) {
+      // Was failing completely silently before — the form would reset
+      // and look like it saved even when nothing actually landed in the
+      // database. Now it stays open with the data intact and tells you
+      // exactly what went wrong.
+      alert(`Didn't save: ${error.message}`);
+      return;
+    }
     setKpiForm({ ...BLANK_KPI });
     setShowKpiForm(false);
     await load();
@@ -549,7 +560,8 @@ export default function WorkPerformance() {
 
   async function deleteKpi(id: string) {
     if (!supabase || !confirm('Delete this month?')) return;
-    await supabase.from('work_kpi_monthly').delete().eq('id', id);
+    const { error } = await supabase.from('work_kpi_monthly').delete().eq('id', id);
+    if (error) { alert(`Couldn't delete: ${error.message}`); return; }
     await load();
   }
 
